@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+tests/.tmp/
+tests/runtime/
+.coverage
+dist/
+build/
+.joiny-mnemonic/
+# Legacy state directory retained for read-in-place compatibility.
+.llm-memory/
+*.db
+*.db-shm
+*.db-wal
+benchmarks/runtime/
+.claude/settings.json
+.claude/settings.local.json

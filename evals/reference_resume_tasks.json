@@ -1,0 +1,32 @@
+[
+  {
+    "id": "storage-decision",
+    "query": "which canonical storage engine was selected",
+    "required_evidence": ["SQLite"]
+  },
+  {
+    "id": "migration-owner",
+    "query": "who owns the migration task",
+    "required_evidence": ["Nadia"]
+  },
+  {
+    "id": "api-port",
+    "query": "local API port",
+    "required_evidence": ["8765"]
+  },
+  {
+    "id": "language-preference",
+    "query": "preferred response language",
+    "required_evidence": ["Russian"]
+  },
+  {
+    "id": "release-deadline",
+    "query": "Aurora release deadline",
+    "required_evidence": ["Aurora", "Friday"]
+  },
+  {
+    "id": "canonical-constraint",
+    "query": "canonical deletion constraint",
+    "required_evidence": ["Never delete canonical events"]
+  }
+]
