@@ -91,6 +91,7 @@ The warning threshold is the branch policy's `context_window_tokens * snapshot_r
 triggering event is `PostToolUse`, and the normal governor path creates a snapshot. This path is
 independent of `PreCompact`/`PostCompact`; those remain recovery hooks, not the first detector.
 
+Every injected resume packet includes a protected `[DURABLE MEMORY CAPTURE]` instruction. The agent is told to promote durable, evidence-backed information with an available structured memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in compact resume.
 ## What is captured
 
 The runtime accepts JSON on stdin and emits JSON only on stdout.

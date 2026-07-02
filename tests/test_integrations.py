@@ -83,6 +83,10 @@ class IntegrationTest(unittest.TestCase):
         self.assertFalse(values["kv_cache_tiers"])
         self.assertTrue(values["text_memory"])
         self.assertTrue(values["manual_cli_api_mcp"])
+        self.assertEqual(
+            self.service.capabilities()["core"]["durable_memory_markers"],
+            ["Goal", "Decision", "Fact", "Constraint", "TODO", "Preference"],
+        )
 
     def test_mcp_lifecycle_tools_and_calls(self) -> None:
         server = MCPServer(self.service)

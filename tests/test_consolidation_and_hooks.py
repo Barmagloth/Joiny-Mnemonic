@@ -34,18 +34,77 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         event = self.service.store.append_event(
             kind="message",
             role="user",
-            content="Goal: ship the durable core\nDecision: use SQLite\nTODO: add hooks",
+            content=(
+                "Goal: ship the durable core\n"
+                "Decision: use SQLite\n"
+                "TODO: add hooks\n"
+                "Fact: WAL is enabled\n"
+                "Constraint: operate offline\n"
+                "Preference: keep reports concise"
+            ),
         )
         result = self.service.consolidator.consolidate_event(self.service, event)
-        self.assertEqual(len(result.memory_ids), 3)
+        self.assertEqual(len(result.memory_ids), 6)
         blocks = self.service.store.get_active_blocks()
         self.assertEqual(blocks["goal"].content, "ship the durable core")
         self.assertIn("use SQLite", blocks["decisions"].content)
         self.assertIn("add hooks", blocks["open_tasks"].content)
+        self.assertIn("operate offline", blocks["constraints"].content)
+        memory_types = {
+            self.service.store.get_memory(memory_id).memory_type
+            for memory_id in result.memory_ids
+        }
+        self.assertTrue({"fact", "decision", "task", "preference"}.issubset(memory_types))
         for memory_id in result.memory_ids:
             self.assertIn(event.id, self.service.store.get_memory(memory_id).source_event_ids)
         repeated = self.service.consolidator.consolidate_event(self.service, event)
         self.assertEqual(repeated.memory_ids, result.memory_ids)
+
+    def test_unmarked_fact_is_searchable_but_not_automatically_resumed(self) -> None:
+        source = self.service.store.append_event(
+            kind="message",
+            role="user",
+            content="The verified build codename is ORBITAL741.",
+        )
+        unmarked = self.service.consolidator.consolidate_event(self.service, source)
+        self.assertEqual(unmarked.memory_ids, ())
+        for index in range(120):
+            self.service.store.append_event(
+                kind="message", role="user", content=f"routine distractor {index:04d}"
+            )
+
+        task = EvaluationTask(
+            id="unmarked-boundary",
+            query="verified build codename",
+            required_evidence=("ORBITAL741",),
+        )
+        report = evaluate_policies(
+            self.service,
+            [task],
+            policies=[FullHistoryPolicy(), ResumePolicy(700)],
+        )
+        rows = {row["policy"]: row for row in report["results"]}
+        self.assertEqual(rows["full-history"]["quality"], 1.0)
+        self.assertEqual(rows["resume-700"]["quality_vs_full_history"], 0.0)
+        hits = self.service.search(query="ORBITAL741", include_events=True, semantic=False)
+        self.assertIn(source.id, {hit.id for hit in hits})
+
+        marked_source = self.service.store.append_event(
+            kind="message", role="assistant", content="Fact: Build codename is ORBITAL741."
+        )
+        marked = self.service.consolidator.consolidate_event(self.service, marked_source)
+        self.assertEqual(len(marked.memory_ids), 1)
+        for index in range(120, 240):
+            self.service.store.append_event(
+                kind="message", role="user", content=f"routine distractor {index:04d}"
+            )
+        promoted = evaluate_policies(
+            self.service,
+            [task],
+            policies=[FullHistoryPolicy(), ResumePolicy(700)],
+        )
+        promoted_rows = {row["policy"]: row for row in promoted["results"]}
+        self.assertEqual(promoted_rows["resume-700"]["quality_vs_full_history"], 1.0)
 
     def test_compaction_is_extractive_and_provenance_bound(self) -> None:
         events = [
@@ -87,6 +146,29 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         )
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertIn("[MEMORY PACKET]", context)
+        self.assertIn("[DURABLE MEMORY CAPTURE]", context)
+        self.assertIn("Fact:", context)
+        self.assertIn("Unmarked prose remains searchable", context)
+
+    def test_agent_marker_in_stop_hook_is_promoted(self) -> None:
+        output = process_hook(
+            self.service,
+            "codex",
+            {
+                "hook_event_name": "Stop",
+                "session_id": "native-durable-marker",
+                "last_assistant_message": "Fact: Deployment requires the X-Trace header.",
+            },
+        )
+        self.assertEqual(output, {})
+        memories = self.service.store.list_memories()
+        self.assertEqual(len(memories), 1)
+        self.assertEqual(memories[0].memory_type, "fact")
+        self.assertEqual(memories[0].content, "Deployment requires the X-Trace header.")
+        self.assertEqual(
+            self.service.exact_source(memories[0].id)[0].content,
+            "Fact: Deployment requires the X-Trace header.",
+        )
 
     def test_installers_write_real_project_configs_and_preserve_existing_hooks(self) -> None:
         root = RUNTIME_ROOT / f"install-{uuid.uuid4().hex}"

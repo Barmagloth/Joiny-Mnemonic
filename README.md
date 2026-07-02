@@ -24,7 +24,7 @@ protocols, not built-in implementations.
 | Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
 | Budget governor | Versioned thresholds with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
-| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `TODO:` markers |
+| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
 | Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts and native-session bindings |
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
@@ -62,14 +62,16 @@ joiny-mnemonic --db .state/memory.db --project-root . verify
 
 ```powershell
 joiny-mnemonic append --kind message --role user `
-  --content "Goal: ship durable memory`nDecision: use SQLite`nTODO: install hooks"
+  --content "Goal: ship durable memory`nDecision: use SQLite`nFact: WAL is enabled`nTODO: install hooks"
 joiny-mnemonic consolidate
 joiny-mnemonic compact --keep-recent 8 --summary-budget 600
 joiny-mnemonic snapshot --track README.md
 joiny-mnemonic resume --budget 1500 --text-only
 ```
 
-`consolidate` only promotes explicit evidence. It does not infer unstated facts. Exact promotion
+`consolidate` only promotes explicit evidence. It does not infer unstated facts. Every resume packet therefore includes a protected `[DURABLE MEMORY CAPTURE]` instruction: when the agent judges information important across sessions, it should use an available structured memory tool or emit a concise standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` line. The agent should mark durable, evidence-backed information only, not every message.
+
+Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:
 
 ```powershell

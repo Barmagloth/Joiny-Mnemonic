@@ -66,7 +66,7 @@
 | Task-level quality gate | external runner report is required; diagnostic report is rejected | task-runner separation test |
 | Одно ядро принимает события 4 agent families | adapter integration test |
 | Hook configs сохраняют существующие handlers | installer merge/idempotency test |
-| Full test command completes | 48 tests completed in the 2026-07-02 implementation run |
+| Full test command completes | 50 tests completed in the 2026-07-02 implementation run |
 
 ## Команды аудита
 
@@ -95,6 +95,7 @@ joiny-mnemonic verify
 | User-global hooks without fixed project path | env/OS-aware config resolution plus `hook --global` runtime Git-root discovery | `test_global_installers_resolve_user_paths_and_runtime_project` |
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
 | Count context before reducer/native compaction | raw `UserPromptSubmit` and `PostToolUse` increments with immutable receipts | `test_raw_hook_counter_warns_before_native_compaction_and_is_idempotent` |
+| Agent-assisted durable promotion | protected runtime instruction plus explicit marker parser; unmarked prose stays searchable | boundary test, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
 | Warn on the crossing tool result | audited `context_warning`, forced `PostToolUse` context injection | same test |
 | Do not double-count retries | unique counter receipt and crossing-event replay behavior | same test |
 | Bound counter overhead | O(1) latest-total read and atomic append | benchmark `hook_counter_p95_under_25ms` gate |

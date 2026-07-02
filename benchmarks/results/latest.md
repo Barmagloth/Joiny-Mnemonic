@@ -4,19 +4,19 @@ Token counter: `conservative-byte-word-estimate`. Exact for selected model: `Fal
 
 | Workload | Raw tokens | Emitted | Saved | Critical recall | Path refs | Line recall | Exact recovery | Reducer p95 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| project-test-suite | 2632 | 120 | 2512 | 100.0% | 100.0% | 2.0% | yes | 7.827 |
-| controlled-failing-suite | 9935 | 421 | 9514 | 100.0% | 100.0% | 3.2% | yes | 23.279 |
-| real-source-search | 12341 | 5034 | 7307 | 100.0% | 100.0% | 0.0% | yes | 13.606 |
-| real-git-diff-no-index | 261 | 261 | 0 | 100.0% | 100.0% | 100.0% | yes | 0.387 |
+| project-test-suite | 2746 | 120 | 2626 | 100.0% | 100.0% | 1.9% | yes | 7.383 |
+| controlled-failing-suite | 9927 | 413 | 9514 | 100.0% | 100.0% | 3.2% | yes | 25.269 |
+| real-source-search | 12421 | 5063 | 7358 | 100.0% | 100.0% | 0.0% | yes | 13.643 |
+| real-git-diff-no-index | 246 | 246 | 0 | 100.0% | 100.0% | 100.0% | yes | 0.385 |
 
 ## Aggregate
 
-- Token savings per exposure: **19333 (76.8%)**.
-- Token savings at 10 exposures: **193330**.
-- Reducer latency p95: **18.364 ms**.
-- Enriched ingest latency p95: **29.025 ms**.
-- Hook counter committed-append latency p95: **2.628 ms**.
-- SQLite storage overhead: **24576 bytes**.
+- Token savings per exposure: **19498 (76.9%)**.
+- Token savings at 10 exposures: **194980**.
+- Reducer latency p95: **21.445 ms**.
+- Enriched ingest latency p95: **29.476 ms**.
+- Hook counter committed-append latency p95: **0.828 ms**.
+- SQLite storage overhead: **222336 bytes**.
 - Critical signal recall: **100.0%**.
 - Exact source recovery: **100.0%**.
 - Path/line reference recall: **100.0%**.

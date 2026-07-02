@@ -29,6 +29,16 @@ CONTEXT_MANAGEMENT_INSTRUCTION = (
     "</context_management>"
 )
 
+DURABLE_MEMORY_INSTRUCTION = (
+    "<durable_memory_capture>\n"
+    "[DURABLE MEMORY CAPTURE]\n"
+    "For information that must survive future sessions, use a structured memory tool when "
+    "available; otherwise emit one concise standalone Goal:, Decision:, Fact:, Constraint:, "
+    "TODO:, or Preference: line. Mark only durable, evidence-backed items. Unmarked prose remains "
+    "searchable but is not guaranteed in compact resume.\n"
+    "</durable_memory_capture>"
+)
+
 
 class MemoryService:
     """One agent-neutral core shared by the CLI, HTTP API, MCP, and adapters."""
@@ -208,7 +218,10 @@ class MemoryService:
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
             state=state,
-            protected_instructions=(CONTEXT_MANAGEMENT_INSTRUCTION,),
+            protected_instructions=(
+                CONTEXT_MANAGEMENT_INSTRUCTION,
+                DURABLE_MEMORY_INSTRUCTION,
+            ),
         )
         self.usage.record_prompt(
             packet,
@@ -227,6 +240,9 @@ class MemoryService:
                 "snapshot_delta": "recursive-json-patch-v2",
                 "lexical_retrieval": "sqlite-fts5-bm25" if self.store.fts_enabled else "python-fallback",
                 "automatic_consolidation": "explicit-evidence-only",
+                "durable_memory_markers": [
+                    "Goal", "Decision", "Fact", "Constraint", "TODO", "Preference",
+                ],
                 "active_session_compaction": True,
                 "tool_output_reduction": "canonical-raw-plus-command-aware-derived-views",
                 "usage_observability": "provider-reported-plus-labelled-estimates",
