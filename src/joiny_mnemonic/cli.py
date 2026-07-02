@@ -201,6 +201,15 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument("--branch", default="main")
     install.add_argument("--budget", type=int, default=1500)
     install.add_argument("--global", dest="global_scope", action="store_true")
+    install.add_argument("--profile", help="bundled model profile or custom")
+    install.add_argument("--context-window", type=int)
+    install.add_argument("--snapshot-ratio", type=float)
+    install.add_argument("--compact-ratio", type=float)
+    install.add_argument("--handoff-ratio", type=float)
+    install.add_argument("--hard-limit-ratio", type=float)
+    install.add_argument("--handoff-tokens", type=int)
+    install.add_argument("--reserve-tokens", type=int)
+    install.add_argument("--min-action-events", type=int)
 
     code_index = commands.add_parser("code-index")
     code_index.add_argument("--force", action="store_true")
@@ -223,18 +232,25 @@ def build_parser() -> argparse.ArgumentParser:
     usage.add_argument("--branch", default="main")
     usage.add_argument("--session")
 
+    commands.add_parser("context-profiles")
+
     budget_policy = commands.add_parser("budget-policy")
     budget_policy.add_argument("--branch", default="main")
-    budget_policy.add_argument("--context-window", type=int, default=200_000)
-    budget_policy.add_argument("--snapshot-ratio", type=float, default=0.45)
-    budget_policy.add_argument("--compact-ratio", type=float, default=0.60)
-    budget_policy.add_argument("--handoff-ratio", type=float, default=0.75)
-    budget_policy.add_argument("--hard-limit-ratio", type=float, default=0.90)
-    budget_policy.add_argument("--min-action-events", type=int, default=20)
+    budget_policy.add_argument("--agent")
+    budget_policy.add_argument("--profile")
+    budget_policy.add_argument("--handoff-tokens", type=int)
+    budget_policy.add_argument("--reserve-tokens", type=int)
+    budget_policy.add_argument("--context-window", type=int)
+    budget_policy.add_argument("--snapshot-ratio", type=float)
+    budget_policy.add_argument("--compact-ratio", type=float)
+    budget_policy.add_argument("--handoff-ratio", type=float)
+    budget_policy.add_argument("--hard-limit-ratio", type=float)
+    budget_policy.add_argument("--min-action-events", type=int)
 
     governor = commands.add_parser("governor")
     governor.add_argument("--branch", default="main")
     governor.add_argument("--session")
+    governor.add_argument("--agent")
     governor.add_argument("--apply", action="store_true")
 
     task_start = commands.add_parser("task-start")
@@ -298,6 +314,15 @@ def run(args: argparse.Namespace) -> int:
                 branch_id=args.branch,
                 token_budget=args.budget,
                 global_scope=args.global_scope,
+                profile=args.profile,
+                context_window_tokens=args.context_window,
+                snapshot_ratio=args.snapshot_ratio,
+                compact_ratio=args.compact_ratio,
+                handoff_ratio=args.handoff_ratio,
+                hard_limit_ratio=args.hard_limit_ratio,
+                recommended_handoff_tokens=args.handoff_tokens,
+                reserve_tokens=args.reserve_tokens,
+                min_action_interval_events=args.min_action_events,
             )
         )
         return 0
@@ -376,24 +401,45 @@ def run(args: argparse.Namespace) -> int:
             _print(service.store.list_tool_output_views(args.event_id))
         elif args.command == "usage":
             _print(service.usage.report(branch_id=args.branch, session_id=args.session))
+        elif args.command == "context-profiles":
+            _print(service.context_limits.builtins)
         elif args.command == "budget-policy":
-            _print(service.store.set_budget_policy(
-                branch_id=args.branch,
-                context_window_tokens=args.context_window,
-                snapshot_ratio=args.snapshot_ratio,
-                compact_ratio=args.compact_ratio,
-                handoff_ratio=args.handoff_ratio,
-                hard_limit_ratio=args.hard_limit_ratio,
-                min_action_interval_events=args.min_action_events,
-            ))
+            if args.agent:
+                path, policy = service.context_limits.configure_agent(
+                    args.agent,
+                    profile=args.profile,
+                    overrides={
+                        "context_window_tokens": args.context_window,
+                        "snapshot_ratio": args.snapshot_ratio,
+                        "compact_ratio": args.compact_ratio,
+                        "handoff_ratio": args.handoff_ratio,
+                        "hard_limit_ratio": args.hard_limit_ratio,
+                        "recommended_handoff_tokens": args.handoff_tokens,
+                        "reserve_tokens": args.reserve_tokens,
+                        "min_action_interval_events": args.min_action_events,
+                    },
+                )
+                _print({"path": str(path), "policy": policy})
+            else:
+                _print(service.store.set_budget_policy(
+                    branch_id=args.branch,
+                    context_window_tokens=args.context_window or 200_000,
+                    snapshot_ratio=args.snapshot_ratio or 0.45,
+                    compact_ratio=args.compact_ratio or 0.60,
+                    handoff_ratio=args.handoff_ratio or 0.75,
+                    hard_limit_ratio=args.hard_limit_ratio or 0.90,
+                    min_action_interval_events=(
+                        20 if args.min_action_events is None else args.min_action_events
+                    ),
+                ))
         elif args.command == "governor":
             if args.apply:
                 _print(service.governor.evaluate_and_apply(
-                    branch_id=args.branch, session_id=args.session
+                    branch_id=args.branch, session_id=args.session, agent=args.agent
                 ))
             else:
                 _print(service.governor.decide(
-                    branch_id=args.branch, session_id=args.session
+                    branch_id=args.branch, session_id=args.session, agent=args.agent
                 ))
         elif args.command == "task-start":
             _print(service.tasks.start(

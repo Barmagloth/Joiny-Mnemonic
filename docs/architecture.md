@@ -146,9 +146,12 @@ when it is smaller; `exact_source(view_id)` always promotes to the canonical eve
 Hook receipts also key usage and reduction records, so native retries do not double-count cost or
 savings.
 
-`budget_policies` is versioned per branch. `BudgetGovernor` prefers the latest provider-reported
-context usage and falls back to a visible-transcript estimate. Snapshot, compact and handoff
-actions are rate-limited and written to `governor_actions` before execution.
+Per-agent limits live in the reviewable `.joiny-mnemonic/context-limits.json` file, with a global
+file as fallback. Bundled model profiles separate advertised context capacity from the conservative
+absolute handoff cap. Legacy versioned `budget_policies` remain a fallback for callers without an
+agent profile. `BudgetGovernor` prefers provider-reported usage, then the raw hook counter, then a
+canonical-history estimate. Snapshot, compact and handoff actions are rate-limited per resolved
+policy and written to `governor_actions` before execution.
 
 A task maps to one immutable branch lineage. `task_versions` records status transitions and
 checkpoint snapshot IDs; `task_session_bindings` prevents a native session from silently moving
@@ -164,5 +167,6 @@ and opens `<root>/.joiny-mnemonic/memory.db`, preserving project isolation. Exis
 the new cumulative total, so reads remain constant-time as a session grows. It counts
 raw `UserPromptSubmit` and `PostToolUse` payloads before tool-output reduction; receipt uniqueness
 makes retries idempotent. The governor uses `max(provider_context, hook_cumulative)` and falls back
-to raw canonical events, never compact views. Crossing the snapshot ratio emits one audited
-`context_warning` and returns the same warning for a retry of the crossing delivery.
+to raw canonical events, never compact views. Crossing the per-agent snapshot threshold emits one
+audited `context_checkpoint` and returns the same checkpoint for a retry of the crossing delivery.
+A handoff recommendation is not emitted until the separate handoff threshold.

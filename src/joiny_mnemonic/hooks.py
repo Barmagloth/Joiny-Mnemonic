@@ -14,6 +14,7 @@ from typing import Any
 
 from .adapters import adapter_capabilities
 from .consolidation import EvidenceConsolidator
+from .context_limits import ContextLimitConfig
 from .models import Event
 from .paths import resolve_project_database
 from .service import MemoryService
@@ -261,7 +262,7 @@ def process_hook(
         event_id=events[-1].id,
         receipt_key=f"usage:{receipt_key}",
     )
-    policy = service.store.get_budget_policy(branch_id=branch_id)
+    policy = service.budget_policy(branch_id=branch_id, agent=agent)
     counter = service.usage.record_hook_context(
         events,
         event_name=event_name,
@@ -269,16 +270,15 @@ def process_hook(
         session_id=session_id,
         receipt_key=receipt_key,
         context_window_tokens=policy.context_window_tokens,
-        threshold_tokens=math.ceil(
-            policy.context_window_tokens * policy.snapshot_ratio
-        ),
+        threshold_tokens=service.governor.thresholds(policy)["snapshot"],
     )
     warning = (
-        service.governor.register_context_warning(
+        service.governor.register_context_checkpoint(
             counter,
             branch_id=branch_id,
             session_id=session_id,
             source_event=events[-1],
+            agent=agent,
         )
         if counter is not None else False
     )
@@ -289,6 +289,7 @@ def process_hook(
         branch_id=branch_id,
         session_id=session_id,
         source_event=events[-1],
+        agent=agent,
     )
 
     inject_context = event_name in {"SessionStart", "UserPromptSubmit", "PostCompact"}
@@ -300,20 +301,31 @@ def process_hook(
         query = str(value.get("prompt", "resume current goal constraints decisions and open tasks"))
         packet = service.resume(branch_id=branch_id, token_budget=token_budget, query=query)
         context = packet.text
+        thresholds = service.governor.thresholds(policy)
         if warning and counter is not None:
             context += (
-                "\n\n[EARLY CONTEXT WARNING]\n"
+                "\n\n[CONTEXT CHECKPOINT]\n"
                 f"Cumulative raw UserPromptSubmit/PostToolUse context is approximately "
                 f"{counter.cumulative_tokens}/{counter.context_window_tokens} tokens "
-                f"({counter.ratio:.1%}). This warning is emitted before native compaction. "
-                "A durable snapshot is available; start a fresh session now to avoid lossy "
-                "native context compression."
+                f"({counter.ratio:.1%}). A durable snapshot was captured before native "
+                f"compaction. Handoff is not recommended until approximately "
+                f"{thresholds['handoff']} tokens."
             )
-        if any(action in decision.actions for action in ("handoff", "handoff_required")):
+        if "handoff_required" in decision.actions:
             context += (
-                "\n\n[CONTEXT GOVERNOR]\n"
-                f"Context usage is {decision.context_ratio:.1%}. Snapshot and compaction are complete. "
-                "Start a fresh session for this task; the resume packet is durable."
+                "\n\n[CONTEXT HANDOFF REQUIRED]\n"
+                f"Context usage is approximately {decision.context_tokens}/"
+                f"{policy.context_window_tokens} tokens ({decision.context_ratio:.1%}). "
+                "Start a new session now to avoid lossy native compaction; a durable resume "
+                "packet is available."
+            )
+        elif "handoff" in decision.actions:
+            context += (
+                "\n\n[CONTEXT HANDOFF RECOMMENDED]\n"
+                f"Context usage is approximately {decision.context_tokens}/"
+                f"{policy.context_window_tokens} tokens ({decision.context_ratio:.1%}). "
+                "Consider starting a new session for this task; a durable resume packet is "
+                "available."
             )
         return _context_output(agent, event_name, context)
     return {}
@@ -325,6 +337,8 @@ class InstallResult:
     command: str
     status: str
     scope: str = "project"
+    profile: str | None = None
+    limits_file: str | None = None
     notes: tuple[str, ...] = ()
 
 
@@ -500,6 +514,15 @@ def install_hooks(
     branch_id: str = "main",
     token_budget: int = 1500,
     global_scope: bool = False,
+    profile: str | None = None,
+    context_window_tokens: int | None = None,
+    snapshot_ratio: float | None = None,
+    compact_ratio: float | None = None,
+    handoff_ratio: float | None = None,
+    hard_limit_ratio: float | None = None,
+    recommended_handoff_tokens: int | None = None,
+    reserve_tokens: int | None = None,
+    min_action_interval_events: int | None = None,
     environ: dict[str, str] | None = None,
     home: str | Path | None = None,
 ) -> InstallResult:
@@ -512,6 +535,22 @@ def install_hooks(
         if not root.is_dir():
             raise FileNotFoundError(root)
         path = Path()
+    limits = ContextLimitConfig(root or Path.cwd(), environ=environ, home=home)
+    limits_path, limits_policy = limits.configure_agent(
+        agent,
+        profile=profile,
+        global_scope=global_scope,
+        overrides={
+            "context_window_tokens": context_window_tokens,
+            "snapshot_ratio": snapshot_ratio,
+            "compact_ratio": compact_ratio,
+            "handoff_ratio": handoff_ratio,
+            "hard_limit_ratio": hard_limit_ratio,
+            "recommended_handoff_tokens": recommended_handoff_tokens,
+            "reserve_tokens": reserve_tokens,
+            "min_action_interval_events": min_action_interval_events,
+        },
+    )
     command = _command(
         root,
         agent,
@@ -578,9 +617,13 @@ def install_hooks(
         raise ValueError(f"unsupported hook installer: {agent}")
     return InstallResult(
         agent=agent,
-        files=(str(path),),
+        files=(str(path), str(limits_path)),
         command=command,
         status="installed",
         scope="global" if global_scope else "project",
-        notes=notes,
+        profile=limits_policy.profile,
+        limits_file=str(limits_path),
+        notes=notes + (
+            f"Context profile {limits_policy.profile} is stored in {limits_path}.",
+        ),
     )

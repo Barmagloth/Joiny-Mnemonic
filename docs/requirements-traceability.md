@@ -84,19 +84,20 @@ joiny-mnemonic verify
 | Preserve exact tool output | Canonical `events`; immutable `tool_output_views` reference source hash | `test_reducer_preserves_raw_source_and_critical_failure_signals` |
 | Never expand prompt with a view | Reducer stores prompt view only when framed view is smaller | benchmark `no_workload_expands_prompt` gate |
 | Observe actual and estimated usage | Append-only `usage_samples`, provider/estimate flag, retry receipts | `test_hook_retries_do_not_double_count_reduction_or_provider_usage` |
-| Trigger before context exhaustion | Versioned ratios and audited/rate-limited governor actions | `test_governor_uses_versioned_policy_and_applies_audited_actions` |
+| Trigger before context exhaustion | Per-agent JSON profiles, absolute handoff cap, reserve and audited/rate-limited actions | governor policy test plus `test_seven_bundled_profiles_and_agent_specific_install_config` |
 | Task-specific continuity | Task branch, protected goal, snapshot, versioned status, resume packet | task-boundary and native-task hook tests |
 | Measure net benefit | Real subprocess corpus, baseline/enriched DB comparison, latency and storage | `test_real_subprocess_benchmark_enforces_profit_and_recovery_gates` plus checked benchmark report |
 | Measure information loss | critical/path/verbatim recall and SHA-256 exact promotion | benchmark retention gates |
-## Global hooks and early warning
+## Global hooks and context handoff
 
 | Requirement | Implementation | Verification |
 |---|---|---|
 | User-global hooks without fixed project path | env/OS-aware config resolution plus `hook --global` runtime Git-root discovery | `test_global_installers_resolve_user_paths_and_runtime_project` |
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
+| Configure different agents independently | project/global `context-limits.json` with seven model presets and explicit overrides | `test_seven_bundled_profiles_and_agent_specific_install_config` |
 | Count context before reducer/native compaction | raw `UserPromptSubmit` and `PostToolUse` increments with immutable receipts | `test_raw_hook_counter_warns_before_native_compaction_and_is_idempotent` |
 | Agent-assisted durable promotion | protected runtime instruction plus explicit marker parser; unmarked prose stays searchable | boundary test, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
-| Warn on the crossing tool result | audited `context_warning`, forced `PostToolUse` context injection | same test |
+| Checkpoint without premature handoff | audited `context_checkpoint`; recommendation starts only at handoff | `test_snapshot_checkpoint_does_not_recommend_handoff_early` |
 | Do not double-count retries | unique counter receipt and crossing-event replay behavior | same test |
 | Bound counter overhead | O(1) latest-total read and atomic append | benchmark `hook_counter_p95_under_25ms` gate |
 ## Joiny-Mnemonic naming

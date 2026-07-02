@@ -204,6 +204,7 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "inputSchema": _schema({
             "branch_id": {"type": "string", "default": "main"},
             "session_id": {"type": ["string", "null"]},
+            "agent": {"type": ["string", "null"]},
             "apply": {"type": "boolean", "default": False},
         }),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},

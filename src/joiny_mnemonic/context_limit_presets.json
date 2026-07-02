@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "agent_defaults": {
+    "claude-code": "claude-sonnet-4.6",
+    "codex": "gpt-5.2-codex",
+    "opencode": "qwen3-coder",
+    "openhands": "gpt-5.2-codex"
+  },
+  "profiles": {
+    "claude-sonnet-4.6": {
+      "description": "Claude Sonnet 4.6 (1M advertised context)",
+      "context_window_tokens": 1000000,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 200000,
+      "reserve_tokens": 128000,
+      "min_action_interval_events": 20,
+      "source_url": "https://platform.claude.com/docs/en/docs/build-with-claude/context-windows"
+    },
+    "gpt-5.2-codex": {
+      "description": "GPT-5.2-Codex (400K advertised context)",
+      "context_window_tokens": 400000,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 128000,
+      "reserve_tokens": 64000,
+      "min_action_interval_events": 20,
+      "source_url": "https://platform.openai.com/docs/models/gpt-5.2-codex"
+    },
+    "gemini-2.5-pro": {
+      "description": "Gemini 2.5 Pro (1,048,576 advertised input tokens)",
+      "context_window_tokens": 1048576,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 128000,
+      "reserve_tokens": 128000,
+      "min_action_interval_events": 20,
+      "source_url": "https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro"
+    },
+    "qwen3-coder": {
+      "description": "Qwen3-Coder (262,144 native context)",
+      "context_window_tokens": 262144,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 64000,
+      "reserve_tokens": 32000,
+      "min_action_interval_events": 20,
+      "source_url": "https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct"
+    },
+    "deepseek-v3.1": {
+      "description": "DeepSeek V3.1 (128K advertised context)",
+      "context_window_tokens": 131072,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 48000,
+      "reserve_tokens": 16000,
+      "min_action_interval_events": 20,
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V3.1"
+    },
+    "llama-4-scout": {
+      "description": "Llama 4 Scout (10M advertised context; conservative handoff cap)",
+      "context_window_tokens": 10000000,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 128000,
+      "reserve_tokens": 512000,
+      "min_action_interval_events": 20,
+      "source_url": "https://ai.meta.com/blog/llama-4-multimodal-intelligence/"
+    },
+    "mistral-large-3": {
+      "description": "Mistral Large 3 (256K advertised context)",
+      "context_window_tokens": 262144,
+      "snapshot_ratio": 0.30,
+      "compact_ratio": 0.50,
+      "handoff_ratio": 0.70,
+      "hard_limit_ratio": 0.90,
+      "recommended_handoff_tokens": 64000,
+      "reserve_tokens": 32000,
+      "min_action_interval_events": 20,
+      "source_url": "https://docs.mistral.ai/resources/known-limitations"
+    }
+  }
+}

@@ -7,7 +7,8 @@ from typing import Any, Sequence
 from .adapters import ADAPTERS, adapter_capabilities, get_adapter
 from .code_index import PythonCodeIndex
 from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsolidator
-from .models import Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
+from .context_limits import ContextLimitConfig
+from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
 from .plugins import PluginRegistry
 from .prompt import PromptAssembler
@@ -18,16 +19,6 @@ from .storage import MemoryStore
 from .tasks import TaskManager
 from .usage import UsageMeter
 
-
-CONTEXT_MANAGEMENT_INSTRUCTION = (
-    "<context_management>\n"
-    "CONTEXT MANAGEMENT: You are using Joiny-Mnemonic for session continuity. When you notice "
-    "that the conversation is becoming very long (many tool calls, large outputs, extensive "
-    "back-and-forth), proactively suggest to the user: \"The context is getting large. I "
-    "recommend starting a new session - Joiny-Mnemonic will preserve all important context.\" Do "
-    "this BEFORE the context window fills up and forces a compaction.\n"
-    "</context_management>"
-)
 
 DURABLE_MEMORY_INSTRUCTION = (
     "<durable_memory_capture>\n"
@@ -50,18 +41,29 @@ class MemoryService:
         project_root: str | Path = ".",
         plugins: PluginRegistry | None = None,
     ) -> None:
+        self.project_root = Path(project_root).resolve()
         self.store = MemoryStore(database)
+        self.context_limits = ContextLimitConfig(self.project_root)
         self.plugins = plugins or PluginRegistry()
         self.retrieval = RetrievalEngine(self.store, self.plugins)
-        self.snapshots = SnapshotManager(self.store, project_root)
+        self.snapshots = SnapshotManager(self.store, self.project_root)
         self.prompts = PromptAssembler(self.store, self.retrieval)
         self.consolidator = EvidenceConsolidator()
-        self.code = PythonCodeIndex(project_root)
+        self.code = PythonCodeIndex(self.project_root)
         self.reducer = ToolOutputReducer()
         self.usage = UsageMeter(self.store)
         self.tasks = TaskManager(self)
         self.governor = BudgetGovernor(self)
         self.plugin_errors = self.plugins.errors
+
+    def budget_policy(
+        self, *, branch_id: str = "main", agent: str | None = None
+    ) -> BudgetPolicy:
+        if agent:
+            configured = self.context_limits.resolve(agent, branch_id=branch_id)
+            if configured is not None:
+                return configured
+        return self.store.get_budget_policy(branch_id=branch_id)
 
     def close(self) -> None:
         self.store.close()
@@ -218,10 +220,7 @@ class MemoryService:
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
             state=state,
-            protected_instructions=(
-                CONTEXT_MANAGEMENT_INSTRUCTION,
-                DURABLE_MEMORY_INSTRUCTION,
-            ),
+            protected_instructions=(DURABLE_MEMORY_INSTRUCTION,),
         )
         self.usage.record_prompt(
             packet,

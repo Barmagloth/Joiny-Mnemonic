@@ -24,6 +24,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["joiny_mnemonic*"]
 
+[tool.setuptools.package-data]
+joiny_mnemonic = ["context_limit_presets.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

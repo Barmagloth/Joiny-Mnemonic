@@ -188,7 +188,16 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                 elif path == "/v1/prompt":
                     result = service.prompts.assemble(**body)
                 elif path == "/v1/budget-policy":
-                    result = service.store.set_budget_policy(**body)
+                    values = dict(body)
+                    agent = values.pop("agent", None)
+                    profile = values.pop("profile", None)
+                    if agent:
+                        config_path, policy = service.context_limits.configure_agent(
+                            str(agent), profile=profile, overrides=values
+                        )
+                        result = {"path": str(config_path), "policy": policy}
+                    else:
+                        result = service.store.set_budget_policy(**values)
                 elif path == "/v1/governor":
                     values = dict(body)
                     apply = bool(values.pop("apply", False))

@@ -23,10 +23,10 @@ project/database paths.
 ## Project-local installers
 
 ```powershell
-joiny-mnemonic --project-root . install-hooks codex
-joiny-mnemonic --project-root . install-hooks claude-code
-joiny-mnemonic --project-root . install-hooks opencode
-joiny-mnemonic --project-root . install-hooks openhands
+joiny-mnemonic --project-root . install-hooks codex --profile gpt-5.2-codex
+joiny-mnemonic --project-root . install-hooks claude-code --profile claude-sonnet-4.6
+joiny-mnemonic --project-root . install-hooks opencode --profile qwen3-coder
+joiny-mnemonic --project-root . install-hooks openhands --profile gpt-5.2-codex
 ```
 
 Installers merge their handlers into existing JSON and preserve unrelated hooks. Running the same
@@ -79,19 +79,33 @@ path. Runtime resolution checks explicit project/workspace/cwd fields, then host
 environment variables, then the process cwd, and walks upward to the nearest `.git`. Canonical
 state remains project-local at `<resolved-root>/.joiny-mnemonic/memory.db`. If that file does not exist but a legacy `<resolved-root>/.llm-memory/memory.db` does, the runtime reuses the legacy database in place.
 
-## Early raw-context warning
+## Context checkpoints and handoff recommendations
 
 Every unique `UserPromptSubmit` and `PostToolUse` delivery appends one atomic row to
-`hook_context_counters`, including the new cumulative total. Tool output is counted before derived-view reduction. Receipts make the
-counter retry-safe. The governor compares the cumulative raw estimate with provider-reported
-context usage and uses the larger value.
+`hook_context_counters`, including the new cumulative total. Tool output is counted before
+derived-view reduction. Receipts make the counter retry-safe. The governor compares the cumulative
+raw estimate with provider-reported context usage and uses the larger value.
 
-The warning threshold is the branch policy's `context_window_tokens * snapshot_ratio` (defaults:
-200,000 * 0.45). At the first crossing, the hook injects `[EARLY CONTEXT WARNING]` even when the
-triggering event is `PostToolUse`, and the normal governor path creates a snapshot. This path is
-independent of `PreCompact`/`PostCompact`; those remain recovery hooks, not the first detector.
+The active policy is resolved by agent from `.joiny-mnemonic/context-limits.json`, then from the
+global file. A project may therefore run Claude Code and Codex with different context windows and
+handoff thresholds on the same branch. The selected model profile and explicit overrides are
+written during `install-hooks`; reinstallation without new limit arguments preserves them.
 
-Every injected resume packet includes a protected `[DURABLE MEMORY CAPTURE]` instruction. The agent is told to promote durable, evidence-backed information with an available structured memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in compact resume.
+Crossing the snapshot threshold injects `[CONTEXT CHECKPOINT]` and records a durable snapshot. It
+does not tell the user to start another session. `[CONTEXT HANDOFF RECOMMENDED]` starts only at the
+agent's handoff threshold, and `[CONTEXT HANDOFF REQUIRED]` is reserved for the hard limit. This
+path is independent of `PreCompact`/`PostCompact`; those remain recovery hooks, not the first
+detector. The messages are neutral and event-driven; there is no unconditional branded handoff
+instruction in every resume packet.
+
+Advertised windows and operational quality limits are separate. The profile calculation and the
+seven bundled model presets are documented in [context-limits.md](context-limits.md).
+
+Every injected resume packet still includes the protected `[DURABLE MEMORY CAPTURE]` instruction.
+The agent is told to promote durable, evidence-backed information with an available structured
+memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:`
+marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in
+compact resume.
 ## What is captured
 
 The runtime accepts JSON on stdin and emits JSON only on stdout.

@@ -1851,14 +1851,23 @@ class MemoryStore:
             ).fetchone()
         return str(row["source_event_id"]) if row is not None and row["source_event_id"] else None
 
-    def last_governor_action_seq(self, branch_id: str, action: str) -> int | None:
+    def last_governor_action_seq(
+        self, branch_id: str, action: str, *, policy_id: str | None = None
+    ) -> int | None:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT e.seq FROM governor_actions g LEFT JOIN events e ON e.id=g.source_event_id "
-                "WHERE g.branch_id=? AND g.action=? ORDER BY g.created_at DESC LIMIT 1",
+            rows = self._conn.execute(
+                "SELECT e.seq,g.payload_json FROM governor_actions g "
+                "LEFT JOIN events e ON e.id=g.source_event_id "
+                "WHERE g.branch_id=? AND g.action=? ORDER BY g.created_at DESC",
                 (branch_id, action),
-            ).fetchone()
-        return int(row["seq"]) if row is not None and row["seq"] is not None else None
+            ).fetchall()
+        for row in rows:
+            if policy_id is not None:
+                payload = json.loads(row["payload_json"])
+                if payload.get("policy_id") != policy_id:
+                    continue
+            return int(row["seq"]) if row["seq"] is not None else None
+        return None
 
     @staticmethod
     def _task_from_row(row: sqlite3.Row) -> TaskRecord:

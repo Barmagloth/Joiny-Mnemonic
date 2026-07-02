@@ -41,43 +41,60 @@ class BudgetGovernor:
         return total, "local-canonical-raw-estimate"
 
     @staticmethod
-    def _threshold(policy: BudgetPolicy, ratio: float) -> int:
-        return math.ceil(policy.context_window_tokens * ratio)
+    def thresholds(policy: BudgetPolicy) -> dict[str, int]:
+        window = policy.context_window_tokens
+        physical_handoff = math.ceil(window * policy.handoff_ratio)
+        if policy.reserve_tokens:
+            physical_handoff = min(physical_handoff, window - policy.reserve_tokens)
+        handoff = physical_handoff
+        if policy.recommended_handoff_tokens is not None:
+            handoff = min(handoff, policy.recommended_handoff_tokens)
+        scale = handoff / physical_handoff if physical_handoff else 1.0
+        snapshot = max(1, math.ceil(window * policy.snapshot_ratio * scale))
+        compact = max(snapshot + 1, math.ceil(window * policy.compact_ratio * scale))
+        handoff = max(compact + 1, handoff)
+        hard = math.ceil(window * policy.hard_limit_ratio)
+        if policy.reserve_tokens:
+            hard = min(hard, window - policy.reserve_tokens)
+        if hard <= handoff:
+            raise ValueError(
+                f"invalid policy {policy.id}: hard threshold {hard} must exceed handoff {handoff}"
+            )
+        return {
+            "snapshot": snapshot,
+            "compact": compact,
+            "handoff": handoff,
+            "handoff_required": hard,
+        }
 
     def decide(
         self,
         *,
         branch_id: str = "main",
         session_id: str | None = None,
+        agent: str | None = None,
     ) -> GovernorDecision:
-        policy = self.service.store.get_budget_policy(branch_id=branch_id)
+        policy = self.service.budget_policy(branch_id=branch_id, agent=agent)
+        thresholds = self.thresholds(policy)
         context_tokens, source = self.estimate_context(
             branch_id=branch_id, session_id=session_id
         )
         ratio = context_tokens / policy.context_window_tokens
         actions: list[str] = []
         reasons: list[str] = []
-        if ratio >= policy.snapshot_ratio:
-            actions.append("snapshot")
-            reasons.append(
-                f"context {context_tokens} reached snapshot threshold "
-                f"{self._threshold(policy, policy.snapshot_ratio)}"
-            )
-        if ratio >= policy.compact_ratio:
-            actions.append("compact")
-            reasons.append(
-                f"context ratio {ratio:.3f} reached compact ratio {policy.compact_ratio:.3f}"
-            )
-        if ratio >= policy.handoff_ratio:
-            actions.append("handoff")
-            reasons.append(
-                f"context ratio {ratio:.3f} reached handoff ratio {policy.handoff_ratio:.3f}"
-            )
-        if ratio >= policy.hard_limit_ratio:
-            actions.append("handoff_required")
-            reasons.append(
-                f"context ratio {ratio:.3f} reached hard limit {policy.hard_limit_ratio:.3f}"
-            )
+        labels = {
+            "snapshot": "snapshot",
+            "compact": "compaction",
+            "handoff": "recommended handoff",
+            "handoff_required": "hard handoff",
+        }
+        for action in ("snapshot", "compact", "handoff", "handoff_required"):
+            threshold = thresholds[action]
+            if context_tokens >= threshold:
+                actions.append(action)
+                reasons.append(
+                    f"context {context_tokens} reached {labels[action]} threshold {threshold}"
+                )
         return GovernorDecision(
             branch_id=branch_id,
             context_tokens=context_tokens,
@@ -88,32 +105,34 @@ class BudgetGovernor:
             source=source,
         )
 
-    def register_context_warning(
+    def register_context_checkpoint(
         self,
         counter: HookContextCounter,
         *,
         branch_id: str,
         session_id: str,
         source_event: Event,
+        agent: str | None = None,
     ) -> bool:
         if counter.cumulative_tokens < counter.threshold_tokens:
             return False
-        policy = self.service.store.get_budget_policy(branch_id=branch_id)
-        receipt_key = f"context-warning:{session_id}:{policy.id}:{counter.threshold_tokens}"
+        policy = self.service.budget_policy(branch_id=branch_id, agent=agent)
+        receipt_key = f"context-checkpoint:{session_id}:{policy.id}:{counter.threshold_tokens}"
         created = self.service.store.record_governor_action(
             receipt_key=receipt_key,
             branch_id=branch_id,
             session_id=session_id,
             source_event_id=source_event.id,
-            action="context_warning",
+            action="context_checkpoint",
             reason=(
                 f"cumulative raw hook context {counter.cumulative_tokens} reached "
-                f"early warning threshold {counter.threshold_tokens}"
+                f"snapshot threshold {counter.threshold_tokens}"
             ),
             context_tokens=counter.cumulative_tokens,
             threshold_tokens=counter.threshold_tokens,
             payload={
                 "policy_id": policy.id,
+                "agent": agent,
                 "source": "hook-cumulative-raw-estimate",
                 "event_name": counter.event_name,
                 "increment_tokens": counter.increment_tokens,
@@ -127,29 +146,28 @@ class BudgetGovernor:
         branch_id: str = "main",
         session_id: str | None = None,
         source_event: Event | None = None,
+        agent: str | None = None,
     ) -> GovernorDecision:
-        decision = self.decide(branch_id=branch_id, session_id=session_id)
+        decision = self.decide(branch_id=branch_id, session_id=session_id, agent=agent)
         if not decision.actions:
             return decision
-        policy = self.service.store.get_budget_policy(branch_id=branch_id)
+        policy = self.service.budget_policy(branch_id=branch_id, agent=agent)
+        thresholds = self.thresholds(policy)
         current_seq = source_event.seq if source_event is not None else (
             self.service.store.query_events(branch_id=branch_id)[-1].seq
             if self.service.store.query_events(branch_id=branch_id) else 0
         )
         applied: list[str] = []
         reasons: list[str] = []
+        reason_by_action = dict(zip(decision.actions, decision.reasons, strict=True))
         snapshot_created = False
         for action in decision.actions:
-            last_seq = self.service.store.last_governor_action_seq(branch_id, action)
+            last_seq = self.service.store.last_governor_action_seq(
+                branch_id, action, policy_id=policy.id
+            )
             if last_seq is not None and current_seq - last_seq < policy.min_action_interval_events:
                 continue
-            ratio = {
-                "snapshot": policy.snapshot_ratio,
-                "compact": policy.compact_ratio,
-                "handoff": policy.handoff_ratio,
-                "handoff_required": policy.hard_limit_ratio,
-            }[action]
-            threshold = self._threshold(policy, ratio)
+            threshold = thresholds[action]
             bucket_width = max(1, math.ceil(policy.context_window_tokens * 0.05))
             receipt = (
                 f"governor:{branch_id}:{policy.id}:{action}:"
@@ -161,13 +179,11 @@ class BudgetGovernor:
                 session_id=session_id,
                 source_event_id=source_event.id if source_event is not None else None,
                 action=action,
-                reason=next(
-                    (reason for reason in decision.reasons if action.split("_")[0] in reason),
-                    decision.reasons[0] if decision.reasons else action,
-                ),
+                reason=reason_by_action[action],
+
                 context_tokens=decision.context_tokens,
                 threshold_tokens=threshold,
-                payload={"policy_id": policy.id, "source": decision.source},
+                payload={"policy_id": policy.id, "agent": agent, "source": decision.source},
             )
             if not created:
                 continue
@@ -180,12 +196,8 @@ class BudgetGovernor:
                     snapshot_created = True
                 self.service.compact(branch_id=branch_id)
             applied.append(action)
-            reasons.append(
-                next(
-                    (reason for reason in decision.reasons if action.split("_")[0] in reason),
-                    action,
-                )
-            )
+            reasons.append(reason_by_action[action])
+
         return GovernorDecision(
             branch_id=decision.branch_id,
             context_tokens=decision.context_tokens,

@@ -22,7 +22,7 @@ protocols, not built-in implementations.
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
 | Tool-output reduction | Immutable raw output plus command-aware compact/summary views, exact promotion and no-expansion guard |
 | Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
-| Budget governor | Versioned thresholds with rate-limited snapshot, compaction and handoff actions |
+| Budget governor | Per-agent JSON profiles with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
 | Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
@@ -84,10 +84,10 @@ Install the package in the interpreter that the agent can execute, then run one 
 installer:
 
 ```powershell
-joiny-mnemonic --project-root . install-hooks codex
-joiny-mnemonic --project-root . install-hooks claude-code
-joiny-mnemonic --project-root . install-hooks opencode
-joiny-mnemonic --project-root . install-hooks openhands
+joiny-mnemonic --project-root . install-hooks codex --profile gpt-5.2-codex
+joiny-mnemonic --project-root . install-hooks claude-code --profile claude-sonnet-4.6
+joiny-mnemonic --project-root . install-hooks opencode --profile qwen3-coder
+joiny-mnemonic --project-root . install-hooks openhands --profile gpt-5.2-codex
 ```
 
 For a personal installation across all projects, use `--global`:
@@ -103,6 +103,12 @@ hook payload's working directory to the nearest Git root and uses that project's
 `.joiny-mnemonic/memory.db`. `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `OPENCODE_CONFIG_DIR` and
 `XDG_CONFIG_HOME` are honored. OpenHands currently supports repository hooks only, so
 `install-hooks openhands --global` fails explicitly.
+
+Installation also writes the selected agent/model limits to
+`.joiny-mnemonic/context-limits.json`. Re-running an installer without limit arguments preserves
+that agent's existing values. Use `joiny-mnemonic context-profiles` to inspect the seven bundled
+model profiles, or pass `--context-window`, `--handoff-tokens`, `--reserve-tokens` and ratio flags
+to override a profile. The file is ordinary JSON and may be reviewed or edited directly.
 
 The installers preserve unrelated existing hooks and write:
 
@@ -142,10 +148,12 @@ joiny-mnemonic output-views evt_0123456789abcdef
 joiny-mnemonic source view_0123456789abcdef
 joiny-mnemonic usage --branch main
 
-joiny-mnemonic budget-policy --context-window 200000 `
-  --snapshot-ratio 0.45 --compact-ratio 0.60 `
-  --handoff-ratio 0.75 --hard-limit-ratio 0.90
-joiny-mnemonic governor --branch main --apply
+joiny-mnemonic context-profiles
+joiny-mnemonic budget-policy --agent codex --profile custom `
+  --context-window 200000 --handoff-tokens 120000 --reserve-tokens 32000 `
+  --snapshot-ratio 0.30 --compact-ratio 0.50 `
+  --handoff-ratio 0.70 --hard-limit-ratio 0.90
+joiny-mnemonic governor --branch main --agent codex --apply
 
 joiny-mnemonic task-start ISSUE-417 "Repair invoice accounting"
 joiny-mnemonic task-resume ISSUE-417 --budget 1200 --text-only
@@ -157,9 +165,15 @@ and bind the complete native session to the task branch.
 
 `UserPromptSubmit` and `PostToolUse` also add their raw, pre-reduction size to an idempotent
 per-session cumulative counter. The governor uses the maximum of this counter and any
-provider-reported context usage. On crossing `context_window * snapshot_ratio`, the hook creates
-or reuses a durable snapshot and injects `[EARLY CONTEXT WARNING]` immediately, including on
-`PostToolUse`; it does not wait for `PreCompact`/`PostCompact`.
+provider-reported context usage. At the snapshot threshold it creates a durable snapshot and
+injects a neutral `[CONTEXT CHECKPOINT]`; it does not recommend a new session. The first handoff
+recommendation appears only at the configured handoff threshold, and the hard-limit message is
+separate. These checks do not wait for `PreCompact`/`PostCompact`.
+
+Advertised context capacity is not a measured quality guarantee. Bundled profiles keep the vendor
+window separately from a conservative `recommended_handoff_tokens` cap. The defaults are starting
+points, not universal degradation limits; see [docs/context-limits.md](docs/context-limits.md) for
+the evidence and calculation.
 
 ## Performance and retention benchmark
 

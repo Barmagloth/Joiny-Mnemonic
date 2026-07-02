@@ -179,6 +179,11 @@ class BudgetPolicy:
     hard_limit_ratio: float
     min_action_interval_events: int
     created_at: str
+    agent: str | None = None
+    profile: str | None = None
+    recommended_handoff_tokens: int | None = None
+    reserve_tokens: int = 0
+    source: str = "database"
 
 
 @dataclass(frozen=True, slots=True)

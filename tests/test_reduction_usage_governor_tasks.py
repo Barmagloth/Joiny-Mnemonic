@@ -202,7 +202,7 @@ class ReductionUsageGovernorTaskTest(unittest.TestCase):
             },
             token_budget=700,
         )
-        self.assertNotIn("EARLY CONTEXT WARNING", first["hookSpecificOutput"]["additionalContext"])
+        self.assertNotIn("CONTEXT CHECKPOINT", first["hookSpecificOutput"]["additionalContext"])
         verbose = "\n".join(
             f"tests/test_bulk.py::test_case_{index:04d} PASSED" for index in range(500)
         )
@@ -218,7 +218,7 @@ class ReductionUsageGovernorTaskTest(unittest.TestCase):
             self.service, "claude-code", delivery, token_budget=700
         )
         warning = warned["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("EARLY CONTEXT WARNING", warning)
+        self.assertIn("CONTEXT CHECKPOINT", warning)
         self.assertIn("before native compaction", warning)
         session_id = self.service.store.hook_session(
             "claude-code", "counter-session", branch_id="main"
@@ -241,7 +241,7 @@ class ReductionUsageGovernorTaskTest(unittest.TestCase):
             self.service, "claude-code", delivery, token_budget=700
         )
         self.assertIn(
-            "EARLY CONTEXT WARNING", retry["hookSpecificOutput"]["additionalContext"]
+            "CONTEXT CHECKPOINT", retry["hookSpecificOutput"]["additionalContext"]
         )
         self.assertEqual(
             self.service.store.hook_context_total(
