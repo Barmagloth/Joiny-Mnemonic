@@ -8,15 +8,15 @@ derived views with exact provenance.
 
 The core and its local interfaces are implemented and covered by tests. Agent hook installers
 generate project-local integrations, but this repository's automated suite does not launch the
-four external agent binaries. Semantic retrieval, knowledge graph and KV storage remain plugin
-protocols, not built-in implementations.
+four external agent binaries. Semantic retrieval and a provenance-aware knowledge graph ship as
+separately installable plugins; KV storage remains an extension protocol.
 
 | Area | Implemented behavior |
 |---|---|
 | Canonical history | SQLite append-only events/artifacts, hash chain, secret redaction, `synchronous=FULL`, SQL update/delete guards |
 | Provenance | Every derived claim references existing events visible in the target branch lineage |
 | Protected state | Versioned `instructions`, `goal`, `constraints`, `decisions`, `open_tasks` |
-| Retrieval | SQLite FTS5/BM25 candidate retrieval with time/file/type/branch filters and risk/freshness/cost reranking |
+| Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
@@ -30,6 +30,7 @@ protocols, not built-in implementations.
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
 | Evaluation | Evidence-presence diagnostic and a separate external task-runner protocol for real outcome scoring |
 | Interfaces | Python, CLI, local HTTP and MCP stdio share one `MemoryService` |
+| Optional plugins | Persistent local semantic index and provenance-backed SQLite entity graph; both are rebuildable derived views |
 
 Explicit limits:
 
@@ -37,7 +38,7 @@ Explicit limits:
   upstream API change.
 - The code graph supports Python only. Other languages report unsupported.
 - Consolidation is deterministic and evidence-bound; there is no built-in LLM fact extractor.
-- Semantic, knowledge-graph and KV features are disabled unless a plugin is installed.
+- Semantic and knowledge-graph features are disabled until their separate packages are installed; KV requires a third-party plugin.
 - The physical-memory governor selects among supplied candidates; it is not a KV compressor.
 - Production readiness still requires host-level integration tests for the exact agent versions
   and a project-specific external task runner.
@@ -57,6 +58,34 @@ The default database is `.joiny-mnemonic/memory.db`. If only a legacy `.llm-memo
 ```powershell
 joiny-mnemonic --db .state/memory.db --project-root . verify
 ```
+
+## Optional semantic search and knowledge graph
+
+The core has no heavy model dependency. Install either plugin from this repository when needed:
+
+```powershell
+python -m pip install -e plugins/semantic-local
+python -m pip install -e plugins/knowledge-graph
+joiny-mnemonic capabilities
+```
+
+The semantic plugin indexes both typed memories and ordinary canonical events, so it can retrieve
+unmarked prose without keyword overlap. It uses `sentence-transformers/all-MiniLM-L6-v2` by
+default and downloads that model on first use; override it with
+`JOINY_MNEMONIC_SEMANTIC_MODEL`. The derived vector index is stored under
+`.joiny-mnemonic/plugins/semantic.sqlite`.
+
+The graph plugin extracts explicit relations such as
+`[[Joiny-Mnemonic]] -[stores]-> [[SQLite]]`, selected natural-language relations between marked
+or backticked entities, and lower-confidence co-occurrence edges. Every edge retains its memory
+record and canonical source event IDs. Query it through any public interface:
+
+```powershell
+joiny-mnemonic graph-neighbors "SQLite" --branch main --limit 20
+```
+
+These indexes are derived and rebuildable. Canonical events and typed memories remain the source
+of truth.
 
 ## Capture, consolidate and resume
 
@@ -126,6 +155,7 @@ verification steps are in [docs/integrations.md](docs/integrations.md).
 ```powershell
 joiny-mnemonic search "snapshot provenance" --type decision --limit 10
 joiny-mnemonic timeline --limit 30
+joiny-mnemonic graph-neighbors "SQLite" --limit 20
 
 joiny-mnemonic code-index
 joiny-mnemonic code-search "resume"
@@ -133,8 +163,8 @@ joiny-mnemonic code-context "MemoryService.resume"
 joiny-mnemonic code-impact "MemoryStore.append_event" --depth 3
 ```
 
-MCP additionally exposes `memory_code_search`, `memory_code_context` and
-`memory_code_impact`, alongside append, derive, search, source, snapshot and resume tools.
+MCP additionally exposes `memory_graph_neighbors`, `memory_code_search`, `memory_code_context`
+and `memory_code_impact`, alongside append, derive, search, source, snapshot and resume tools.
 
 ## Output reduction, usage, governor and tasks
 
@@ -218,10 +248,68 @@ See [docs/evaluation.md](docs/evaluation.md) for the request schema and comparis
 
 ## Local API and MCP
 
+Run the HTTP API or stdio MCP server directly:
+
 ```powershell
 joiny-mnemonic serve --host 127.0.0.1 --port 8765
-joiny-mnemonic mcp
+joiny-mnemonic --db .joiny-mnemonic/memory.db --project-root . mcp
 ```
+
+After installing the package, run the client registration command from the project root. Hooks and
+MCP may be enabled together against the same database: hooks capture the session automatically;
+MCP exposes explicit memory, source, snapshot, resume, semantic search, graph and code-context tools.
+
+```powershell
+# Claude Code: current project, private local configuration
+claude mcp add --transport stdio --scope local joiny-mnemonic -- `
+  joiny-mnemonic --db .joiny-mnemonic/memory.db --project-root . mcp
+
+# Codex CLI and IDE extension
+codex mcp add joiny-mnemonic -- `
+  joiny-mnemonic --db .joiny-mnemonic/memory.db --project-root . mcp
+
+# OpenHands CLI
+openhands mcp add joiny-mnemonic --transport stdio joiny-mnemonic -- `
+  --db .joiny-mnemonic/memory.db --project-root . mcp
+```
+
+OpenCode provides an interactive installer:
+
+```powershell
+opencode mcp add
+```
+
+Alternatively, add the server directly to the project's `opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "joiny-mnemonic": {
+      "type": "local",
+      "command": [
+        "joiny-mnemonic",
+        "--db", ".joiny-mnemonic/memory.db",
+        "--project-root", ".",
+        "mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
+```
+
+Verify the registered server with the matching client:
+
+```powershell
+claude mcp get joiny-mnemonic
+codex mcp get joiny-mnemonic
+openhands mcp get joiny-mnemonic
+opencode mcp list
+```
+
+If the client cannot find `joiny-mnemonic` on `PATH`, replace the executable name in the server
+command with the absolute path reported by `Get-Command joiny-mnemonic`.
 
 The HTTP server intentionally has no authentication and binds to loopback by default. Put an
 authenticating reverse proxy in front of any non-loopback deployment.
@@ -236,7 +324,10 @@ python -m unittest discover -s tests -v
 
 The current suite includes crash durability, immutable storage, branch visibility, recursive
 snapshot deltas, restored-state resume, FTS without Python full scans, atomic tool groups,
-evidence-bound consolidation, hook idempotency/installers, Python AST impact, MCP and HTTP.
+evidence-bound consolidation, semantic no-keyword retrieval, branch-scoped graph projection,
+automatic tamper rejection, hook idempotency/installers, Python AST impact, MCP and HTTP.
+
+Licensed under the [MIT License](LICENSE).
 
 Architecture: [docs/architecture.md](docs/architecture.md). Security:
 [docs/security.md](docs/security.md). Evidence matrix:

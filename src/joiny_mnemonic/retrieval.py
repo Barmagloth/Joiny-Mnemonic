@@ -188,17 +188,47 @@ class RetrievalEngine:
             if context.query:
                 hits = [hit for hit in hits if hit.score > 0.05]
 
-        if context.semantic and context.query:
+        if context.semantic and context.query and self.plugins.semantic:
+            visible_records = self.store.list_memories(
+                branch_id=context.branch_id,
+                memory_types=context.memory_types,
+                since=context.since,
+                until=context.until,
+                file=context.file,
+            )
+            visible_events = (
+                self.store.query_events(
+                    branch_id=context.branch_id,
+                    since=context.since,
+                    until=context.until,
+                    file=context.file,
+                )
+                if context.include_events else []
+            )
             filters: dict[str, Any] = {
                 "branch_id": context.branch_id,
                 "memory_types": context.memory_types,
                 "file": context.file,
                 "since": context.since,
                 "until": context.until,
+                "allowed_memory_ids": tuple(record.id for record in visible_records),
+                "allowed_event_ids": tuple(event.id for event in visible_events),
             }
             for plugin in self.plugins.semantic.values():
-                hits.extend(plugin.search(context.query, limit=context.limit, filters=filters))
-
+                try:
+                    sync = getattr(plugin, "sync", None)
+                    if callable(sync):
+                        sync(visible_records, visible_events)
+                    else:
+                        for record in visible_records:
+                            plugin.index(record)
+                    hits.extend(
+                        plugin.search(context.query, limit=context.limit, filters=filters)
+                    )
+                except Exception as exc:
+                    error = f"semantic:{plugin.name}: {exc}"
+                    if error not in self.plugins.errors:
+                        self.plugins.errors.append(error)
         deduplicated: dict[tuple[str, str], RetrievalHit] = {}
         for hit in hits:
             key = (hit.source_kind, hit.id)

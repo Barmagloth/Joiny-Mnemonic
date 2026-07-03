@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from .models import MemoryRecord, RetrievalHit
+
+
+@dataclass(frozen=True, slots=True)
+class PluginContext:
+    """Project-local paths supplied to installed plugin factories."""
+
+    project_root: Path
+    database_path: Path
 
 
 @runtime_checkable
@@ -20,7 +30,9 @@ class KnowledgeGraphProjection(Protocol):
     name: str
 
     def project(self, record: MemoryRecord) -> None: ...
-    def neighbors(self, entity: str, *, limit: int) -> list[RetrievalHit]: ...
+    def neighbors(
+        self, entity: str, *, limit: int, filters: dict[str, Any] | None = None
+    ) -> list[RetrievalHit]: ...
 
 
 @runtime_checkable
@@ -38,12 +50,16 @@ class PluginRegistry:
     knowledge_graph: dict[str, KnowledgeGraphProjection]
     kv_tiers: dict[str, KVTier]
     errors: list[str]
+    context: PluginContext | None
 
-    def __init__(self, *, load_installed: bool = True) -> None:
+    def __init__(
+        self, *, load_installed: bool = True, context: PluginContext | None = None
+    ) -> None:
         self.semantic = {}
         self.knowledge_graph = {}
         self.kv_tiers = {}
         self.errors = []
+        self.context = context
         if load_installed:
             # Load legacy groups first; renamed entry points with the same plugin name win.
             for namespace in ("llm_memory", "joiny_mnemonic"):
@@ -51,10 +67,26 @@ class PluginRegistry:
                 self._load_group(f"{namespace}.knowledge_graph", self.knowledge_graph)
                 self._load_group(f"{namespace}.kv_tier", self.kv_tiers)
 
+    def _instantiate(self, loaded: Any) -> Any:
+        if not callable(loaded):
+            return loaded
+        if self.context is None:
+            return loaded()
+        try:
+            parameters = inspect.signature(loaded).parameters.values()
+        except (TypeError, ValueError):
+            return loaded()
+        accepts_context = any(
+            parameter.name == "context"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+        return loaded(context=self.context) if accepts_context else loaded()
+
     def _load_group(self, group: str, target: dict[str, Any]) -> None:
         for point in entry_points(group=group):
             try:
-                plugin = point.load()()
+                plugin = self._instantiate(point.load())
                 target[plugin.name] = plugin
             except Exception as exc:
                 self.errors.append(f"{group}:{point.name}: {exc}")

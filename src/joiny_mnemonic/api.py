@@ -181,6 +181,10 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     result = service.derive_memory(**body)
                 elif path == "/v1/search":
                     result = service.search(**body)
+                elif path == "/v1/graph/neighbors":
+                    values = dict(body)
+                    entity = values.pop("entity")
+                    result = service.knowledge_neighbors(entity, **values)
                 elif path == "/v1/snapshots":
                     result = service.create_snapshot(**body)
                 elif path == "/v1/resume":

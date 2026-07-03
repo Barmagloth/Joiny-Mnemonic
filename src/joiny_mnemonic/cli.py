@@ -143,6 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--no-events", action="store_true")
     search.add_argument("--no-semantic", action="store_true")
 
+    graph = commands.add_parser("graph-neighbors")
+    graph.add_argument("entity")
+    graph.add_argument("--branch", default="main")
+    graph.add_argument("--limit", type=int, default=20)
     source = commands.add_parser("source")
     source.add_argument("id")
 
@@ -368,6 +372,10 @@ def run(args: argparse.Namespace) -> int:
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes))
         elif args.command == "search":
             _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic))
+        elif args.command == "graph-neighbors":
+            _print(service.knowledge_neighbors(
+                args.entity, branch_id=args.branch, limit=args.limit
+            ))
         elif args.command == "source":
             _print(service.exact_source(args.id))
         elif args.command == "project-source":

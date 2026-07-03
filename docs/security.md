@@ -29,9 +29,14 @@ Regex-фильтр не заменяет специализированный DL
 
 ## Integrity
 
-Каждое событие имеет `content_hash`, `previous_hash` и `chain_hash`. `verify` пересчитывает всю
-цепочку. Это обнаруживает изменение строки, но не заменяет внешний signed checkpoint: атакующий
-с полным доступом к файлу и коду может заменить всю БД.
+Каждое событие имеет `content_hash`, `previous_hash` и `chain_hash`. Артефакты и tool-output
+views также проверяются по content/source hashes. Полная проверка выполняется при открытии store;
+публичные reads повторяют её после изменения SQLite data/schema version, а каждый MCP tool call
+проверяет цепочку до dispatch. При несовпадении система fail-closed с `StoreIntegrityError`.
+Команда `verify` остаётся явным audit endpoint.
+
+Это обнаруживает изменение строки, но не заменяет внешний signed checkpoint: атакующий с полным
+доступом к файлу и коду может заменить всю БД вместе с хешами или изменить сам verifier.
 
 ## Availability and backup
 

@@ -7,6 +7,7 @@ name = "joiny-mnemonic"
 version = "0.4.0"
 description = "Joiny-Mnemonic: agent-agnostic, provenance-first memory for long-running LLM sessions"
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = []
 

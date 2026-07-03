@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
 import re
@@ -37,6 +38,19 @@ def _hash(value: bytes | str) -> str:
 def _fts_match_query(value: str) -> str:
     terms = [term for term in re.findall(r"[\w./:-]+", value, re.UNICODE) if term]
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+
+
+class StoreIntegrityError(RuntimeError):
+    """Raised when canonical storage fails automatic integrity verification."""
+
+
+def integrity_checked(method: Any) -> Any:
+    @functools.wraps(method)
+    def wrapped(self: "MemoryStore", *args: Any, **kwargs: Any) -> Any:
+        self._guard_read()
+        return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 BASE_SCHEMA = """
@@ -350,6 +364,8 @@ class MemoryStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.redactor = redactor or SecretRedactor()
         self._lock = threading.RLock()
+        self._verified_data_version: int | None = None
+        self._verified_schema_version: int | None = None
         target = ":memory:" if self._in_memory else str(self.path)
         self._conn = sqlite3.connect(target, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
@@ -371,6 +387,49 @@ class MemoryStore:
                     f"cannot initialize durable SQLite store at {self.path}; "
                     "the filesystem supports neither WAL nor exclusive rollback journaling"
                 ) from fallback_exc
+        try:
+            self.assert_integrity()
+        except Exception:
+            self._conn.close()
+            raise
+
+    def _data_version(self) -> int:
+        with self._lock:
+            row = self._conn.execute("PRAGMA data_version").fetchone()
+        return int(row[0])
+
+    def _schema_version(self) -> int:
+        with self._lock:
+            row = self._conn.execute("PRAGMA schema_version").fetchone()
+        return int(row[0])
+
+    def assert_integrity(self) -> None:
+        """Verify canonical hashes and fail closed if durable data was altered."""
+        for _ in range(3):
+            before = (self._data_version(), self._schema_version())
+            try:
+                valid, error = self.verify_chain()
+            except Exception as exc:
+                raise StoreIntegrityError(
+                    f"canonical store could not be verified: {exc}"
+                ) from exc
+            after = (self._data_version(), self._schema_version())
+            if not valid:
+                raise StoreIntegrityError(error or "canonical store failed integrity verification")
+            if before == after:
+                self._verified_data_version, self._verified_schema_version = after
+                return
+        raise StoreIntegrityError("canonical store changed while integrity was being verified")
+
+    def ensure_integrity(self) -> None:
+        """Cheap read guard; re-verify only after another connection committed."""
+        self._guard_read()
+
+    def _guard_read(self) -> None:
+        current = (self._data_version(), self._schema_version())
+        verified = (self._verified_data_version, self._verified_schema_version)
+        if verified != current:
+            self.assert_integrity()
 
     def _configure(self) -> None:
         mode = self._conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
@@ -684,6 +743,7 @@ class MemoryStore:
             )
             return session_id
 
+    @integrity_checked
     def consolidation_result(self, event_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
@@ -777,6 +837,7 @@ class MemoryStore:
             chain_hash=row["chain_hash"],
         )
 
+    @integrity_checked
     def get_event(self, event_id: str) -> Event:
         with self._lock:
             row = self._conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
@@ -784,6 +845,7 @@ class MemoryStore:
             raise KeyError(f"unknown event: {event_id}")
         return self._event_from_row(row)
 
+    @integrity_checked
     def get_artifact(self, artifact_id: str) -> Artifact:
         with self._lock:
             row = self._conn.execute("SELECT * FROM artifacts WHERE id=?", (artifact_id,)).fetchone()
@@ -817,10 +879,12 @@ class MemoryStore:
         lineage.reverse()
         return lineage
 
+    @integrity_checked
     def branch_lineage(self, branch_id: str = "main") -> tuple[tuple[str, int | None], ...]:
         with self._lock:
             return tuple(self._lineage_locked(branch_id))
 
+    @integrity_checked
     def query_events(
         self,
         *,
@@ -886,6 +950,7 @@ class MemoryStore:
             clauses.append(clause + ")")
         return "(" + " OR ".join(clauses) + ")", params
 
+    @integrity_checked
     def search_events_fts(
         self,
         query: str,
@@ -929,6 +994,7 @@ class MemoryStore:
                 break
         return result
 
+    @integrity_checked
     def search_memories_fts(
         self,
         query: str,
@@ -1034,6 +1100,7 @@ class MemoryStore:
             supersedes_id=row["supersedes_id"], created_at=row["created_at"],
         )
 
+    @integrity_checked
     def get_active_blocks(self, *, branch_id: str = "main") -> dict[str, ActiveBlock]:
         with self._lock:
             rows: list[sqlite3.Row] = []
@@ -1221,6 +1288,7 @@ class MemoryStore:
                 )
         return record
 
+    @integrity_checked
     def get_memory(self, memory_id: str) -> MemoryRecord:
         with self._lock:
             row = self._conn.execute(
@@ -1230,6 +1298,7 @@ class MemoryStore:
             raise KeyError(f"unknown memory: {memory_id}")
         return self._memory_from_row(row)
 
+    @integrity_checked
     def list_memories(
         self,
         *,
@@ -1270,6 +1339,7 @@ class MemoryStore:
             records = [record for record in records if file in record.files]
         return records
 
+    @integrity_checked
     def provenance(self, memory_id: str) -> list[Event]:
         record = self.get_memory(memory_id)
         events = [self.get_event(event_id) for event_id in record.source_event_ids]
@@ -1396,6 +1466,7 @@ class MemoryStore:
             created_at=created_at,
         )
 
+    @integrity_checked
     def get_snapshot(self, snapshot_id: str) -> Snapshot:
         with self._lock:
             row, state = self._materialize_snapshot_locked(snapshot_id)
@@ -1422,11 +1493,13 @@ class MemoryStore:
             return None
         return max(candidates, key=lambda row: (int(row["cursor_seq"]), row["created_at"]))
 
+    @integrity_checked
     def latest_snapshot(self, *, branch_id: str = "main") -> Snapshot | None:
         with self._lock:
             row = self._latest_visible_snapshot_row_locked(branch_id)
         return self.get_snapshot(row["id"]) if row else None
 
+    @integrity_checked
     def snapshot_tail(
         self, snapshot_id: str, *, target_branch_id: str | None = None
     ) -> list[Event]:
@@ -1500,6 +1573,7 @@ class MemoryStore:
         assert row is not None
         return self._tool_view_from_row(row)
 
+    @integrity_checked
     def get_tool_output_view(
         self, event_id: str, *, level: str = "compact"
     ) -> ToolOutputView | None:
@@ -1510,6 +1584,7 @@ class MemoryStore:
             ).fetchone()
         return self._tool_view_from_row(row) if row is not None else None
 
+    @integrity_checked
     def get_tool_output_view_by_id(self, view_id: str) -> ToolOutputView:
         with self._lock:
             row = self._conn.execute(
@@ -1519,6 +1594,7 @@ class MemoryStore:
             raise KeyError(f"unknown tool output view: {view_id}")
         return self._tool_view_from_row(row)
 
+    @integrity_checked
     def list_tool_output_views(self, event_id: str) -> tuple[ToolOutputView, ...]:
         with self._lock:
             rows = self._conn.execute(
@@ -1597,6 +1673,7 @@ class MemoryStore:
         assert row is not None
         return self._usage_from_row(row)
 
+    @integrity_checked
     def usage_report(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> dict[str, Any]:
@@ -1653,6 +1730,7 @@ class MemoryStore:
             row["cost_usd"] += item.cost_usd or 0.0
         return {"branch_id": branch_id, "session_id": session_id, "totals": totals, "by_operation": by_operation}
 
+    @integrity_checked
     def latest_context_usage(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> UsageSample | None:
@@ -1711,6 +1789,7 @@ class MemoryStore:
             )
         return increment_tokens, cumulative, True
 
+    @integrity_checked
     def hook_context_total(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> int:
@@ -1730,6 +1809,7 @@ class MemoryStore:
                     (branch_id, branch_id),
                 ).fetchone()
         return int(row["total"]) if row is not None else 0
+    @integrity_checked
     def latest_provider_context_usage(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> UsageSample | None:
@@ -1798,6 +1878,7 @@ class MemoryStore:
         assert result is not None
         return self._budget_policy_from_row(result)
 
+    @integrity_checked
     def get_budget_policy(self, *, branch_id: str = "main") -> BudgetPolicy:
         with self._lock:
             row = self._conn.execute(
@@ -1843,6 +1924,7 @@ class MemoryStore:
             )
         return True
 
+    @integrity_checked
     def governor_action_source(self, receipt_key: str) -> str | None:
         with self._lock:
             row = self._conn.execute(
@@ -1851,6 +1933,7 @@ class MemoryStore:
             ).fetchone()
         return str(row["source_event_id"]) if row is not None and row["source_event_id"] else None
 
+    @integrity_checked
     def last_governor_action_seq(
         self, branch_id: str, action: str, *, policy_id: str | None = None
     ) -> int | None:
@@ -1922,6 +2005,7 @@ class MemoryStore:
         assert row is not None
         return self._task_from_row(row)
 
+    @integrity_checked
     def get_task(self, task_key: str) -> TaskRecord:
         with self._lock:
             row = self._conn.execute(
@@ -1932,6 +2016,7 @@ class MemoryStore:
             raise KeyError(f"unknown task: {task_key}")
         return self._task_from_row(row)
 
+    @integrity_checked
     def list_tasks(self, *, status: str | None = None) -> tuple[TaskRecord, ...]:
         sql = (
             "SELECT t.* FROM task_versions t JOIN (SELECT task_key,MAX(version) version "
@@ -1965,6 +2050,7 @@ class MemoryStore:
                 (session_id, task_key, _now()),
             )
 
+    @integrity_checked
     def task_for_hook_session(self, agent: str, external_session_id: str) -> TaskRecord | None:
         with self._lock:
             row = self._conn.execute(

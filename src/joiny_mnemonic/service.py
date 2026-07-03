@@ -10,7 +10,7 @@ from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsol
 from .context_limits import ContextLimitConfig
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
-from .plugins import PluginRegistry
+from .plugins import PluginContext, PluginRegistry
 from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
@@ -44,7 +44,9 @@ class MemoryService:
         self.project_root = Path(project_root).resolve()
         self.store = MemoryStore(database)
         self.context_limits = ContextLimitConfig(self.project_root)
-        self.plugins = plugins or PluginRegistry()
+        self.plugins = plugins or PluginRegistry(
+            context=PluginContext(project_root=self.project_root, database_path=self.store.path)
+        )
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
         self.prompts = PromptAssembler(self.store, self.retrieval)
@@ -66,6 +68,19 @@ class MemoryService:
         return self.store.get_budget_policy(branch_id=branch_id)
 
     def close(self) -> None:
+        closed: set[int] = set()
+        for collection in (
+            self.plugins.semantic,
+            self.plugins.knowledge_graph,
+            self.plugins.kv_tiers,
+        ):
+            for plugin in collection.values():
+                if id(plugin) in closed:
+                    continue
+                close = getattr(plugin, "close", None)
+                if callable(close):
+                    close()
+                closed.add(id(plugin))
         self.store.close()
 
     def __enter__(self) -> MemoryService:
@@ -170,6 +185,40 @@ class MemoryService:
     def search(self, **values: Any) -> list[RetrievalHit]:
         return self.retrieval.search(RetrievalContext(**values))
 
+    def knowledge_neighbors(
+        self, entity: str, *, branch_id: str = "main", limit: int = 20
+    ) -> list[RetrievalHit]:
+        if limit < 1:
+            return []
+        records = self.store.list_memories(branch_id=branch_id)
+        filters = {
+            "branch_id": branch_id,
+            "allowed_memory_ids": tuple(record.id for record in records),
+        }
+        hits: list[RetrievalHit] = []
+        for plugin in self.plugins.knowledge_graph.values():
+            try:
+                sync = getattr(plugin, "sync", None)
+                if callable(sync):
+                    sync(records)
+                else:
+                    for record in records:
+                        plugin.project(record)
+                hits.extend(plugin.neighbors(entity, limit=limit, filters=filters))
+            except Exception as exc:
+                error = f"knowledge_graph:{plugin.name}: {exc}"
+                if error not in self.plugin_errors:
+                    self.plugin_errors.append(error)
+        deduplicated: dict[str, RetrievalHit] = {}
+        for hit in hits:
+            current = deduplicated.get(hit.id)
+            if current is None or hit.score > current.score:
+                deduplicated[hit.id] = hit
+        return sorted(
+            deduplicated.values(),
+            key=lambda hit: (hit.score, hit.created_at),
+            reverse=True,
+        )[:limit]
     def exact_source(self, memory_or_event_id: str) -> list[Event]:
         if memory_or_event_id.startswith("evt_"):
             return [self.store.get_event(memory_or_event_id)]

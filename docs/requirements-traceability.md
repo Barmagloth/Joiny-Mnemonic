@@ -9,15 +9,17 @@
 |---|---|---|
 | Append-only messages/tool calls/outputs/artifacts | `storage.py`: `events`, `artifacts`, `_append_event_in_tx` | `test_canonical_events_are_immutable_and_hash_chained` |
 | Нет update/delete единственной source copy | SQL triggers `events_no_*`, `artifacts_no_*` | тот же тест выполняет прямые SQL UPDATE/DELETE |
+| Automatic integrity rejection | startup verification, read version guard, MCP pre-dispatch verification | `AutomaticIntegrityTest` corrupts a canonical row |
 | Версии и provenance производных записей | `block_versions`, `memory_records`, `snapshots` | `test_typed_memory_requires_and_returns_exact_provenance`, snapshot tests |
 | Protected active blocks | `set_active_block`, `PromptAssembler.BLOCK_ORDER` | `test_active_blocks_are_versioned_and_never_compacted` |
 | Последние сообщения verbatim | `PromptAssembler._event_text` | prompt tests и exact content assertions |
 | Компактный index старой истории | historical index section, `RetrievalEngine.timeline` | prompt budget tests |
 | Prompt под token budget | `PromptAssembler.assemble` | active block и resume tests |
 | Index/state/summary/source | timeline, snapshot state, memory records, `exact_source` | provenance + snapshot tests |
-| Optional embeddings/graph/KV | `PluginRegistry`, entry-point groups | capability tests |
+| Optional embeddings/graph/KV | `PluginRegistry`, entry-point groups; semantic and graph packages shipped separately | plugin behavior and capability tests |
 | Time/text/file/type retrieval | FTS5/BM25 candidate SQL + `RetrievalEngine` rerank | `test_fts_retrieval_avoids_full_python_history_scan`, branch FTS test |
-| Semantic retrieval | Optional plugin protocol only | `capabilities.semantic_retrieval` is false without a plugin |
+| Semantic retrieval | `plugins/semantic-local` indexes memories and canonical events with cosine search | `test_semantic_plugin_finds_unmarked_event_without_keyword_overlap` |
+| Knowledge graph projection | `plugins/knowledge-graph` plus CLI/MCP/HTTP query surfaces | `test_knowledge_graph_is_queryable_and_branch_scoped` |
 | Exact source promotion | `promote_to_source`, `MemoryService.exact_source` | provenance test |
 | Точное актуальное содержимое файла | `SnapshotManager.read_project_source` + root containment | snapshot/source tests |
 | Query/freshness/risk/cost score | `_memory_hit` | retrieval unit path; параметры видны в metadata |
@@ -66,7 +68,7 @@
 | Task-level quality gate | external runner report is required; diagnostic report is rejected | task-runner separation test |
 | Одно ядро принимает события 4 agent families | adapter integration test |
 | Hook configs сохраняют существующие handlers | installer merge/idempotency test |
-| Full test command completes | 50 tests completed in the 2026-07-02 implementation run |
+| Full test command completes | 58 tests completed in the 2026-07-03 implementation run |
 
 ## Команды аудита
 

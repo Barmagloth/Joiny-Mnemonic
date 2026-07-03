@@ -160,6 +160,7 @@ class ServiceCase(unittest.TestCase):
                 memory_types=("decision",),
                 file="search.md",
                 include_events=True,
+                semantic=False,
             )
         hit = next(item for item in hits if item.id == record.id)
         self.assertEqual(hit.metadata["retrieval_backend"], "fts5-bm25")

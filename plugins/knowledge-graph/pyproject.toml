@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joiny-mnemonic-knowledge-graph"
+version = "0.1.0"
+description = "Provenance-aware SQLite entity graph plugin for Joiny-Mnemonic"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["joiny-mnemonic>=0.4.0"]
+license = {text = "MIT"}
+
+[project.entry-points."joiny_mnemonic.knowledge_graph"]
+sqlite-entity-graph = "joiny_mnemonic_knowledge_graph:create_plugin"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["joiny_mnemonic_knowledge_graph*"]

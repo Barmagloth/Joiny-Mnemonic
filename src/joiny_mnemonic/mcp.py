@@ -112,6 +112,18 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
+        "name": "memory_graph_neighbors",
+        "description": "Return provenance-backed knowledge-graph edges for an entity.",
+        "inputSchema": _schema(
+            {
+                "entity": {"type": "string"},
+                "branch_id": {"type": "string", "default": "main"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+            ["entity"],
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    },    {
         "name": "memory_source",
         "description": "Promote a memory result to its exact immutable source event(s).",
         "inputSchema": _schema({"id": {"type": "string"}}, ["id"]),
@@ -261,6 +273,7 @@ class MCPServer:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
     def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        self.service.store.assert_integrity()
         if name == "memory_append":
             return self.service.store.append_event(**arguments)
         if name == "memory_set_block":
@@ -269,6 +282,12 @@ class MCPServer:
             return self.service.derive_memory(**arguments)
         if name == "memory_search":
             return self.service.search(**arguments)
+        if name == "memory_graph_neighbors":
+            return self.service.knowledge_neighbors(
+                arguments["entity"],
+                branch_id=arguments.get("branch_id", "main"),
+                limit=arguments.get("limit", 20),
+            )
         if name == "memory_source":
             return self.service.exact_source(arguments["id"])
         if name == "memory_project_source":

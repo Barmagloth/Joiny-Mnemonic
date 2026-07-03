@@ -9,11 +9,13 @@ import urllib.request
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 from joiny_mnemonic.adapters import ADAPTERS, adapter_capabilities
 from joiny_mnemonic.api import make_handler
+from joiny_mnemonic.cli import build_parser
 from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION, serve_stdio
-from joiny_mnemonic.plugins import PluginRegistry
+from joiny_mnemonic.plugins import PluginContext, PluginRegistry
 from joiny_mnemonic.physical import (
     PhysicalCandidate,
     PhysicalMemoryGovernor,
@@ -37,6 +39,10 @@ class IntegrationTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
         self.assertEqual(config["project"]["name"], "joiny-mnemonic")
+        self.assertEqual(config["project"]["license"], {"file": "LICENSE"})
+        self.assertTrue(
+            (root / "LICENSE").read_text(encoding="utf-8").startswith("MIT License")
+        )
         self.assertEqual(
             config["project"]["scripts"],
             {
@@ -48,6 +54,9 @@ class IntegrationTest(unittest.TestCase):
             config["tool"]["setuptools"]["packages"]["find"]["include"],
             ["joiny_mnemonic*"],
         )
+        graph = build_parser().parse_args(["graph-neighbors", "SQLite"])
+        self.assertEqual(graph.command, "graph-neighbors")
+        self.assertEqual(graph.entity, "SQLite")
     def test_renamed_plugin_groups_override_legacy_groups(self) -> None:
         with patch("joiny_mnemonic.plugins.entry_points", return_value=()) as points:
             PluginRegistry(load_installed=True)
@@ -63,6 +72,29 @@ class IntegrationTest(unittest.TestCase):
                 "joiny_mnemonic.kv_tier",
             ],
         )
+    def test_entry_point_factory_receives_project_context(self) -> None:
+        context = PluginContext(
+            project_root=RUNTIME_ROOT,
+            database_path=RUNTIME_ROOT / "context.db",
+        )
+
+        class Point:
+            name = "context-aware"
+
+            @staticmethod
+            def load():
+                def factory(*, context):
+                    return SimpleNamespace(name="context-aware", context=context)
+
+                return factory
+
+        def points(*, group):
+            return (Point(),) if group == "joiny_mnemonic.semantic" else ()
+
+        with patch("joiny_mnemonic.plugins.entry_points", side_effect=points):
+            registry = PluginRegistry(context=context)
+        self.assertIs(registry.semantic["context-aware"].context, context)
+        self.assertEqual(registry.errors, [])
     def test_four_agent_families_use_the_same_core(self) -> None:
         native = {
             "claude-code": {"hook_event_name": "UserPromptSubmit", "prompt": "from claude"},
@@ -103,7 +135,9 @@ class IntegrationTest(unittest.TestCase):
             server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
         )
         tools = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-        self.assertIn("memory_append", {item["name"] for item in tools["result"]["tools"]})
+        names = {item["name"] for item in tools["result"]["tools"]}
+        self.assertIn("memory_append", names)
+        self.assertIn("memory_graph_neighbors", names)
         called = server.handle(
             {
                 "jsonrpc": "2.0",
@@ -210,6 +244,16 @@ class IntegrationTest(unittest.TestCase):
                 result = json.load(response)
             self.assertEqual(result["content"], "via HTTP")
             self.assertEqual(self.service.store.query_events()[-1].content, "via HTTP")
+            graph_body = json.dumps({"entity": "SQLite"}).encode()
+            graph_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/graph/neighbors",
+                data=graph_body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(graph_request, timeout=5) as response:
+                graph = json.load(response)
+            self.assertEqual(graph, [])
         finally:
             server.shutdown()
             server.server_close()

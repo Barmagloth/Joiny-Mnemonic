@@ -130,8 +130,19 @@ Entry-point группы:
 
 Legacy `llm_memory.*` entry-point groups are loaded first for compatibility; renamed `joiny_mnemonic.*` plugins take precedence by plugin name.
 
-Это только extension protocols. Репозиторий не включает built-in embedding model, graph database,
-GPU/CPU KV store, quantizer или offloader.
+Ядро оставляет тяжёлые зависимости опциональными, но репозиторий поставляет две отдельные
+реализации:
+
+- `plugins/semantic-local` — локальный sentence-transformer, persistent SQLite vector index,
+  cosine retrieval по typed memories и обычным canonical events;
+- `plugins/knowledge-graph` — persistent SQLite projection явных и маркированных entity
+  relations с `memory_id`, `source_event_ids` и branch-aware filtering.
+
+`MemoryService` передаёт plugin factory проектный root и путь канонической БД. Derived indexes
+хранятся отдельно под `.joiny-mnemonic/plugins/`, могут быть перестроены из канонических данных
+и никогда не становятся source of truth. Graph доступен через CLI `graph-neighbors`, MCP
+`memory_graph_neighbors` и HTTP `POST /v1/graph/neighbors`. KV tier, quantizer и offloader
+остаются только extension protocols.
 
 Ошибка plugin не отменяет уже подтверждённую запись ядра и попадает в `plugin_errors`.
 Отсутствующий plugin просто отключает соответствующую capability.
