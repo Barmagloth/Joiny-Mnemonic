@@ -98,6 +98,7 @@ joiny-mnemonic verify
 |---|---|---|
 | User-global hooks without fixed project path | env/OS-aware config resolution plus `hook --global` runtime Git-root discovery | `test_global_installers_resolve_user_paths_and_runtime_project` |
 | MCP does not imply automatic capture | first-connect warning plus configured/runtime capability fields | `test_capabilities_and_mcp_distinguish_installer_from_active_hooks` |
+| Keep MCP and hooks on one project database | host project environment plus project-relative database resolution and explicit path diagnostics | `test_claude_mcp_relative_paths_follow_claude_project_dir` |
 | Invalid hook config is visible | `hook_configuration_status=invalid-config` and dependent capabilities false | `test_capabilities_report_invalid_claude_settings` |
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
 | Configure different agents independently | project/global `context-limits.json` with seven model presets and explicit overrides | `test_seven_bundled_profiles_and_agent_specific_install_config` |

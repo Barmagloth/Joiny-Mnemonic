@@ -21,7 +21,11 @@ from .evaluation import (
 )
 from .hooks import install_hooks, process_hook, resolve_hook_project
 from .mcp import serve_stdio
-from .paths import resolve_project_database
+from .paths import (
+    resolve_project_database,
+    resolve_runtime_database,
+    resolve_runtime_project,
+)
 from .physical import PhysicalCandidate, PhysicalMemoryGovernor, Placement
 from .service import MemoryService
 
@@ -338,8 +342,8 @@ def run(args: argparse.Namespace) -> int:
             project_root = resolve_hook_project(value)
             database = resolve_project_database(project_root)
         else:
-            project_root = Path(args.project_root).resolve()
-            database = args.db or resolve_project_database(project_root)
+            project_root = resolve_runtime_project(args.project_root)
+            database = resolve_runtime_database(args.db, project_root)
         service = MemoryService(database, project_root=project_root)
         try:
             _print(process_hook(
@@ -352,8 +356,9 @@ def run(args: argparse.Namespace) -> int:
         finally:
             service.close()
         return 0
-    database = args.db or resolve_project_database(args.project_root)
-    service = MemoryService(database, project_root=args.project_root)
+    project_root = resolve_runtime_project(args.project_root)
+    database = resolve_runtime_database(args.db, project_root)
+    service = MemoryService(database, project_root=project_root)
     try:
         if args.command == "init":
             _print({"database": str(service.store.path), "initialized": True})

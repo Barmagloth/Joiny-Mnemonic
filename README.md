@@ -261,14 +261,17 @@ joiny-mnemonic --db .joiny-mnemonic/memory.db --project-root . mcp
 ```
 
 After installing the package, run the client registration command from the project root. MCP does
-not capture ordinary conversation text or durable marker lines by itself. Hooks and MCP may share
-one database after hooks are configured: hooks perform automatic capture; MCP exposes explicit
-memory, source, snapshot, resume, semantic search, graph and code-context tools.
+not capture ordinary conversation text or durable marker lines by itself. Hooks and MCP share one
+database after hooks are configured: hooks perform automatic capture; MCP exposes explicit memory,
+source, snapshot, resume, semantic search, graph and code-context tools. Relative `--project-root .`
+is resolved from the host project identity (`CLAUDE_PROJECT_DIR` for Claude Code), and a relative
+`--db` is then resolved against that project rather than the MCP launcher's process directory.
 
 On MCP initialization the server states this boundary. `memory_capabilities` reports
-`hook_installer_available`, `hooks_configured`, `hook_configuration_status` and
-`hook_runtime_verified`. Automatic ingestion/resume/tool-capture flags remain false until both the
-configuration is detected and this database has observed a native hook session.
+`hook_installer_available`, `hooks_configured`, `hook_configuration_status`,
+`hook_database_matches` and `hook_runtime_verified`. The response includes both active and expected
+database paths. Automatic ingestion/resume/tool-capture flags remain false until configuration is
+detected and this exact database has observed a native hook session.
 
 ```powershell
 # Claude Code: current project, private local configuration

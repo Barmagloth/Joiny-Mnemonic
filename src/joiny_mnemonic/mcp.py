@@ -305,6 +305,12 @@ class MCPServer:
                 f" Automatic hook capture is NOT active for {agent} ({status}). "
                 f"{action}"
             )
+        if details["hook_database_matches"] is False:
+            return instructions + (
+                f" Automatic capture is SPLIT across databases: hooks target "
+                f"{details['hook_expected_database_path']}, while this MCP server uses "
+                f"{details['active_database_path']}. Point MCP at the hook database."
+            )
         if not details["hook_runtime_verified"]:
             return instructions + (
                 f" Hook configuration is present for {agent}, but no delivery has been "

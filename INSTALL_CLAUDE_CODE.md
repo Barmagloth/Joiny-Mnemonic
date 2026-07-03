@@ -67,7 +67,9 @@ joiny-mnemonic verify
 - `hooks_configured=true` — команда найдена в валидном project/global config;
 - `hook_runtime_verified=true` — хотя бы один hook уже дошёл до этой базы.
 
-MCP сам по себе не сохраняет обычный диалог или маркеры `Goal:/Decision:/Fact:`. При первом
+MCP сам по себе не сохраняет обычный диалог или маркеры `Goal:/Decision:/Fact:`. Относительные
+`--project-root .` и `--db` разрешаются через `CLAUDE_PROJECT_DIR`, поэтому MCP и hooks используют
+одну проектную базу даже при запуске MCP из другого рабочего каталога. При первом
 MCP-подключении сервер явно предупреждает об этом и подсказывает `install-hooks`, если
 автоматический capture не настроен.
 

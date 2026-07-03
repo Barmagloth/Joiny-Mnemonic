@@ -11,6 +11,7 @@ from .context_limits import ContextLimitConfig
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
 from .plugins import PluginContext, PluginRegistry
+from .paths import resolve_project_database
 from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
@@ -323,6 +324,19 @@ class MemoryService:
                 "hook_runtime_verified": runtime_verified,
             }
         )
+        expected_database = resolve_project_database(self.project_root).resolve()
+        active_database = self.store.path
+        database_matches = (
+            None if str(active_database) == ":memory:"
+            else active_database.resolve() == expected_database
+        )
+        values.update(
+            {
+                "hook_expected_database_path": str(expected_database),
+                "active_database_path": str(active_database),
+                "hook_database_matches": database_matches,
+            }
+        )
         if installation["invalid_configs"]:
             paths = ", ".join(
                 item["path"] for item in installation["invalid_configs"]
@@ -339,6 +353,11 @@ class MemoryService:
             warnings.append(
                 f"{agent} hook configuration was detected, but this database has "
                 "not observed a hook delivery yet"
+            )
+        if installation["configured"] and database_matches is False:
+            warnings.append(
+                f"{agent} hooks target {expected_database}, but this process opened "
+                f"{active_database}; automatic capture and MCP search are split"
             )
         return values, warnings
 

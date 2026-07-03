@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 import threading
 import tomllib
 import unittest
@@ -17,6 +20,7 @@ from joiny_mnemonic.api import make_handler
 from joiny_mnemonic.hooks import install_hooks
 from joiny_mnemonic.cli import build_parser
 from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION, serve_stdio
+from joiny_mnemonic.paths import resolve_runtime_database, resolve_runtime_project
 from joiny_mnemonic.plugins import PluginContext, PluginRegistry
 from joiny_mnemonic.physical import (
     PhysicalCandidate,
@@ -151,6 +155,70 @@ class IntegrationTest(unittest.TestCase):
         self.assertFalse(called["result"]["isError"])
         self.assertEqual(self.service.store.query_events()[-1].content, "via MCP")
 
+    def test_claude_mcp_relative_paths_follow_claude_project_dir(self) -> None:
+        root = RUNTIME_ROOT / f"claude-project-dir-{uuid.uuid4().hex}"
+        project = root / "project"
+        foreign_cwd = root / "launcher-cwd"
+        (project / ".git").mkdir(parents=True)
+        foreign_cwd.mkdir(parents=True)
+        env = os.environ.copy()
+        env.update(
+            {
+                "CLAUDE_PROJECT_DIR": str(project),
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        payload = {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "claude-path-probe",
+            "cwd": str(project),
+            "prompt": "Decision: route-probe uses the project database",
+        }
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "joiny_mnemonic",
+                "--db",
+                ".joiny-mnemonic/memory.db",
+                "--project-root",
+                ".",
+                "hook",
+                "--agent",
+                "claude-code",
+            ],
+            cwd=foreign_cwd,
+            env=env,
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        project_database = project / ".joiny-mnemonic" / "memory.db"
+        self.assertTrue(project_database.exists())
+        self.assertFalse((foreign_cwd / ".joiny-mnemonic" / "memory.db").exists())
+        resolved_root = resolve_runtime_project(".", environ=env)
+        resolved_database = resolve_runtime_database(
+            ".joiny-mnemonic/memory.db", resolved_root
+        )
+        self.assertEqual(resolved_root, project.resolve())
+        self.assertEqual(Path(resolved_database), project_database.resolve())
+        service = MemoryService(resolved_database, project_root=resolved_root)
+        try:
+            self.assertIn(
+                "route-probe uses the project database",
+                {record.content for record in service.store.list_memories()},
+            )
+            capability = service.capabilities("claude-code")["agent"]
+            self.assertTrue(capability["hook_database_matches"])
+            self.assertEqual(
+                Path(capability["active_database_path"]), project_database.resolve()
+            )
+        finally:
+            service.close()
+
     def test_stdio_is_newline_delimited_json_only(self) -> None:
         incoming = io.BytesIO(
             (
@@ -252,6 +320,36 @@ class IntegrationTest(unittest.TestCase):
                 observed = service.capabilities("claude-code")["agent"]
                 self.assertTrue(observed["hook_runtime_verified"])
                 self.assertTrue(observed["event_ingestion"])
+        finally:
+            service.close()
+
+    def test_mcp_reports_hook_database_split(self) -> None:
+        root = RUNTIME_ROOT / f"hook-database-split-{uuid.uuid4().hex}"
+        root.mkdir(parents=True)
+        install_hooks("claude-code", root)
+        service = MemoryService(root / "alternate.db", project_root=root)
+        try:
+            capabilities = service.capabilities("claude-code")
+            agent = capabilities["agent"]
+            self.assertFalse(agent["hook_database_matches"])
+            self.assertTrue(
+                any("automatic capture and MCP search are split" in warning
+                    for warning in capabilities["warnings"])
+            )
+            initialized = MCPServer(service).handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": PROTOCOL_VERSION,
+                        "clientInfo": {"name": "Claude Code", "version": "test"},
+                    },
+                }
+            )
+            self.assertIn(
+                "SPLIT across databases", initialized["result"]["instructions"]
+            )
         finally:
             service.close()
 

@@ -152,9 +152,12 @@ python -m joiny_mnemonic --db <project>/.joiny-mnemonic/memory.db \
 ```
 
 MCP alone does not intercept the transcript or persist marker lines merely because they appear in
-chat. The initialize response says so on every new MCP connection. When the client name identifies
-Claude Code, Codex, OpenCode or OpenHands, it also reports whether automatic capture is absent,
-configured but not yet observed, or observed in the current database.
+chat. The initialize response says so on every new MCP connection. For stdio hosts, a relative
+`--project-root .` uses the host-provided project environment (`CLAUDE_PROJECT_DIR` in Claude Code),
+and relative `--db` paths are anchored to that resolved root. This prevents hooks and MCP from
+silently opening two databases when the host launches the MCP process from another directory. When
+the client name identifies Claude Code, Codex, OpenCode or OpenHands, it also reports whether
+automatic capture is absent, database-split, configured but not yet observed, or observed.
 
 `memory_capabilities` separates installer availability from active state:
 
@@ -162,6 +165,8 @@ configured but not yet observed, or observed in the current database.
 - `hooks_configured`: a generated project/global command was found in valid host config;
 - `hook_configuration_status`: `not-configured`, `invalid-config`, `configured`, or
   `configured-with-invalid-config`;
+- `hook_database_matches`: the MCP/CLI process opened the project database targeted by hooks;
+- `active_database_path` / `hook_expected_database_path`: exact paths for diagnosing split state;
 - `hook_runtime_verified`: at least one native hook session reached this database.
 
 Until valid configuration is detected and a hook delivery is observed, automatic
