@@ -6,6 +6,7 @@ import threading
 import tomllib
 import unittest
 import urllib.request
+import uuid
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 
 from joiny_mnemonic.adapters import ADAPTERS, adapter_capabilities
 from joiny_mnemonic.api import make_handler
+from joiny_mnemonic.hooks import install_hooks
 from joiny_mnemonic.cli import build_parser
 from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION, serve_stdio
 from joiny_mnemonic.plugins import PluginContext, PluginRegistry
@@ -188,6 +190,91 @@ class IntegrationTest(unittest.TestCase):
         usage = server._call_tool("memory_usage", {"branch_id": task.branch_id})
         self.assertIn("totals", usage)
 
+    def test_capabilities_and_mcp_distinguish_installer_from_active_hooks(self) -> None:
+        root = RUNTIME_ROOT / f"hook-status-{uuid.uuid4().hex}"
+        root.mkdir(parents=True)
+        global_path = root / "isolated-global" / "settings.json"
+        service = MemoryService(":memory:", project_root=root)
+        try:
+            with patch(
+                "joiny_mnemonic.hooks.resolve_global_install_path",
+                return_value=global_path,
+            ):
+                missing = service.capabilities("claude-code")
+                agent = missing["agent"]
+                self.assertTrue(agent["hook_installer_available"])
+                self.assertFalse(agent["hooks_configured"])
+                self.assertFalse(agent["event_ingestion"])
+                self.assertFalse(agent["hook_runtime_verified"])
+                self.assertTrue(missing["warnings"])
+
+                server = MCPServer(service)
+                initialized = server.handle(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": PROTOCOL_VERSION,
+                            "clientInfo": {"name": "Claude Code", "version": "test"},
+                        },
+                    }
+                )
+                instructions = initialized["result"]["instructions"]
+                self.assertIn("MCP alone does not capture", instructions)
+                self.assertIn("NOT active", instructions)
+                self.assertIn("install-hooks claude-code", instructions)
+
+                install_hooks("claude-code", root)
+                configured = service.capabilities("claude-code")["agent"]
+                self.assertTrue(configured["hooks_configured"])
+                self.assertFalse(configured["event_ingestion"])
+                self.assertFalse(configured["hook_runtime_verified"])
+
+                configured_server = MCPServer(service)
+                configured_init = configured_server.handle(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": PROTOCOL_VERSION,
+                            "clientInfo": {"name": "Claude Code", "version": "test"},
+                        },
+                    }
+                )
+                self.assertIn(
+                    "no delivery has been observed",
+                    configured_init["result"]["instructions"],
+                )
+
+                service.store.hook_session("claude-code", "observed-session")
+                observed = service.capabilities("claude-code")["agent"]
+                self.assertTrue(observed["hook_runtime_verified"])
+                self.assertTrue(observed["event_ingestion"])
+        finally:
+            service.close()
+
+    def test_capabilities_report_invalid_claude_settings(self) -> None:
+        root = RUNTIME_ROOT / f"invalid-capability-{uuid.uuid4().hex}"
+        settings = root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text('{"hooks": [] "broken": true}', encoding="utf-8")
+        service = MemoryService(":memory:", project_root=root)
+        try:
+            with patch(
+                "joiny_mnemonic.hooks.resolve_global_install_path",
+                return_value=root / "isolated-global" / "settings.json",
+            ):
+                result = service.capabilities("claude-code")
+            agent = result["agent"]
+            self.assertEqual(agent["hook_configuration_status"], "invalid-config")
+            self.assertFalse(agent["hook_config_valid"])
+            self.assertFalse(agent["hooks_configured"])
+            self.assertFalse(agent["event_ingestion"])
+            self.assertIn(str(settings.resolve()), result["warnings"][0])
+        finally:
+            service.close()
     def test_physical_memory_governor_compares_store_and_recompute(self) -> None:
         candidates = [
             PhysicalCandidate(Placement.TEXT_RECOMPUTE, 0, 0, 100, 5),

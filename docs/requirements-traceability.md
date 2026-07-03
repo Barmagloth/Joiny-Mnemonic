@@ -68,7 +68,9 @@
 | Task-level quality gate | external runner report is required; diagnostic report is rejected | task-runner separation test |
 | Одно ядро принимает события 4 agent families | adapter integration test |
 | Hook configs сохраняют существующие handlers | installer merge/idempotency test |
-| Full test command completes | 58 tests completed in the 2026-07-03 implementation run |
+| Invalid host JSON is never overwritten | pre-validation before limits/config writes | `test_invalid_claude_json_is_rejected_without_partial_install` |
+| Valid host JSON is recoverable | verified `.joiny-mnemonic.bak`, post-write validation and rollback | `test_failed_claude_write_restores_verified_backup` |
+| Full test command completes | 62 tests completed in the 2026-07-03 implementation run |
 
 ## Команды аудита
 
@@ -95,6 +97,8 @@ joiny-mnemonic verify
 | Requirement | Implementation | Verification |
 |---|---|---|
 | User-global hooks without fixed project path | env/OS-aware config resolution plus `hook --global` runtime Git-root discovery | `test_global_installers_resolve_user_paths_and_runtime_project` |
+| MCP does not imply automatic capture | first-connect warning plus configured/runtime capability fields | `test_capabilities_and_mcp_distinguish_installer_from_active_hooks` |
+| Invalid hook config is visible | `hook_configuration_status=invalid-config` and dependent capabilities false | `test_capabilities_report_invalid_claude_settings` |
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
 | Configure different agents independently | project/global `context-limits.json` with seven model presets and explicit overrides | `test_seven_bundled_profiles_and_agent_specific_install_config` |
 | Count context before reducer/native compaction | raw `UserPromptSubmit` and `PostToolUse` increments with immutable receipts | `test_raw_hook_counter_warns_before_native_compaction_and_is_idempotent` |

@@ -279,7 +279,72 @@ class MemoryService:
         )
         return packet
 
-    def capabilities(self, agent: str | None = None, supplied: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _agent_capabilities(
+        self, agent: str, supplied: dict[str, Any] | None = None
+    ) -> tuple[dict[str, Any], list[str]]:
+        from .hooks import hook_installation_status
+
+        values = adapter_capabilities(agent, supplied)
+        warnings: list[str] = []
+        try:
+            installation = hook_installation_status(self.project_root, agent)
+        except ValueError:
+            installation = {
+                "status": "unsupported",
+                "configured": False,
+                "config_valid": True,
+                "checked_paths": [],
+                "configured_paths": [],
+                "configured_scopes": [],
+                "invalid_configs": [],
+                "install_command": None,
+            }
+        runtime_verified = self.store.has_hook_activity(agent)
+        if supplied is None:
+            effective = installation["configured"] and runtime_verified
+            for key in (
+                "event_ingestion",
+                "automatic_resume",
+                "tool_capture",
+                "active_compaction",
+            ):
+                values[key] = bool(values[key] and effective)
+        values.update(
+            {
+                "hook_installer_available": values["hook_installer"],
+                "hooks_configured": installation["configured"],
+                "hook_configuration_status": installation["status"],
+                "hook_config_valid": installation["config_valid"],
+                "hook_checked_paths": installation["checked_paths"],
+                "hook_configured_paths": installation["configured_paths"],
+                "hook_configured_scopes": installation["configured_scopes"],
+                "hook_invalid_configs": installation["invalid_configs"],
+                "hook_install_command": installation["install_command"],
+                "hook_runtime_verified": runtime_verified,
+            }
+        )
+        if installation["invalid_configs"]:
+            paths = ", ".join(
+                item["path"] for item in installation["invalid_configs"]
+            )
+            warnings.append(
+                f"{agent} hook configuration contains invalid JSON or is unreadable: {paths}"
+            )
+        if not installation["configured"] and installation["status"] != "unsupported":
+            warnings.append(
+                f"{agent} automatic capture is not configured; MCP alone does not "
+                "capture ordinary conversation text or durable marker lines"
+            )
+        elif installation["configured"] and not runtime_verified:
+            warnings.append(
+                f"{agent} hook configuration was detected, but this database has "
+                "not observed a hook delivery yet"
+            )
+        return values, warnings
+
+    def capabilities(
+        self, agent: str | None = None, supplied: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         result: dict[str, Any] = {
             "core": {
                 "append_only": True,
@@ -305,13 +370,19 @@ class MemoryService:
                 "cli": True,
             },
             "plugin_errors": list(self.plugin_errors),
+            "warnings": [],
         }
         if agent:
-            result["agent"] = adapter_capabilities(agent, supplied)
+            agent_values, warnings = self._agent_capabilities(agent, supplied)
+            result["agent"] = agent_values
+            result["warnings"].extend(warnings)
         else:
-            result["adapters"] = {
-                name: adapter_capabilities(name) for name in sorted(ADAPTERS)
-            }
+            adapters: dict[str, Any] = {}
+            for name in sorted(ADAPTERS):
+                values, warnings = self._agent_capabilities(name)
+                adapters[name] = values
+                result["warnings"].extend(warnings)
+            result["adapters"] = adapters
         return result
 
     def verify(self) -> dict[str, Any]:

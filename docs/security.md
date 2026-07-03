@@ -27,6 +27,13 @@ Retrieved content оборачивается в отдельный тег с `tr
 Regex-фильтр не заменяет специализированный DLP. Для чувствительных окружений нужно добавить
 локальные правила и ограничить права на каталог БД.
 
+## Host configuration writes
+
+Claude, Codex and OpenHands JSON files are host-owned security-sensitive configuration. The hook
+installer validates the existing JSON before any related write, creates a byte-for-byte
+`.joiny-mnemonic.bak`, durably writes a temporary document where supported, validates the emitted
+JSON, and restores the original bytes on failure. Invalid input is never auto-repaired because that
+could silently discard unrelated user configuration.
 ## Integrity
 
 Каждое событие имеет `content_hash`, `previous_hash` и `chain_hash`. Артефакты и tool-output

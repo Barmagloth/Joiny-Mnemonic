@@ -26,6 +26,11 @@ joiny-mnemonic --project-root . install-hooks claude-code
 `.joiny-mnemonic/memory.db`. Если уже существует старая `.llm-memory/memory.db`, она
 используется на месте без разрушительной миграции.
 
+Перед записью существующий `settings.json` проверяется. Невалидный JSON не изменяется, а
+команда завершается с указанием строки и столбца ошибки. Валидный файл копируется в
+`settings.json.joiny-mnemonic.bak`; после записи новый JSON проверяется, а при ошибке
+восстанавливается исходная версия.
+
 ## 3. Глобальная установка
 
 Один пользовательский hook можно установить для всех проектов:
@@ -45,16 +50,26 @@ joiny-mnemonic install-hooks claude-code --global
 - `UserPromptSubmit` и `PostToolUse` сохраняются идемпотентно.
 - Сырые токены этих событий считаются до редукции tool output.
 - При достижении раннего порога создаётся снапшот и внедряется
-  `[EARLY CONTEXT WARNING]`, до нативного сжатия Claude Code.
+  `[CONTEXT CHECKPOINT]`, до нативного сжатия Claude Code.
 - Полный исходный tool output остаётся доступен через exact-source promotion.
 
 ## 5. Проверка
 
 ```powershell
-joiny-mnemonic capabilities
+joiny-mnemonic capabilities --agent claude-code
 joiny-mnemonic timeline
 joiny-mnemonic verify
 ```
+
+В `memory_capabilities`/CLI нужно различать:
+
+- `hook_installer_available=true` — установщик существует;
+- `hooks_configured=true` — команда найдена в валидном project/global config;
+- `hook_runtime_verified=true` — хотя бы один hook уже дошёл до этой базы.
+
+MCP сам по себе не сохраняет обычный диалог или маркеры `Goal:/Decision:/Fact:`. При первом
+MCP-подключении сервер явно предупреждает об этом и подсказывает `install-hooks`, если
+автоматический capture не настроен.
 
 Создать снапшот вручную:
 

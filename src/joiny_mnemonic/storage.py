@@ -1850,7 +1850,6 @@ class MemoryStore:
         hard_limit_ratio: float = 0.90,
         min_action_interval_events: int = 20,
     ) -> BudgetPolicy:
-        ratios = (snapshot_ratio, compact_ratio, handoff_ratio, hard_limit_ratio)
         if context_window_tokens <= 0 or min_action_interval_events < 0:
             raise ValueError("budget sizes and intervals must be positive")
         if not (0 < snapshot_ratio < compact_ratio < handoff_ratio < hard_limit_ratio <= 1):
@@ -2049,6 +2048,15 @@ class MemoryStore:
                 "INSERT INTO task_session_bindings(session_id,task_key,created_at) VALUES(?,?,?)",
                 (session_id, task_key, _now()),
             )
+
+    @integrity_checked
+    def has_hook_activity(self, agent: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM hook_sessions WHERE agent=? LIMIT 1",
+                (agent,),
+            ).fetchone()
+        return row is not None
 
     @integrity_checked
     def task_for_hook_session(self, agent: str, external_session_id: str) -> TaskRecord | None:

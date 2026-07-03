@@ -133,6 +133,11 @@ hook payload's working directory to the nearest Git root and uses that project's
 `XDG_CONFIG_HOME` are honored. OpenHands currently supports repository hooks only, so
 `install-hooks openhands --global` fails explicitly.
 
+Before changing a host-owned JSON file, the installer parses and validates the existing document.
+Invalid JSON aborts the installation before the limits file is touched. A valid existing file is
+backed up as `<config>.joiny-mnemonic.bak`; the new document is validated after writing and the
+backup is restored if writing or validation fails.
+
 Installation also writes the selected agent/model limits to
 `.joiny-mnemonic/context-limits.json`. Re-running an installer without limit arguments preserves
 that agent's existing values. Use `joiny-mnemonic context-profiles` to inspect the seven bundled
@@ -255,9 +260,15 @@ joiny-mnemonic serve --host 127.0.0.1 --port 8765
 joiny-mnemonic --db .joiny-mnemonic/memory.db --project-root . mcp
 ```
 
-After installing the package, run the client registration command from the project root. Hooks and
-MCP may be enabled together against the same database: hooks capture the session automatically;
-MCP exposes explicit memory, source, snapshot, resume, semantic search, graph and code-context tools.
+After installing the package, run the client registration command from the project root. MCP does
+not capture ordinary conversation text or durable marker lines by itself. Hooks and MCP may share
+one database after hooks are configured: hooks perform automatic capture; MCP exposes explicit
+memory, source, snapshot, resume, semantic search, graph and code-context tools.
+
+On MCP initialization the server states this boundary. `memory_capabilities` reports
+`hook_installer_available`, `hooks_configured`, `hook_configuration_status` and
+`hook_runtime_verified`. Automatic ingestion/resume/tool-capture flags remain false until both the
+configuration is detected and this database has observed a native hook session.
 
 ```powershell
 # Claude Code: current project, private local configuration

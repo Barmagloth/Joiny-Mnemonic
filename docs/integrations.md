@@ -30,7 +30,11 @@ joiny-mnemonic --project-root . install-hooks openhands --profile gpt-5.2-codex
 ```
 
 Installers merge their handlers into existing JSON and preserve unrelated hooks. Running the same
-installer twice is idempotent.
+installer twice is idempotent. Existing JSON is parsed before any installation side effect; a
+syntax error names the file, line and column and leaves both the host config and context limits
+unchanged. Before replacing a valid JSON config, the installer writes and verifies
+`<config>.joiny-mnemonic.bak`. The emitted JSON is parsed after writing; any write/validation
+failure restores the original bytes.
 
 | Host | Generated file | Capture | Resume injection | Compaction continuity |
 |---|---|---|---|---|
@@ -147,7 +151,22 @@ python -m joiny_mnemonic --db <project>/.joiny-mnemonic/memory.db \
   --project-root <project> mcp
 ```
 
-MCP alone does not intercept the transcript.
+MCP alone does not intercept the transcript or persist marker lines merely because they appear in
+chat. The initialize response says so on every new MCP connection. When the client name identifies
+Claude Code, Codex, OpenCode or OpenHands, it also reports whether automatic capture is absent,
+configured but not yet observed, or observed in the current database.
+
+`memory_capabilities` separates installer availability from active state:
+
+- `hook_installer_available`: this host has an installer;
+- `hooks_configured`: a generated project/global command was found in valid host config;
+- `hook_configuration_status`: `not-configured`, `invalid-config`, `configured`, or
+  `configured-with-invalid-config`;
+- `hook_runtime_verified`: at least one native hook session reached this database.
+
+Until valid configuration is detected and a hook delivery is observed, automatic
+ingestion/resume/tool-capture capabilities remain false and the response includes an explicit
+install, repair, or verification warning.
 ## Usage, task and governor fields
 
 Hook payloads may include provider `usage` (`input_tokens`, `output_tokens`, cache fields,

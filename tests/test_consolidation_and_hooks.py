@@ -4,7 +4,9 @@ import json
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
+from joiny_mnemonic import hooks as hook_module
 from joiny_mnemonic.hooks import install_hooks, process_hook
 from joiny_mnemonic.evaluation import (
     EvaluationTask,
@@ -181,17 +183,22 @@ class ConsolidationAndHooksTest(unittest.TestCase):
                 ]
             }
         }
-        (root / ".claude" / "settings.json").write_text(json.dumps(existing), encoding="utf-8")
+        claude_settings = root / ".claude" / "settings.json"
+        original_claude = json.dumps(existing).encode("utf-8")
+        claude_settings.write_bytes(original_claude)
         legacy_plugin = root / ".opencode" / "plugins" / "llm-memory.js"
         legacy_plugin.parent.mkdir(parents=True)
         legacy_plugin.write_text("export const LlmMemoryPlugin = () => {}; // -m llm_memory", encoding="utf-8")
 
-        install_hooks("claude-code", root)
+        claude_install = install_hooks("claude-code", root)
         install_hooks("codex", root)
         install_hooks("openhands", root)
         install_hooks("opencode", root)
 
-        claude = json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        self.assertIsNotNone(claude_install.backup_file)
+        backup = Path(claude_install.backup_file)
+        self.assertEqual(backup.read_bytes(), original_claude)
+        claude = json.loads(claude_settings.read_text(encoding="utf-8"))
         self.assertEqual(claude["hooks"]["Stop"][0]["hooks"][0]["command"], "existing")
         self.assertNotIn("llm_memory", json.dumps(claude))
         self.assertIn("PostCompact", claude["hooks"])
@@ -205,6 +212,54 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertIn("intentionally inert", legacy_plugin.read_text(encoding="utf-8"))
         self.assertNotIn("LlmMemoryPlugin", legacy_plugin.read_text(encoding="utf-8"))
 
+    def test_invalid_claude_json_is_rejected_without_partial_install(self) -> None:
+        root = RUNTIME_ROOT / f"invalid-claude-{uuid.uuid4().hex}"
+        settings = root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        invalid = b'{"hooks": {"Stop": []} "permissions": {}}'
+        settings.write_bytes(invalid)
+
+        with self.assertRaisesRegex(
+            ValueError, r"invalid JSON at line 1, column .*not modified"
+        ):
+            install_hooks("claude-code", root)
+
+        self.assertEqual(settings.read_bytes(), invalid)
+        self.assertFalse(
+            settings.with_suffix(".json.joiny-mnemonic.bak").exists()
+        )
+        self.assertFalse((root / ".joiny-mnemonic" / "context-limits.json").exists())
+    def test_failed_claude_write_restores_verified_backup(self) -> None:
+        root = RUNTIME_ROOT / f"rollback-claude-{uuid.uuid4().hex}"
+        settings = root / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        original = b'{"permissions": {"allow": ["Read"]}}'
+        settings.write_bytes(original)
+        real_write = hook_module._durable_write
+        failed = False
+
+        def fail_target_once(path: Path, data: bytes) -> None:
+            nonlocal failed
+            if path == settings and not failed:
+                failed = True
+                path.write_bytes(b'{"partial":')
+                raise OSError("simulated interrupted settings write")
+            real_write(path, data)
+
+        with (
+            patch.object(Path, "replace", side_effect=PermissionError),
+            patch.object(hook_module, "_durable_write", side_effect=fail_target_once),
+            self.assertRaisesRegex(OSError, "simulated interrupted"),
+        ):
+            install_hooks("claude-code", root)
+
+        self.assertTrue(failed)
+        self.assertEqual(settings.read_bytes(), original)
+        backup = settings.with_suffix(".json.joiny-mnemonic.bak")
+        self.assertEqual(backup.read_bytes(), original)
+        self.assertEqual(json.loads(settings.read_text(encoding="utf-8"))["permissions"], {
+            "allow": ["Read"]
+        })
     def test_task_runner_evaluation_is_distinct_from_evidence_diagnostic(self) -> None:
         event = self.service.store.append_event(
             kind="message", role="user", content="Decision: use SQLite"

@@ -2,20 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .adapters import adapter_capabilities
-from .consolidation import EvidenceConsolidator
 from .context_limits import ContextLimitConfig
-from .models import Event
 from .paths import resolve_project_database
 from .service import MemoryService
 
@@ -145,6 +142,18 @@ def resolve_global_install_path(
         )
     raise ValueError(f"unsupported hook installer: {agent}")
 
+
+def resolve_project_install_path(agent: str, project_root: str | Path) -> Path:
+    root = Path(project_root).expanduser().resolve()
+    if agent == "claude-code":
+        return root / ".claude" / "settings.json"
+    if agent == "codex":
+        return root / ".codex" / "hooks.json"
+    if agent == "opencode":
+        return root / ".opencode" / "plugins" / "joiny-mnemonic.js"
+    if agent == "openhands":
+        return root / ".openhands" / "hooks.json"
+    raise ValueError(f"unsupported hook installer: {agent}")
 
 def _task_key(value: dict[str, Any]) -> str | None:
     for key in ("task_id", "taskId", "task_key", "taskKey"):
@@ -339,6 +348,7 @@ class InstallResult:
     scope: str = "project"
     profile: str | None = None
     limits_file: str | None = None
+    backup_file: str | None = None
     notes: tuple[str, ...] = ()
 
 
@@ -374,27 +384,171 @@ def _command(
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
-    value = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        source = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            f"{path} is not valid UTF-8 JSON; file was not modified"
+        ) from exc
+    try:
+        value = json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{path} contains invalid JSON at line {exc.lineno}, "
+            f"column {exc.colno}; file was not modified"
+        ) from exc
     if not isinstance(value, dict):
-        raise ValueError(f"{path} must contain a JSON object")
+        raise ValueError(f"{path} must contain a JSON object; file was not modified")
     return value
 
 
-def _write_json(path: Path, value: dict[str, Any]) -> None:
+def _durable_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    data = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-    temporary.write_text(data, encoding="utf-8")
-    try:
-        temporary.replace(path)
-    except PermissionError:
-        # Some Windows network/project filesystems reject replace-over-existing.
-        path.write_text(data, encoding="utf-8")
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+    with path.open("wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
 
+
+def _json_backup_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".joiny-mnemonic.bak")
+
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_json(path: Path, value: dict[str, Any]) -> Path | None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    rendered = json.loads(data)
+    if not isinstance(rendered, dict):
+        raise ValueError("serialized hook configuration must be a JSON object")
+
+    original = path.read_bytes() if path.exists() else None
+    backup: Path | None = None
+    if original is not None:
+        _read_json(path)
+        backup = _json_backup_path(path)
+        backup_temporary = backup.with_suffix(backup.suffix + ".tmp")
+        _durable_write(backup_temporary, original)
+        try:
+            backup_temporary.replace(backup)
+        except PermissionError:
+            _durable_write(backup, original)
+            _safe_unlink(backup_temporary)
+        if backup.read_bytes() != original:
+            raise OSError(f"failed to verify backup for {path}")
+
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    try:
+        _durable_write(temporary, data)
+        try:
+            temporary.replace(path)
+        except PermissionError:
+            # Network filesystems may reject replace-over-existing. The verified
+            # backup makes this fallback recoverable.
+            _durable_write(path, data)
+            _safe_unlink(temporary)
+        _read_json(path)
+    except Exception:
+        try:
+            if original is None:
+                _safe_unlink(path)
+            else:
+                _durable_write(path, original)
+                _read_json(path)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                f"failed to write {path} and failed to restore its verified backup"
+            ) from restore_exc
+        raise
+    finally:
+        _safe_unlink(temporary)
+    return backup
+
+
+def _contains_hook_command(value: Any, agent: str) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_hook_command(item, agent) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_hook_command(item, agent) for item in value)
+    if not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    return (
+        ("joiny_mnemonic" in folded or "joiny-mnemonic" in folded)
+        and "hook" in folded
+        and agent.casefold() in folded
+    )
+
+
+def hook_installation_status(
+    project_root: str | Path,
+    agent: str,
+    *,
+    environ: dict[str, str] | None = None,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
+    root = Path(project_root).expanduser().resolve()
+    candidates: list[tuple[str, Path]] = [
+        ("project", resolve_project_install_path(agent, root))
+    ]
+    if agent != "openhands":
+        candidates.append(
+            (
+                "global",
+                resolve_global_install_path(agent, environ=environ, home=home),
+            )
+        )
+
+    checked: list[str] = []
+    configured: list[str] = []
+    configured_scopes: list[str] = []
+    invalid: list[dict[str, str]] = []
+    seen: set[Path] = set()
+    for scope, path in candidates:
+        resolved = path.expanduser().resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        checked.append(str(resolved))
+        if not resolved.exists():
+            continue
+        try:
+            if agent == "opencode":
+                value: Any = resolved.read_text(encoding="utf-8")
+            else:
+                value = _read_json(resolved)
+        except (OSError, ValueError) as exc:
+            invalid.append({"path": str(resolved), "error": str(exc)})
+            continue
+        if _contains_hook_command(value, agent):
+            configured.append(str(resolved))
+            configured_scopes.append(scope)
+
+    is_configured = bool(configured)
+    if is_configured and invalid:
+        status = "configured-with-invalid-config"
+    elif is_configured:
+        status = "configured"
+    elif invalid:
+        status = "invalid-config"
+    else:
+        status = "not-configured"
+    command = f'joiny-mnemonic --project-root "{root}" install-hooks {agent}'
+    return {
+        "status": status,
+        "configured": is_configured,
+        "config_valid": not invalid,
+        "checked_paths": checked,
+        "configured_paths": configured,
+        "configured_scopes": configured_scopes,
+        "invalid_configs": invalid,
+        "install_command": command,
+    }
 
 def _upsert_hook_command(
     groups: list[Any], command: str, *, typed: bool
@@ -429,7 +583,7 @@ def _merge_command_hooks(
     events: dict[str, str | None],
     *,
     nested: bool,
-) -> None:
+) -> Path | None:
     config = _read_json(path)
     hooks = config.setdefault("hooks", {}) if nested else config
     if not isinstance(hooks, dict):
@@ -445,10 +599,10 @@ def _merge_command_hooks(
         if matcher is not None:
             group["matcher"] = matcher
         groups.append(group)
-    _write_json(path, config)
+    return _write_json(path, config)
 
 
-def _merge_openhands(path: Path, command: str) -> None:
+def _merge_openhands(path: Path, command: str) -> Path | None:
     config = _read_json(path)
     for event, matcher in {
         "session_start": "*",
@@ -465,7 +619,7 @@ def _merge_openhands(path: Path, command: str) -> None:
         if matcher is not None:
             group["matcher"] = matcher
         groups.append(group)
-    _write_json(path, config)
+    return _write_json(path, config)
 
 def _opencode_plugin(command: str) -> str:
     encoded = json.dumps(command)
@@ -534,7 +688,12 @@ def install_hooks(
         root = Path(project_root or ".").resolve()
         if not root.is_dir():
             raise FileNotFoundError(root)
-        path = Path()
+        path = resolve_project_install_path(agent, root)
+
+    # Validate host-owned JSON before writing the limits file or any hook config.
+    if agent in {"claude-code", "codex", "openhands"}:
+        _read_json(path)
+
     limits = ContextLimitConfig(root or Path.cwd(), environ=environ, home=home)
     limits_path, limits_policy = limits.configure_agent(
         agent,
@@ -566,20 +725,19 @@ def install_hooks(
         "PreCompact": "manual|auto",
         "PostCompact": "manual|auto",
     }
+    backup_path: Path | None = None
     if agent == "claude-code":
-        if not global_scope:
-            assert root is not None
-            path = root / ".claude" / "settings.json"
-        _merge_command_hooks(path, command, lifecycle_events, nested=True)
+        backup_path = _merge_command_hooks(
+            path, command, lifecycle_events, nested=True
+        )
         notes = (
             "Global hooks resolve project root from each native hook payload."
             if global_scope else "Project settings are shared with this repository."
         ,)
     elif agent == "codex":
-        if not global_scope:
-            assert root is not None
-            path = root / ".codex" / "hooks.json"
-        _merge_command_hooks(path, command, lifecycle_events, nested=True)
+        backup_path = _merge_command_hooks(
+            path, command, lifecycle_events, nested=True
+        )
         notes = (
             "User-level Codex hooks load independently of project trust and resolve each project at runtime.",
         ) if global_scope else (
@@ -590,13 +748,9 @@ def install_hooks(
             # resolve_global_install_path already rejects this; keep the guard explicit.
             raise ValueError("OpenHands does not support user-global hook files")
         assert root is not None
-        path = root / ".openhands" / "hooks.json"
-        _merge_openhands(path, command)
+        backup_path = _merge_openhands(path, command)
         notes = ()
     elif agent == "opencode":
-        if not global_scope:
-            assert root is not None
-            path = root / ".opencode" / "plugins" / "joiny-mnemonic.js"
         path.parent.mkdir(parents=True, exist_ok=True)
         legacy_path = path.with_name("llm-memory.js")
         if legacy_path.exists():
@@ -623,6 +777,7 @@ def install_hooks(
         scope="global" if global_scope else "project",
         profile=limits_policy.profile,
         limits_file=str(limits_path),
+        backup_file=str(backup_path) if backup_path is not None else None,
         notes=notes + (
             f"Context profile {limits_policy.profile} is stored in {limits_path}.",
         ),
