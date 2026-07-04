@@ -219,6 +219,63 @@ class IntegrationTest(unittest.TestCase):
         finally:
             service.close()
 
+    def test_hook_cli_accepts_utf8_bom_from_powershell_pipe(self) -> None:
+        root = RUNTIME_ROOT / f"hook-utf8-bom-{uuid.uuid4().hex}"
+        project = root / "project"
+        project.mkdir(parents=True)
+        database = project / ".joiny-mnemonic" / "memory.db"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        marker = "utf8-bom hook payload reached durable memory"
+        payload = {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "powershell-bom-probe",
+            "cwd": str(project),
+            "prompt": f"Fact: {marker}",
+        }
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "joiny_mnemonic",
+                "--db",
+                str(database),
+                "--project-root",
+                str(project),
+                "hook",
+                "--agent",
+                "claude-code",
+            ],
+            cwd=project,
+            env=env,
+            input=b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stderr.decode("utf-8", errors="replace"),
+        )
+        service = MemoryService(database, project_root=project)
+        try:
+            self.assertIn(
+                f"Fact: {marker}",
+                {event.content for event in service.store.query_events()},
+            )
+            self.assertIn(
+                marker,
+                {record.content for record in service.store.list_memories()},
+            )
+            self.assertTrue(service.store.has_hook_activity("claude-code"))
+        finally:
+            service.close()
+
     def test_stdio_is_newline_delimited_json_only(self) -> None:
         incoming = io.BytesIO(
             (

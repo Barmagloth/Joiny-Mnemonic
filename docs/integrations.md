@@ -112,7 +112,8 @@ marker. Ordinary prose is retained and searchable but is not promised automatic 
 compact resume.
 ## What is captured
 
-The runtime accepts JSON on stdin and emits JSON only on stdout.
+The runtime accepts UTF-8 JSON on stdin and emits JSON only on stdout. A leading UTF-8 BOM is
+accepted because native Windows PowerShell pipelines may prefix redirected text with one.
 
 - `SessionStart`: records lifecycle state and injects the resume packet.
 - `UserPromptSubmit`: records the prompt, applies evidence-bound consolidation, and injects

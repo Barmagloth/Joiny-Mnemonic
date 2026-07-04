@@ -62,6 +62,18 @@ def _json_array(value: str) -> list[str]:
     return result
 
 
+def _hook_json_input(stream: Any) -> dict[str, Any]:
+    """Read native hook JSON as UTF-8 while accepting an optional UTF-8 BOM."""
+    raw_stream = getattr(stream, "buffer", stream)
+    source = raw_stream.read()
+    if isinstance(source, str):
+        source = source.removeprefix("\ufeff")
+    value = json.loads(source)
+    if not isinstance(value, dict):
+        raise ValueError("hook input must be a JSON object")
+    return value
+
+
 def _evaluation_tasks(path: str | Path) -> list[EvaluationTask]:
     values = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(values, list):
@@ -335,9 +347,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 0
     if args.command == "hook":
-        value = json.load(sys.stdin)
-        if not isinstance(value, dict):
-            raise ValueError("hook input must be a JSON object")
+        value = _hook_json_input(sys.stdin)
         if args.global_scope:
             project_root = resolve_hook_project(value)
             database = resolve_project_database(project_root)

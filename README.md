@@ -131,7 +131,8 @@ The global hook command contains no install-time project path. At every delivery
 hook payload's working directory to the nearest Git root and uses that project's
 `.joiny-mnemonic/memory.db`. `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `OPENCODE_CONFIG_DIR` and
 `XDG_CONFIG_HOME` are honored. OpenHands currently supports repository hooks only, so
-`install-hooks openhands --global` fails explicitly.
+`install-hooks openhands --global` fails explicitly. Hook stdin accepts UTF-8 JSON with or without
+a leading BOM, including payloads forwarded by native Windows PowerShell pipelines.
 
 Before changing a host-owned JSON file, the installer parses and validates the existing document.
 Invalid JSON aborts the installation before the limits file is touched. A valid existing file is
