@@ -18,6 +18,8 @@ memory-block events и retrieved data не повышаются в typed memory 
 маркеров или поля `memory_candidates`. Явные `derive` и `block-set` остаются отдельными API.
 `failure` означает только evidence конкретной неудачной попытки, а не универсальный запрет.
 `lesson` извлекается как untrusted history и становится protected constraint только через явный API.
+Git staleness — вычисляемое предупреждение об изменениях связанных файлов, а не доказательство
+ложности memory; оно не supersede, не удаляет и не понижает record автоматически.
 
 ## Secret filtering
 

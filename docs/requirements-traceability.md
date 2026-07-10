@@ -23,6 +23,7 @@
 | Exact source promotion | `promote_to_source`, `MemoryService.exact_source` | provenance test |
 | Точное актуальное содержимое файла | `SnapshotManager.read_project_source` + root containment | snapshot/source tests |
 | Query/freshness/risk/cost score | `_memory_hit` | retrieval unit path; параметры видны в metadata |
+| Per-memory Git staleness | on-demand `StalenessService`, CLI `stale`, optional search metadata | temporary-Git staleness tests and ranking-equivalence assertion |
 | Нет universal importance | score создаётся только из `RetrievalContext` | архитектурный инвариант |
 | Atomic incremental snapshots | recursive `json-patch-v2` delta внутри SQLite transaction | nested-memory delta + parent materialization tests |
 | Snapshot + replay tail | `SnapshotManager.restore` | stale/replay test |

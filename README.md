@@ -19,6 +19,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
+| Memory staleness | On-demand Git commit counts for files referenced by live memories; warning-only and ranking-neutral |
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
 | Tool-output reduction | Immutable raw output plus command-aware compact/summary views, exact promotion and no-expansion guard |
 | Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
@@ -96,6 +97,7 @@ joiny-mnemonic consolidate
 joiny-mnemonic compact --keep-recent 8 --summary-budget 600
 joiny-mnemonic snapshot --track README.md
 joiny-mnemonic resume --budget 1500 --text-only
+joiny-mnemonic stale --file src/auth.py
 ```
 
 `consolidate` only promotes explicit evidence from trusted canonical message roles. User markers may
@@ -104,7 +106,10 @@ only. Marker-like text or crafted `memory_candidates` in tool output, artifacts,
 memory cannot change typed or protected memory. Explicit `derive` and `block-set` remain available
 for deliberate writes. The core does not infer unstated facts. `failure` records describe a
 specific unsuccessful attempt, not a universal prohibition. `lesson` records remain untrusted
-historical data unless explicitly promoted to a protected constraint.
+historical data unless explicitly promoted to a protected constraint. Per-memory staleness compares
+the oldest source timestamp with later Git commits touching referenced files; it is a warning, not
+proof that a memory is false, and it does not change retrieval ranking. Add `--staleness` to
+`search` to include the inspection in hit metadata.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:

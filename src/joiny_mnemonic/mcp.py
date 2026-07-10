@@ -113,6 +113,7 @@ TOOLS: tuple[dict[str, Any], ...] = (
                 "exact": {"type": "boolean"},
                 "include_events": {"type": "boolean"},
                 "semantic": {"type": "boolean"},
+                "include_staleness": {"type": "boolean"},
             }
         ),
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},

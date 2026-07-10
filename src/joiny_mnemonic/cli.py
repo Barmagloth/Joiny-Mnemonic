@@ -163,6 +163,14 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--exact", action="store_true")
     search.add_argument("--no-events", action="store_true")
     search.add_argument("--no-semantic", action="store_true")
+    search.add_argument("--staleness", action="store_true")
+
+    stale = commands.add_parser("stale")
+    stale.add_argument("--branch", default="main")
+    selector = stale.add_mutually_exclusive_group()
+    selector.add_argument("--id")
+    selector.add_argument("--file")
+    stale.add_argument("--threshold", type=int, default=3)
 
     graph = commands.add_parser("graph-neighbors")
     graph.add_argument("entity")
@@ -391,7 +399,9 @@ def run(args: argparse.Namespace) -> int:
         elif args.command == "derive":
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes))
         elif args.command == "search":
-            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic))
+            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness))
+        elif args.command == "stale":
+            _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
         elif args.command == "graph-neighbors":
             _print(service.knowledge_neighbors(
                 args.entity, branch_id=args.branch, limit=args.limit

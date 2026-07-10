@@ -15,11 +15,12 @@ from .models import (
     UsageSample,
 )
 from .service import MemoryService
+from .staleness import MemoryStaleness
 from .storage import MemoryStore
 
 __all__ = [
     "ActiveBlock", "Artifact", "BudgetPolicy", "Event", "GovernorDecision",
-    "MemoryRecord", "MemoryService", "MemoryStore", "PromptPacket", "RetrievalHit",
+    "MemoryRecord", "MemoryService", "MemoryStaleness", "MemoryStore", "PromptPacket", "RetrievalHit",
     "Snapshot", "TaskRecord", "ToolOutputView", "UsageSample",
 ]
 

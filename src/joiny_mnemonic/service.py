@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,6 +17,7 @@ from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
 from .snapshots import SnapshotManager
+from .staleness import MemoryStaleness, StalenessService
 from .storage import MemoryStore
 from .tasks import TaskManager
 from .usage import UsageMeter
@@ -53,6 +55,7 @@ class MemoryService:
         )
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
+        self.staleness = StalenessService(self.store, self.project_root)
         self.prompts = PromptAssembler(self.store, self.retrieval)
         self.consolidator = EvidenceConsolidator()
         self.code = PythonCodeIndex(self.project_root)
@@ -187,7 +190,37 @@ class MemoryService:
         return record
 
     def search(self, **values: Any) -> list[RetrievalHit]:
-        return self.retrieval.search(RetrievalContext(**values))
+        include_staleness = bool(values.pop("include_staleness", False))
+        context = RetrievalContext(**values)
+        hits = self.retrieval.search(context)
+        if not include_staleness:
+            return hits
+        inspections = {
+            item.memory_id: item
+            for item in self.staleness.inspect(
+                branch_id=context.branch_id,
+                memory_ids=tuple(
+                    hit.id for hit in hits if hit.source_kind == "memory"
+                ),
+            )
+        }
+        return [
+            replace(
+                hit,
+                metadata={
+                    **hit.metadata,
+                    **(
+                        {"staleness": asdict(inspections[hit.id])}
+                        if hit.id in inspections
+                        else {}
+                    ),
+                },
+            )
+            for hit in hits
+        ]
+
+    def stale(self, **values: Any) -> tuple[MemoryStaleness, ...]:
+        return self.staleness.inspect(**values)
 
     def knowledge_neighbors(
         self, entity: str, *, branch_id: str = "main", limit: int = 20

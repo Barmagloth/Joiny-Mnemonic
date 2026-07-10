@@ -73,6 +73,14 @@ score = relevance*wq + freshness*wf + risk*wr + cost_efficiency*wc
 
 Веса и half-life входят в `RetrievalContext`; постоянного универсального importance score нет.
 
+## Per-memory Git staleness
+
+`StalenessService` inspects only live, non-superseded memories with file references. For each
+record it uses the oldest source-event timestamp and counts later commits touching each file with
+short-lived Git subprocesses. Calls are memoized within one operation. Missing files,
+non-repository roots, unavailable Git, timeouts and malformed timestamps produce explicit
+`missing_file`/`unknown` results. Results are not persisted and never change retrieval ranking.
+
 ## Prompt budget
 
 Порядок включения:
