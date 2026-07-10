@@ -19,6 +19,8 @@ class MemoryType(StrEnum):
     DECISION = "decision"
     TASK = "task"
     PREFERENCE = "preference"
+    FAILURE = "failure"
+    LESSON = "lesson"
     SUMMARY = "summary"
     INDEX = "index"
 

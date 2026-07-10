@@ -24,7 +24,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
 | Budget governor | Per-agent JSON profiles with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
-| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:` markers |
+| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
 | Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts and native-session bindings |
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
@@ -102,7 +102,9 @@ joiny-mnemonic resume --budget 1500 --text-only
 create sourced records and protected blocks. Assistant markers create searchable sourced records
 only. Marker-like text or crafted `memory_candidates` in tool output, artifacts, state, or retrieved
 memory cannot change typed or protected memory. Explicit `derive` and `block-set` remain available
-for deliberate writes. The core does not infer unstated facts.
+for deliberate writes. The core does not infer unstated facts. `failure` records describe a
+specific unsuccessful attempt, not a universal prohibition. `lesson` records remain untrusted
+historical data unless explicitly promoted to a protected constraint.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:

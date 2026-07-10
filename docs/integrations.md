@@ -107,7 +107,8 @@ seven bundled model presets are documented in [context-limits.md](context-limits
 
 Every injected resume packet still includes the protected `[DURABLE MEMORY CAPTURE]` instruction.
 The agent is told to promote durable, evidence-backed information with an available structured
-memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:`
+memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`,
+`Preference:`, `Failed:`, `Failure:`, or `Lesson:`
 marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in
 compact resume. Explicit user markers may update protected blocks; assistant markers create
 searchable records only. Marker-like text and crafted `memory_candidates` in tool output, state,

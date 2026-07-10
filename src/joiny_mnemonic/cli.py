@@ -137,7 +137,12 @@ def build_parser() -> argparse.ArgumentParser:
     block.add_argument("--source", action="append", default=[])
 
     derive = commands.add_parser("derive")
-    derive.add_argument("memory_type", choices=["fact", "decision", "task", "preference", "summary", "index"])
+    derive.add_argument(
+        "memory_type",
+        choices=[
+            "fact", "decision", "task", "preference", "failure", "lesson", "summary", "index"
+        ],
+    )
     derive.add_argument("content")
     derive.add_argument("--summary", default="")
     derive.add_argument("--source", action="append", required=True)

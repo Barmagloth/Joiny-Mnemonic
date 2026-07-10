@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import (
-    ActiveBlock, Artifact, BudgetPolicy, Event, MemoryRecord, Snapshot, TaskRecord,
+    ActiveBlock, Artifact, BudgetPolicy, Event, MemoryRecord, MemoryType, Snapshot, TaskRecord,
     ToolOutputView, UsageSample,
 )
 from .security import SecretRedactor, redaction_counts
@@ -1213,6 +1213,10 @@ class MemoryStore:
         retrieval_cost: float = 1.0,
         supersedes_id: str | None = None,
     ) -> MemoryRecord:
+        memory_type = str(memory_type)
+        allowed_types = {item.value for item in MemoryType}
+        if memory_type not in allowed_types:
+            raise ValueError(f"unsupported memory_type: {memory_type}")
         if not 0.0 <= risk <= 1.0:
             raise ValueError("risk must be between 0 and 1")
         if retrieval_cost < 0:

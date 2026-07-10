@@ -16,6 +16,8 @@ Retrieved content оборачивается в отдельный тег с `tr
 создавать только searchable records. Tool calls, tool outputs, artifacts, state events,
 memory-block events и retrieved data не повышаются в typed memory или protected state из-за
 маркеров или поля `memory_candidates`. Явные `derive` и `block-set` остаются отдельными API.
+`failure` означает только evidence конкретной неудачной попытки, а не универсальный запрет.
+`lesson` извлекается как untrusted history и становится protected constraint только через явный API.
 
 ## Secret filtering
 

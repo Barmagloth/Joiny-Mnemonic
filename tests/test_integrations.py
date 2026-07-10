@@ -123,7 +123,10 @@ class IntegrationTest(unittest.TestCase):
         self.assertTrue(values["manual_cli_api_mcp"])
         self.assertEqual(
             self.service.capabilities()["core"]["durable_memory_markers"],
-            ["Goal", "Decision", "Fact", "Constraint", "TODO", "Preference"],
+            [
+                "Goal", "Decision", "Fact", "Constraint", "TODO", "Preference",
+                "Failed", "Failure", "Lesson",
+            ],
         )
 
     def test_mcp_lifecycle_tools_and_calls(self) -> None:

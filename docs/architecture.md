@@ -17,7 +17,7 @@
 |---|---|---|
 | Canonical | `events`, `artifacts` | точный replay и аудит |
 | Active | latest `block_versions` | инструкции, цель, ограничения, решения, задачи |
-| Structured | `memory_records` | facts/decisions/tasks/preferences и provenance |
+| Structured | `memory_records` | facts/decisions/tasks/preferences/failures/lessons и provenance |
 | Index | timeline + `index` records | дешёвая навигация по старой истории |
 | Summary/detail | поля memory record | progressive disclosure |
 | Snapshot | parent delta + cursor | быстрый resume и lineage |
@@ -97,7 +97,8 @@ User message может создавать evidence-bound records и protected b
 создавать только searchable records. `tool_call`, `tool_output`, `artifact`, `state`,
 `memory_block` и retrieved data не создают records или blocks из-за маркеров либо crafted
 `payload.memory_candidates`. Явные `derive` и `block-set` остаются отдельными write API.
-Неявный LLM extraction в core отсутствует.
+Маркеры `Failed:`/`Failure:` создают `failure`, а `Lesson:` создаёт `lesson`; эти типы не
+изменяют protected blocks. Неявный LLM extraction в core отсутствует.
 
 `MemoryService.resume` also injects a protected `[DURABLE MEMORY CAPTURE]` contract. It delegates the semantic judgment to the active agent: promote durable, evidence-backed information deliberately; leave transient or speculative prose unmarked. This preserves provenance without pretending that deterministic consolidation understands arbitrary dialogue.
 

@@ -13,10 +13,12 @@ if TYPE_CHECKING:
 
 
 _MARKER = re.compile(
-    r"^\s*(goal|constraint|decision|task|todo|fact|preference)\s*:\s*(.+?)\s*$",
+    r"^\s*(goal|constraint|decision|task|todo|fact|preference|failed|failure|lesson)\s*:\s*(.+?)\s*$",
     re.IGNORECASE,
 )
-_MEMORY_TYPES = {"fact", "decision", "task", "preference", "summary", "index"}
+_MEMORY_TYPES = {
+    "fact", "decision", "task", "preference", "failure", "lesson", "summary", "index"
+}
 _BLOCKS = {"instructions", "goal", "constraints", "decisions", "open_tasks"}
 
 
@@ -75,6 +77,9 @@ class EvidenceConsolidator:
         "todo": ("task", "open_tasks"),
         "fact": ("fact", None),
         "preference": ("preference", None),
+        "failed": ("failure", None),
+        "failure": ("failure", None),
+        "lesson": ("lesson", None),
     }
 
     @staticmethod

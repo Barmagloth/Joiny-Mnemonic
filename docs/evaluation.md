@@ -116,7 +116,8 @@ reports, so evidence recall cannot accidentally be presented as task-level quali
 
 The evidence-presence diagnostic intentionally exposes the boundary between canonical retention and automatic resume. A fact mentioned only in ordinary dialogue can score `quality_vs_full_history = 0.0` after enough later history: full history still contains it, and event search can recover it, but no typed memory or protected block was created for the compact resume packet.
 
-Joiny-Mnemonic does not silently infer facts to close this gap. Instead, each runtime resume packet gives the agent a protected `[DURABLE MEMORY CAPTURE]` instruction. Durable, evidence-backed information should be promoted with a structured memory tool when available, or with a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` marker. Tests cover both sides of this boundary: unmarked information remains searchable but can be absent from resume; the same fact explicitly marked as `Fact:` is recovered after an equally long distractor tail.
+Joiny-Mnemonic does not silently infer facts to close this gap. Instead, each runtime resume packet gives the agent a protected `[DURABLE MEMORY CAPTURE]` instruction. Durable, evidence-backed information should be promoted with a structured memory tool when available, or with a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`,
+`Failure:`, or `Lesson:` marker. Tests cover both sides of this boundary: unmarked information remains searchable but can be absent from resume; the same fact explicitly marked as `Fact:` is recovered after an equally long distractor tail.
 
 This means a `>=95%` evidence-presence result is scoped to explicitly promoted evidence. It is not a claim that arbitrary unmarked dialogue will be reconstructed semantically.
 
