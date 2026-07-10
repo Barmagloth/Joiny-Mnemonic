@@ -1683,6 +1683,31 @@ class MemoryStore:
         return self._usage_from_row(row)
 
     @integrity_checked
+    def list_usage_samples(
+        self,
+        *,
+        branch_id: str = "main",
+        session_id: str | None = None,
+        operation: str | None = None,
+    ) -> tuple[UsageSample, ...]:
+        clauses = ["branch_id=?"]
+        params: list[Any] = [branch_id]
+        if session_id is not None:
+            clauses.append("session_id=?")
+            params.append(session_id)
+        if operation is not None:
+            clauses.append("operation=?")
+            params.append(operation)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM usage_samples WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY created_at",
+                params,
+            ).fetchall()
+        return tuple(self._usage_from_row(row) for row in rows)
+
+    @integrity_checked
     def usage_report(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> dict[str, Any]:
@@ -1726,6 +1751,28 @@ class MemoryStore:
         totals["reducer_latency_ms_p95"] = (
             latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
             if latencies else 0.0
+        )
+        retrieval_exposures = [
+            item for item in samples if item.operation == "retrieval_search"
+        ]
+        prompt_exposures = [
+            item for item in samples if item.operation == "prompt_injection"
+        ]
+        totals["retrieval_search_count"] = len(retrieval_exposures)
+        totals["retrieval_result_count"] = sum(
+            len(item.metadata.get("results", ())) for item in retrieval_exposures
+        )
+        totals["prompt_injection_count"] = len(prompt_exposures)
+        totals["prompt_included_event_count"] = sum(
+            len(item.metadata.get("included_event_ids", ())) for item in prompt_exposures
+        )
+        totals["prompt_included_memory_count"] = sum(
+            len(item.metadata.get("included_memory_ids", ())) for item in prompt_exposures
+        )
+        totals["task_correlated_exposure_count"] = sum(
+            1
+            for item in (*retrieval_exposures, *prompt_exposures)
+            if item.metadata.get("task_key")
         )
         by_operation: dict[str, dict[str, Any]] = {}
         for item in samples:

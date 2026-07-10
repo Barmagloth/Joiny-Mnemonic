@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -33,10 +34,12 @@ class PromptAssembler:
         retrieval: RetrievalEngine,
         *,
         token_counter: Callable[[str], int] = conservative_token_estimate,
+        telemetry: Callable[[PromptPacket, dict[str, Any]], None] | None = None,
     ) -> None:
         self.store = store
         self.retrieval = retrieval
         self.token_counter = token_counter
+        self.telemetry = telemetry
 
     def _event_text(self, event: Event) -> str:
         role = event.role or "none"
@@ -128,7 +131,12 @@ class PromptAssembler:
         stale_reasons: tuple[str, ...] = (),
         state: dict[str, Any] | None = None,
         protected_instructions: tuple[str, ...] = (),
+        session_id: str | None = None,
+        task_key: str | None = None,
+        telemetry_receipt: str | None = None,
+        record_telemetry: bool = True,
     ) -> PromptPacket:
+        started = time.perf_counter()
         if token_budget < 1:
             raise ValueError("token_budget must be positive")
         parts = [
@@ -276,7 +284,7 @@ class PromptAssembler:
         tokens = self.token_counter(text)
         if tokens > token_budget:
             raise AssertionError("prompt budget governor emitted an oversized packet")
-        return PromptPacket(
+        packet = PromptPacket(
             text=text,
             estimated_tokens=tokens,
             token_budget=token_budget,
@@ -285,3 +293,19 @@ class PromptAssembler:
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
         )
+        if record_telemetry and self.telemetry is not None:
+            try:
+                self.telemetry(
+                    packet,
+                    {
+                        "branch_id": branch_id,
+                        "session_id": session_id,
+                        "task_key": task_key,
+                        "query": query,
+                        "latency_ms": (time.perf_counter() - started) * 1000,
+                        "receipt_key": telemetry_receipt,
+                    },
+                )
+            except Exception:
+                pass
+        return packet

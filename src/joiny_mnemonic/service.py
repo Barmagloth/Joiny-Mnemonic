@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Sequence
@@ -58,11 +57,15 @@ class MemoryService:
         self.snapshots = SnapshotManager(self.store, self.project_root)
         self.staleness = StalenessService(self.store, self.project_root)
         self.prechecks = PrecheckService(self.store, self.staleness, self.project_root)
-        self.prompts = PromptAssembler(self.store, self.retrieval)
+        self.usage = UsageMeter(self.store)
+        self.prompts = PromptAssembler(
+            self.store,
+            self.retrieval,
+            telemetry=self._record_prompt_injection,
+        )
         self.consolidator = EvidenceConsolidator()
         self.code = PythonCodeIndex(self.project_root)
         self.reducer = ToolOutputReducer()
-        self.usage = UsageMeter(self.store)
         self.tasks = TaskManager(self)
         self.governor = BudgetGovernor(self)
         self.plugin_errors = self.plugins.errors
@@ -193,8 +196,34 @@ class MemoryService:
 
     def search(self, **values: Any) -> list[RetrievalHit]:
         include_staleness = bool(values.pop("include_staleness", False))
+        record_telemetry = bool(values.pop("record_telemetry", True))
+        session_id = values.pop("session_id", None)
+        task_key = values.pop("task_key", None)
+        telemetry_receipt = values.pop("telemetry_receipt", None)
         context = RetrievalContext(**values)
         hits = self.retrieval.search(context)
+        if record_telemetry:
+            try:
+                self.usage.record_retrieval_search(
+                    branch_id=context.branch_id,
+                    session_id=session_id,
+                    task_key=task_key,
+                    query=context.query,
+                    hits=hits,
+                    semantic_enabled=bool(context.semantic and self.plugins.semantic),
+                    filters={
+                        "memory_types": context.memory_types,
+                        "file": context.file,
+                        "since": context.since,
+                        "until": context.until,
+                        "exact": context.exact,
+                        "include_events": context.include_events,
+                    },
+                    limit=context.limit,
+                    receipt_key=telemetry_receipt,
+                )
+            except Exception:
+                pass
         if not include_staleness:
             return hits
         inspections = {
@@ -220,6 +249,19 @@ class MemoryService:
             )
             for hit in hits
         ]
+
+    def _record_prompt_injection(
+        self, packet: PromptPacket, context: dict[str, Any]
+    ) -> None:
+        self.usage.record_prompt_injection(
+            packet,
+            branch_id=str(context["branch_id"]),
+            session_id=context.get("session_id"),
+            task_key=context.get("task_key"),
+            query=str(context.get("query", "")),
+            latency_ms=context.get("latency_ms"),
+            receipt_key=context.get("receipt_key"),
+        )
 
     def stale(self, **values: Any) -> tuple[MemoryStaleness, ...]:
         return self.staleness.inspect(**values)
@@ -291,6 +333,10 @@ class MemoryService:
         branch_id: str = "main",
         token_budget: int = 1500,
         query: str = "resume current goal constraints decisions and open tasks",
+        session_id: str | None = None,
+        task_key: str | None = None,
+        telemetry_receipt: str | None = None,
+        record_telemetry: bool = True,
     ) -> PromptPacket:
         budget = min(token_budget, 1500)
         snapshot = self.store.latest_snapshot(branch_id=branch_id)
@@ -303,7 +349,6 @@ class MemoryService:
             state = restored.state
         else:
             state = self.snapshots.build_state(branch_id=branch_id)
-        started = time.perf_counter()
         packet = self.prompts.assemble(
             token_budget=budget,
             branch_id=branch_id,
@@ -312,12 +357,10 @@ class MemoryService:
             stale_reasons=stale_reasons,
             state=state,
             protected_instructions=(DURABLE_MEMORY_INSTRUCTION,),
-        )
-        self.usage.record_prompt(
-            packet,
-            branch_id=branch_id,
-            operation="resume_packet",
-            latency_ms=(time.perf_counter() - started) * 1000,
+            session_id=session_id,
+            task_key=task_key,
+            telemetry_receipt=telemetry_receipt,
+            record_telemetry=record_telemetry,
         )
         return packet
 

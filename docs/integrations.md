@@ -206,4 +206,5 @@ hook and binds subsequent deliveries from the same native session to that task.
 After every captured delivery the governor evaluates the branch policy. Snapshot and compaction
 are applied before a handoff recommendation is injected. Hook, reduction and usage receipts are
 independent, so a retry after a partial crash resumes missing derived work without duplicating
-canonical events or metrics.
+canonical events or metrics. Prompt-injection exposure uses its own receipt, so repeated native
+delivery does not double-count it.

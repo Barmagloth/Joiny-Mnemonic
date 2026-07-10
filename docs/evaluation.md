@@ -31,6 +31,13 @@ This mode is useful for deterministic regression tests. It does not measure whet
 agent completed a task. There is no default 95% production claim. `--minimum` is optional and
 only gates this diagnostic ratio.
 
+## Exposure correlation boundary
+
+Usage reports count `retrieval_search` and `prompt_injection` exposures and retain task/session
+IDs so later completed/blocked task versions can be correlated with what was shown. This is
+observational data only: exposure does not prove causal usefulness, does not reinforce a record,
+and does not alter retrieval ranking.
+
 ## 2. External task runner
 
 `evaluate-runner` sends the same task once with full-history context and once with the real

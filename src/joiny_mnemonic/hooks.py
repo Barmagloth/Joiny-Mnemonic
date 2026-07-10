@@ -433,7 +433,14 @@ def process_hook(
         inject_context = True
     if inject_context:
         query = str(value.get("prompt", "resume current goal constraints decisions and open tasks"))
-        packet = service.resume(branch_id=branch_id, token_budget=token_budget, query=query)
+        packet = service.resume(
+            branch_id=branch_id,
+            token_budget=token_budget,
+            query=query,
+            session_id=session_id,
+            task_key=task.task_key if task is not None else None,
+            telemetry_receipt=f"prompt-injection:{receipt_key}",
+        )
         context = packet.text
         thresholds = service.governor.thresholds(policy)
         if warning and counter is not None:

@@ -93,6 +93,16 @@ default; no embeddings, daemon, LLM or heuristic native-tool denial is involved.
 Claude Code `PreToolUse` stores the redacted report inside the idempotent hook delivery and emits
 a bounded context packet. The explicit Git pre-commit installer delegates to the same CLI engine.
 
+## Retrieval exposure telemetry
+
+The existing append-only `usage_samples` stream records two derived operation classes.
+`retrieval_search` stores redacted query/filter metadata and ordered result IDs/scores/source
+kinds. `prompt_injection` stores included event/memory IDs, snapshot, budget, emitted-token
+estimate and stale reasons. Hook receipts deduplicate repeated prompt exposure. Telemetry failures
+are isolated from retrieval/prompt results, and telemetry never feeds ranking. Task/session IDs
+permit later correlation with immutable task status versions, but exposure alone is not causal
+evidence of usefulness.
+
 ## Prompt budget
 
 Порядок включения:

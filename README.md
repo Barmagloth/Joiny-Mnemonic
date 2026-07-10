@@ -23,7 +23,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Precheck | Deterministic file/staged/command warnings from failures, lessons, staleness, tasks and active constraints |
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
 | Tool-output reduction | Immutable raw output plus command-aware compact/summary views, exact promotion and no-expansion guard |
-| Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
+| Usage observability | Provider samples plus redacted `retrieval_search`/`prompt_injection` exposure IDs, measurements and task/session correlation |
 | Budget governor | Per-agent JSON profiles with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
 | Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
@@ -125,6 +125,12 @@ joiny-mnemonic --project-root . install-git-hook
 ```
 
 The generated hook calls the same `precheck --staged` engine and preserves unrelated hook content.
+
+Public search and prompt assembly append redacted exposure metadata to the existing usage stream.
+`retrieval_search` stores result IDs, scores, source kinds, positions and filters;
+`prompt_injection` stores included canonical/memory IDs, snapshot, budget and stale reasons.
+No memory content is duplicated. Exposure is correlation data for later task-outcome analysis, not
+proof that retrieval caused an outcome, and it never changes ranking.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:
