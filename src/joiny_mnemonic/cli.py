@@ -67,6 +67,12 @@ def _json_array(value: str) -> list[str]:
     return result
 
 
+def _identifier_list(values: list[str]) -> list[str]:
+    if len(values) == 1 and values[0].lstrip().startswith("["):
+        return _json_array(values[0])
+    return values
+
+
 def _hook_json_input(stream: Any) -> dict[str, Any]:
     """Read native hook JSON as UTF-8 while accepting an optional UTF-8 BOM."""
     raw_stream = getattr(stream, "buffer", stream)
@@ -191,7 +197,14 @@ def build_parser() -> argparse.ArgumentParser:
     graph.add_argument("--branch", default="main")
     graph.add_argument("--limit", type=int, default=20)
     source = commands.add_parser("source")
-    source.add_argument("id")
+    source.add_argument("ids", nargs="+")
+
+    context = commands.add_parser("context")
+    context.add_argument("id")
+    context.add_argument("--branch")
+    context.add_argument("--before", type=int, default=3)
+    context.add_argument("--after", type=int, default=3)
+    context.add_argument("--include-source", action="store_true")
 
     project_source = commands.add_parser("project-source")
     project_source.add_argument("path")
@@ -435,7 +448,20 @@ def run(args: argparse.Namespace) -> int:
                 args.entity, branch_id=args.branch, limit=args.limit
             ))
         elif args.command == "source":
-            _print(service.exact_source(args.id))
+            identifiers = _identifier_list(args.ids)
+            _print(
+                service.exact_source(identifiers[0])
+                if len(identifiers) == 1
+                else service.exact_sources(identifiers)
+            )
+        elif args.command == "context":
+            _print(service.context_around(
+                args.id,
+                branch_id=args.branch,
+                before=args.before,
+                after=args.after,
+                include_source=args.include_source,
+            ))
         elif args.command == "project-source":
             _print(service.project_source(args.path, expected_hash=args.expected_hash))
         elif args.command == "timeline":

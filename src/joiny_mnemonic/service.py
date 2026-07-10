@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from .adapters import ADAPTERS, adapter_capabilities, get_adapter
 from .code_index import PythonCodeIndex
 from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsolidator
+from .context import ContextWindow, ExactSourceResult, build_context_window
 from .context_limits import ContextLimitConfig
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
@@ -303,13 +304,96 @@ class MemoryService:
             key=lambda hit: (hit.score, hit.created_at),
             reverse=True,
         )[:limit]
+
+    def _resolve_exact_source(self, identifier: str) -> tuple[tuple[Event, ...], str]:
+        if not isinstance(identifier, str) or not identifier:
+            raise ValueError("source identifier must be a non-empty string")
+        if identifier.startswith("evt_"):
+            event = self.store.get_event(identifier)
+            return (event,), event.branch_id
+        if identifier.startswith("view_"):
+            view = self.store.get_tool_output_view_by_id(identifier)
+            event = self.store.get_event(view.event_id)
+            return (event,), event.branch_id
+        if identifier.startswith("replay:evt_"):
+            derivation = self.store.get_event(identifier.removeprefix("replay:"))
+            source_ids = tuple(derivation.payload.get("source_event_ids", ()))
+            if source_ids:
+                return (
+                    tuple(self.store.get_event(event_id) for event_id in source_ids),
+                    derivation.branch_id,
+                )
+            return (derivation,), derivation.branch_id
+        if identifier.startswith("mem_"):
+            record = self.store.get_memory(identifier)
+            return tuple(self.store.provenance(identifier)), record.branch_id
+
+        for plugin in self.plugins.knowledge_graph.values():
+            resolver = getattr(plugin, "resolve_source_ids", None)
+            if not callable(resolver):
+                continue
+            try:
+                source_ids = tuple(resolver(identifier) or ())
+            except Exception as exc:
+                error = f"knowledge_graph:{plugin.name}: {exc}"
+                if error not in self.plugin_errors:
+                    self.plugin_errors.append(error)
+                continue
+            if source_ids:
+                events = tuple(self.store.get_event(event_id) for event_id in source_ids)
+                source_branch = events[0].branch_id
+                branch_resolver = getattr(plugin, "resolve_branch_id", None)
+                if callable(branch_resolver):
+                    try:
+                        source_branch = str(branch_resolver(identifier) or source_branch)
+                    except Exception as exc:
+                        error = f"knowledge_graph:{plugin.name}: {exc}"
+                        if error not in self.plugin_errors:
+                            self.plugin_errors.append(error)
+                return events, source_branch
+        raise KeyError(f"unknown source identifier: {identifier}")
+
     def exact_source(self, memory_or_event_id: str) -> list[Event]:
-        if memory_or_event_id.startswith("evt_"):
-            return [self.store.get_event(memory_or_event_id)]
-        if memory_or_event_id.startswith("view_"):
-            view = self.store.get_tool_output_view_by_id(memory_or_event_id)
-            return [self.store.get_event(view.event_id)]
-        return self.store.provenance(memory_or_event_id)
+        events, _ = self._resolve_exact_source(memory_or_event_id)
+        return list(events)
+
+    def exact_sources(self, ids: Sequence[str]) -> tuple[ExactSourceResult, ...]:
+        if isinstance(ids, (str, bytes)) or not isinstance(ids, Sequence):
+            raise TypeError("ids must be a sequence of source identifiers")
+        identifiers = tuple(dict.fromkeys(str(identifier) for identifier in ids))
+        if not identifiers:
+            raise ValueError("at least one source identifier is required")
+        results: list[ExactSourceResult] = []
+        for identifier in identifiers:
+            events, _ = self._resolve_exact_source(identifier)
+            results.append(
+                ExactSourceResult(
+                    id=identifier,
+                    source_event_ids=tuple(event.id for event in events),
+                    events=events,
+                )
+            )
+        return tuple(results)
+
+    def context_around(
+        self,
+        id: str,
+        *,
+        before: int = 3,
+        after: int = 3,
+        include_source: bool = False,
+        branch_id: str | None = None,
+    ) -> ContextWindow:
+        source_events, source_branch = self._resolve_exact_source(id)
+        return build_context_window(
+            self.store,
+            id,
+            source_events,
+            branch_id=branch_id or source_branch,
+            before=before,
+            after=after,
+            include_source=include_source,
+        )
 
     def project_source(self, relative_path: str, *, expected_hash: str | None = None) -> dict[str, Any]:
         return self.snapshots.read_project_source(relative_path, expected_hash=expected_hash)

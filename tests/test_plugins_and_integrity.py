@@ -135,8 +135,31 @@ class PluginBehaviorTest(unittest.TestCase):
             edge = next(hit for hit in hits if hit.metadata["memory_id"] == record.id)
             self.assertEqual(edge.metadata["relation"], "stores")
             self.assertEqual(edge.source_event_ids, (source.id,))
+            self.assertEqual(service.exact_source(edge.id), [source])
+            edge_context = service.context_around(
+                edge.id, before=0, after=0, include_source=True
+            )
+            self.assertEqual(edge_context.source_event_ids, (source.id,))
+            self.assertEqual(edge_context.events, (source,))
 
             service.store.create_branch("child")
+            child_record = service.derive_memory(
+                memory_type="decision",
+                content="[[ChildNode]] -[uses]-> [[SQLite]]",
+                source_event_ids=[source.id],
+                branch_id="child",
+            )
+            child_edge = next(
+                hit
+                for hit in service.knowledge_neighbors("ChildNode", branch_id="child")
+                if hit.metadata["memory_id"] == child_record.id
+            )
+            child_context = service.context_around(
+                child_edge.id, before=0, after=0, include_source=True
+            )
+            self.assertEqual(child_context.branch_id, "child")
+            self.assertEqual(child_context.events, (source,))
+
             hidden_source = service.store.append_event(
                 kind="message",
                 content="A parent-only graph decision after the fork.",

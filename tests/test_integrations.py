@@ -499,6 +499,26 @@ class IntegrationTest(unittest.TestCase):
             with urllib.request.urlopen(graph_request, timeout=5) as response:
                 graph = json.load(response)
             self.assertEqual(graph, [])
+
+            context_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/context",
+                data=json.dumps({"id": result["id"], "before": 0, "after": 0}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(context_request, timeout=5) as response:
+                context = json.load(response)
+            self.assertEqual(context["index"][0]["id"], result["id"])
+
+            source_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/source",
+                data=json.dumps({"ids": [result["id"]]}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(source_request, timeout=5) as response:
+                sources = json.load(response)
+            self.assertEqual(sources[0]["events"][0]["id"], result["id"])
         finally:
             server.shutdown()
             server.server_close()

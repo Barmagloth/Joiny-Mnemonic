@@ -164,8 +164,10 @@ active-hook view/logs as part of deployment.
 
 ## MCP is complementary
 
-Hooks provide automatic capture and context injection. MCP provides explicit search/source/code
-tools. They may be enabled together using the same database:
+Hooks provide automatic capture and context injection. MCP provides explicit search/source/context
+and code tools. `memory_source` accepts either the original single `id` or a batch `ids` array;
+`memory_context` is the only added P2 tool and returns bounded branch-visible interaction context.
+They may be enabled together using the same database:
 
 ```text
 python -m joiny_mnemonic --db <project>/.joiny-mnemonic/memory.db \

@@ -185,6 +185,18 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     values = dict(body)
                     entity = values.pop("entity")
                     result = service.knowledge_neighbors(entity, **values)
+                elif path == "/v1/source":
+                    identifier = body.get("id")
+                    identifiers = body.get("ids")
+                    if (identifier is None) == (identifiers is None):
+                        raise ValueError("source requires exactly one of id or ids")
+                    result = (
+                        service.exact_source(identifier)
+                        if identifier is not None
+                        else service.exact_sources(identifiers)
+                    )
+                elif path == "/v1/context":
+                    result = service.context_around(**body)
                 elif path == "/v1/snapshots":
                     result = service.create_snapshot(**body)
                 elif path == "/v1/resume":

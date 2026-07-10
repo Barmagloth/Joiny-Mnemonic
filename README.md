@@ -137,7 +137,18 @@ always returns the canonical source:
 
 ```powershell
 joiny-mnemonic source mem_0123456789abcdef
+joiny-mnemonic source mem_first mem_second
+joiny-mnemonic source '["mem_first","mem_second"]'
+joiny-mnemonic context mem_0123456789abcdef --before 3 --after 3
+joiny-mnemonic context view_0123456789abcdef --include-source
 ```
+
+`source` keeps its original single-ID response and returns per-ID results only for batch input.
+`context` resolves event, memory, tool-output-view, snapshot replay-memory and supported graph-edge
+IDs to canonical provenance. It selects complete interaction groups around every source, omits
+orphan tool output and respects branch fork cursors. `before` and `after` are each limited to 20
+groups. The default response is a compact chronological index; `--include-source` returns exact
+immutable events.
 
 ## Install agent hooks
 
@@ -194,6 +205,7 @@ verification steps are in [docs/integrations.md](docs/integrations.md).
 joiny-mnemonic search "snapshot provenance" --type decision --limit 10
 joiny-mnemonic timeline --limit 30
 joiny-mnemonic graph-neighbors "SQLite" --limit 20
+joiny-mnemonic context mem_0123456789abcdef --before 3 --after 3
 
 joiny-mnemonic code-index
 joiny-mnemonic code-search "resume"
@@ -201,8 +213,9 @@ joiny-mnemonic code-context "MemoryService.resume"
 joiny-mnemonic code-impact "MemoryStore.append_event" --depth 3
 ```
 
-MCP additionally exposes `memory_graph_neighbors`, `memory_code_search`, `memory_code_context`
-and `memory_code_impact`, alongside append, derive, search, source, snapshot and resume tools.
+MCP additionally exposes `memory_context`, `memory_graph_neighbors`, `memory_code_search`,
+`memory_code_context` and `memory_code_impact`, alongside append, derive, search, batch source,
+snapshot and resume tools.
 
 ## Output reduction, usage, governor and tasks
 

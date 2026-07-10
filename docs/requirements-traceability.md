@@ -26,6 +26,7 @@
 | Per-memory Git staleness | on-demand `StalenessService`, CLI `stale`, optional search metadata | temporary-Git staleness tests and ranking-equivalence assertion |
 | Deterministic precheck | file/staged/command engine, bounded Claude `PreToolUse`, explicit Git hook installer | `test_precheck` ordering, IDs, branch, protocol, budget and installer tests |
 | Retrieval exposure telemetry | append-only usage operations `retrieval_search` and `prompt_injection` with receipts/redaction | `test_telemetry` metadata, dedupe, isolation, aggregation and equivalence tests |
+| Progressive source expansion | branch-visible complete interaction groups, compact/exact `ContextWindow`, batch `exact_sources`, one `memory_context` MCP tool | `test_context_expansion` plus graph edge source/context assertion |
 | Нет universal importance | score создаётся только из `RetrievalContext` | архитектурный инвариант |
 | Atomic incremental snapshots | recursive `json-patch-v2` delta внутри SQLite transaction | nested-memory delta + parent materialization tests |
 | Snapshot + replay tail | `SnapshotManager.restore` | stale/replay test |

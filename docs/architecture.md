@@ -103,6 +103,17 @@ are isolated from retrieval/prompt results, and telemetry never feeds ranking. T
 permit later correlation with immutable task status versions, but exposure alone is not causal
 evidence of usefulness.
 
+## Progressive source expansion
+
+`MemoryService.context_around` resolves canonical event, memory, tool-output-view, snapshot replay
+memory and supported graph-edge IDs to immutable source events. It reads the target branch through
+the existing lineage/fork cursor query, forms complete transcript interaction groups, and omits
+orphan tool outputs. For multi-source records it unions a bounded window around every source group
+and returns events in stable sequence order. `before` and `after` are validated independently in
+the range 0..20. Compact mode returns only role/kind/preview index entries; exact mode returns the
+unchanged canonical `Event` objects. `exact_sources` adds ordered batch promotion while
+`exact_source` retains the original single-ID result.
+
 ## Prompt budget
 
 Порядок включения:
