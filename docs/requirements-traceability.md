@@ -31,7 +31,7 @@
 | Git HEAD/file hashes/staleness | `fingerprint_project`, `compare_fingerprints` | stale snapshot test |
 | Независимое ядро + MCP/CLI/API | `MemoryService`, `mcp.py`, `cli.py`, `api.py` | MCP, stdio и HTTP tests |
 | Claude/Codex/OpenCode/OpenHands capture | `hooks.py` runtime + project installers | four-agent core test, hook idempotency/installer tests |
-| Complete tool interactions | atomic `append_events_once`, transcript grouping | `test_hook_retry_is_idempotent_and_tool_pair_is_atomic`, orphan-output test |
+| Complete tool interactions | atomic `append_events_once`, transcript grouping, explicit failure derivation | success-pair, orphan-output and `test_native_failure_capture` tests |
 | Automatic sourced consolidation | `EvidenceConsolidator` explicit markers/candidates including failure/lesson | marker, trust-policy and `test_failure_lesson` tests |
 | Active compaction continuity | extractive summary/index + lifecycle snapshot/reinjection | compaction provenance and session-hook tests |
 | Python codegraph | AST symbols, calls, exact context, reverse impact | `test_python_ast_call_graph_context_and_reverse_impact` |

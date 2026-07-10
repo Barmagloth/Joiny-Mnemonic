@@ -25,6 +25,15 @@ _SUMMARY = re.compile(
 _PATH_LINE = re.compile(r"(?:^|\s)([^\s:]+\.(?:py|js|ts|tsx|rs|go|java|cs|cpp|c|h)):(\d+)")
 
 
+def first_failure_line(value: str) -> str | None:
+    cleaned = _ANSI.sub("", value).replace("\r\n", "\n").replace("\r", "\n")
+    for raw in cleaned.splitlines():
+        line = " ".join(raw.split())
+        if line and _FAILURE.search(line):
+            return line[:240]
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class ReducedView:
     level: str

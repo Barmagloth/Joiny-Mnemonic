@@ -14,6 +14,7 @@ from typing import Any
 from .adapters import adapter_capabilities
 from .context_limits import ContextLimitConfig
 from .paths import resolve_project_database
+from .reducers import first_failure_line
 from .service import MemoryService
 
 
@@ -167,20 +168,109 @@ def _task_key(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _tool_files(value: dict[str, Any]) -> tuple[str, ...]:
+    found: list[str] = []
+
+    def add(candidate: Any) -> None:
+        values = candidate if isinstance(candidate, (list, tuple, set)) else (candidate,)
+        for item in values:
+            if item is None:
+                continue
+            path = str(item).strip()
+            if path and path not in found:
+                found.append(path)
+
+    inputs = value.get("tool_input", value.get("args", {}))
+    for container in (value, inputs if isinstance(inputs, dict) else {}):
+        for key in ("file_path", "path", "paths", "filename", "files"):
+            if key in container:
+                add(container[key])
+    return tuple(found)
+
+
+def _first_nonempty_line(value: Any) -> str | None:
+    text = _json_text(value) if not isinstance(value, str) else value
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = " ".join(raw.split())
+        if line:
+            return line[:240]
+    return None
+
+
+def _explicit_failure_line(value: dict[str, Any]) -> str | None:
+    containers: list[dict[str, Any]] = [value]
+    for key in ("tool_response", "tool_output", "output"):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("error", "message"):
+            candidate = container.get(key)
+            if isinstance(candidate, dict):
+                nested = _explicit_failure_line(candidate)
+                if nested:
+                    return nested
+            elif candidate is not None:
+                line = _first_nonempty_line(candidate)
+                if line:
+                    return line
+    return None
+
+
+def _derive_native_failure(
+    service: MemoryService,
+    value: dict[str, Any],
+    events: tuple[Any, ...],
+) -> None:
+    pair = tuple(event for event in events if event.kind in {"tool_call", "tool_output"})
+    if len(pair) != 2:
+        return
+    source_ids = tuple(event.id for event in pair)
+    output = next(event for event in pair if event.kind == "tool_output")
+    tool_name = str(
+        value.get("tool_name", value.get("tool", value.get("name", pair[0].content or "tool")))
+    ).strip() or "tool"
+    detail = (
+        _explicit_failure_line(value)
+        or first_failure_line(output.content)
+        or _first_nonempty_line(output.content)
+    )
+    content = f"{tool_name} failed" + (f": {detail}" if detail else "")
+    files = tuple(dict.fromkeys((*_tool_files(value), *(path for event in pair for path in event.files))))
+    for record in service.store.list_memories(
+        branch_id=pair[0].branch_id, include_superseded=True
+    ):
+        if (
+            record.memory_type == "failure"
+            and record.source_event_ids == source_ids
+            and record.content == content
+        ):
+            return
+    service.derive_memory(
+        memory_type="failure",
+        content=content,
+        source_event_ids=source_ids,
+        files=files,
+        branch_id=pair[0].branch_id,
+    )
+
+
 def _hook_events(value: dict[str, Any]) -> list[dict[str, Any]]:
     name = _event_name(value)
     payload = dict(value)
     if name == "UserPromptSubmit":
         return [{"kind": "message", "role": "user", "content": str(value.get("prompt", "")), "payload": payload}]
-    if name == "PostToolUse":
+    if name in {"PostToolUse", "PostToolUseFailure"}:
         call_id = _call_id(value)
         base = {**payload, "_memory_call_id": call_id}
+        files = _tool_files(value)
         return [
             {
                 "kind": "tool_call",
                 "role": "assistant",
                 "content": str(value.get("tool_name", value.get("tool", "tool"))),
                 "payload": {**base, "tool_input": value.get("tool_input", value.get("args", {}))},
+                "files": files,
             },
             {
                 "kind": "tool_output",
@@ -189,6 +279,7 @@ def _hook_events(value: dict[str, Any]) -> list[dict[str, Any]]:
                     value.get("tool_response", value.get("tool_output", value.get("output", "")))
                 ),
                 "payload": base,
+                "files": files,
             },
         ]
     if name == "Stop":
@@ -263,6 +354,8 @@ def process_hook(
         session_id=session_id,
     )
     service.reduce_tool_outputs(events)
+    if event_name == "PostToolUseFailure":
+        _derive_native_failure(service, value, events)
     service.usage.capture_native(
         value,
         source=agent,
@@ -728,7 +821,10 @@ def install_hooks(
     backup_path: Path | None = None
     if agent == "claude-code":
         backup_path = _merge_command_hooks(
-            path, command, lifecycle_events, nested=True
+            path,
+            command,
+            {**lifecycle_events, "PostToolUseFailure": "*"},
+            nested=True,
         )
         notes = (
             "Global hooks resolve project root from each native hook payload."

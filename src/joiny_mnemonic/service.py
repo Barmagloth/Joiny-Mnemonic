@@ -310,6 +310,7 @@ class MemoryService:
                 "event_ingestion",
                 "automatic_resume",
                 "tool_capture",
+                "tool_failure_capture",
                 "active_compaction",
             ):
                 values[key] = bool(values[key] and effective)

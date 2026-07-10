@@ -39,7 +39,7 @@ failure restores the original bytes.
 | Host | Generated file | Capture | Resume injection | Compaction continuity |
 |---|---|---|---|---|
 | Codex | `.codex/hooks.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
-| Claude Code | `.claude/settings.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
+| Claude Code | `.claude/settings.json` | User prompt, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
 | OpenCode | `.opencode/plugins/joiny-mnemonic.js` | `chat.message`, `tool.execute.after` | `experimental.chat.system.transform` | `experimental.session.compacting` |
 | OpenHands | `.openhands/hooks.json` | User prompt, successful tool interaction, assistant stop/session events | `SessionStart`, `UserPromptSubmit` | No joiny-mnemonic compaction hook is installed |
 
@@ -122,6 +122,8 @@ accepted because native Windows PowerShell pipelines may prefix redirected text 
 - `UserPromptSubmit`: records the prompt, applies evidence-bound consolidation, and injects
   query-relevant memory.
 - `PostToolUse`: records one atomic `tool_call` + `tool_output` pair.
+- `PostToolUseFailure` (Claude Code): records the same atomic pair and derives one concise
+  evidence-bound `failure` sourced by both events. It does not infer a lesson or mutate a block.
 - `Stop`: records `last_assistant_message`.
 - `PreCompact` / `PostCompact`: consolidate explicit evidence, create an extractive sourced
   summary/index and snapshot, then re-inject restored context where the host supports it.
@@ -172,6 +174,8 @@ automatic capture is absent, database-split, configured but not yet observed, or
 - `hook_database_matches`: the MCP/CLI process opened the project database targeted by hooks;
 - `active_database_path` / `hook_expected_database_path`: exact paths for diagnosing split state;
 - `hook_runtime_verified`: at least one native hook session reached this database.
+- `tool_failure_capture`: true only when the adapter/host exposes and installs
+  `PostToolUseFailure`; unsupported hosts remain false.
 
 Until valid configuration is detected and a hook delivery is observed, automatic
 ingestion/resume/tool-capture capabilities remain false and the response includes an explicit

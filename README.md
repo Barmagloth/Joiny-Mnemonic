@@ -26,7 +26,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
 | Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
-| Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts and native-session bindings |
+| Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts, native-session bindings, and Claude `PostToolUseFailure` capture |
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
 | Evaluation | Evidence-presence diagnostic and a separate external task-runner protocol for real outcome scoring |
 | Interfaces | Python, CLI, local HTTP and MCP stdio share one `MemoryService` |

@@ -107,8 +107,10 @@ Compaction выбирает полные transcript interaction groups, оста
 consolidation, compaction и snapshot на lifecycle events, а затем передаёт resume packet в
 native context-injection API агента. Canonical transcript при этом не переписывается.
 
-`PostToolUse` доставляется как одна транзакция из `tool_call` и `tool_output`. Повторы native
-hook подавляются immutable receipts. Resume никогда не начинает tool interaction с orphan
+`PostToolUse` доставляется как одна транзакция из `tool_call` и `tool_output`. Для Claude Code
+`PostToolUseFailure` использует ту же atomic pair/receipt схему и после canonical commit создаёт
+один deterministic `failure` с provenance обоих событий. Повторы native hook подавляются
+immutable receipts. Resume никогда не начинает tool interaction с orphan
 output.
 
 ## Code context
