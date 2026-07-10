@@ -13,7 +13,7 @@ separately installable plugins; KV storage remains an extension protocol.
 
 | Area | Implemented behavior |
 |---|---|
-| Canonical history | SQLite append-only events/artifacts, hash chain, secret redaction, `synchronous=FULL`, SQL update/delete guards |
+| Canonical history | SQLite append-only events/artifacts, hash chain, secret/private-region redaction, `synchronous=FULL`, SQL update/delete guards |
 | Provenance | Every derived claim references existing events visible in the target branch lineage |
 | Protected state | Versioned `instructions`, `goal`, `constraints`, `decisions`, `open_tasks` |
 | Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |

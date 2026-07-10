@@ -18,7 +18,7 @@ from .models import (
     ActiveBlock, Artifact, BudgetPolicy, Event, MemoryRecord, Snapshot, TaskRecord,
     ToolOutputView, UsageSample,
 )
-from .security import SecretRedactor
+from .security import SecretRedactor, redaction_counts
 
 
 def _now() -> str:
@@ -567,11 +567,8 @@ class MemoryStore:
         safe_files_value, file_redactions = self.redactor.redact_value(list(files))
         redactions = content_redactions + payload_redactions + file_redactions
         if redactions:
-            counts: dict[str, int] = {}
-            for item in redactions:
-                counts[item.rule] = counts.get(item.rule, 0) + item.count
             safe_payload = dict(safe_payload)
-            safe_payload["_security_redactions"] = counts
+            safe_payload["_security_redactions"] = redaction_counts(redactions)
 
         event_id = f"evt_{uuid.uuid4().hex}"
         created_at = _now()
@@ -772,8 +769,8 @@ class MemoryStore:
         session_id: str | None = None,
         files: Sequence[str] = (),
     ) -> Artifact:
-        safe_name, _ = self.redactor.redact_text(name)
-        safe_mime, _ = self.redactor.redact_text(mime_type)
+        safe_name, name_redactions = self.redactor.redact_text(name)
+        safe_mime, mime_redactions = self.redactor.redact_text(mime_type)
         textual = isinstance(data, str) or safe_mime.startswith("text/") or safe_mime.endswith("json")
         if isinstance(data, str):
             decoded = data
@@ -781,10 +778,13 @@ class MemoryStore:
             decoded = data.decode("utf-8")
         else:
             decoded = data.decode("latin-1")
-        safe_text, redactions = self.redactor.redact_text(decoded)
-        if redactions and not textual:
+        safe_text, data_redactions = self.redactor.redact_text(
+            decoded, private_regions=textual
+        )
+        if data_redactions and not textual:
             raise ValueError("binary artifact appears to contain a secret; refusing durable write")
         safe_data = safe_text.encode("utf-8") if textual else bytes(data)
+        artifact_redactions = name_redactions + mime_redactions + data_redactions
         artifact_id = f"art_{uuid.uuid4().hex}"
         created_at = _now()
         content_hash = _hash(safe_data)
@@ -801,6 +801,11 @@ class MemoryStore:
                     "name": safe_name,
                     "mime_type": safe_mime,
                     "content_hash": content_hash,
+                    **(
+                        {"_security_redactions": redaction_counts(artifact_redactions)}
+                        if artifact_redactions
+                        else {}
+                    ),
                 },
                 files=files,
             )

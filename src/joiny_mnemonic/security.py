@@ -12,6 +12,14 @@ class Redaction:
     count: int
 
 
+def redaction_counts(redactions: Sequence[Redaction]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in redactions:
+        key = "private_regions_omitted" if item.rule == "private_region" else item.rule
+        counts[key] = counts.get(key, 0) + item.count
+    return counts
+
+
 class SecretRedactor:
     """Redact likely credentials before any durable write occurs."""
 
@@ -41,9 +49,77 @@ class SecretRedactor:
         compiled = [(name, re.compile(pattern)) for name, pattern in custom_rules]
         self._rules = self.DEFAULT_RULES + tuple(compiled)
 
-    def redact_text(self, value: str) -> tuple[str, tuple[Redaction, ...]]:
+    @staticmethod
+    def _private_tag_at(value: str, start: int) -> tuple[str, int] | None:
+        closing = value[start : start + 9].casefold() == "</private"
+        opening = value[start : start + 8].casefold() == "<private"
+        if not closing and not opening:
+            return None
+
+        name_end = start + (9 if closing else 8)
+        if name_end < len(value) and not (value[name_end].isspace() or value[name_end] == ">"):
+            return None
+
+        if closing:
+            cursor = name_end
+            while cursor < len(value) and value[cursor].isspace():
+                cursor += 1
+            if cursor < len(value) and value[cursor] == ">":
+                return "close", cursor + 1
+            return None
+
+        quote: str | None = None
+        cursor = name_end
+        while cursor < len(value):
+            char = value[cursor]
+            if quote is not None:
+                if char == quote:
+                    quote = None
+            elif char in {"'", '"'}:
+                quote = char
+            elif char == ">":
+                return "open", cursor + 1
+            cursor += 1
+        return "open", len(value)
+
+    @classmethod
+    def _remove_private_regions(cls, value: str) -> tuple[str, int]:
+        output: list[str] = []
+        cursor = 0
+        count = 0
+        while cursor < len(value):
+            tag = cls._private_tag_at(value, cursor) if value[cursor] == "<" else None
+            if tag is None or tag[0] != "open":
+                output.append(value[cursor])
+                cursor += 1
+                continue
+
+            count += 1
+            output.append("[PRIVATE CONTENT OMITTED]")
+            cursor = tag[1]
+            depth = 1
+            while cursor < len(value) and depth:
+                nested = cls._private_tag_at(value, cursor) if value[cursor] == "<" else None
+                if nested is None:
+                    cursor += 1
+                    continue
+                kind, cursor = nested
+                if kind == "open":
+                    depth += 1
+                    count += 1
+                else:
+                    depth -= 1
+        return "".join(output), count
+
+    def redact_text(
+        self, value: str, *, private_regions: bool = True
+    ) -> tuple[str, tuple[Redaction, ...]]:
+        result, private_count = (
+            self._remove_private_regions(value) if private_regions else (value, 0)
+        )
         redactions: list[Redaction] = []
-        result = value
+        if private_count:
+            redactions.append(Redaction("private_region", private_count))
         for name, pattern in self._rules:
             if name == "assigned_secret":
                 result, count = pattern.subn(r"\1[REDACTED]", result)

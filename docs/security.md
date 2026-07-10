@@ -27,6 +27,12 @@ memory-block events и retrieved data не повышаются в typed memory 
 - PEM private keys;
 - пользовательские regex rules через `SecretRedactor`.
 
+Явный envelope `<private>...</private>` удаляется до regex-фильтров и заменяется на
+`[PRIVATE CONTENT OMITTED]`. Matching case-insensitive, opening attributes поддерживаются,
+а незакрытый opening tag удаляет остаток строки fail-closed. Обработка рекурсивна для строк в
+mapping/sequence; сохраняется только счётчик `private_regions_omitted`, но не удалённые bytes.
+Это явный opt-out от durable storage, а не замена специализированному DLP.
+
 Текстовые артефакты сохраняются уже отредактированными. Бинарный артефакт, в котором
 обнаружена сигнатура секрета, отклоняется, потому что переписывание произвольного binary
 повредило бы данные.

@@ -42,7 +42,7 @@
 | Store/recompute policy | `PhysicalMemoryGovernor.choose` | physical governor test |
 | Retrieved data не instructions | `memory_as_untrusted_data` | prompt-injection test |
 | Active instructions против compaction | hard budget error | active block test |
-| Secret filtering before save | `SecretRedactor` before transaction | secret filter test |
+| Secret/private-region filtering before save | `SecretRedactor` before transaction | secret filter and `test_private_regions` surface tests |
 
 ## Исключённые решения
 
