@@ -98,7 +98,11 @@ joiny-mnemonic snapshot --track README.md
 joiny-mnemonic resume --budget 1500 --text-only
 ```
 
-`consolidate` only promotes explicit evidence. It does not infer unstated facts. Every resume packet therefore includes a protected `[DURABLE MEMORY CAPTURE]` instruction: when the agent judges information important across sessions, it should use an available structured memory tool or emit a concise standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` line. The agent should mark durable, evidence-backed information only, not every message.
+`consolidate` only promotes explicit evidence from trusted canonical message roles. User markers may
+create sourced records and protected blocks. Assistant markers create searchable sourced records
+only. Marker-like text or crafted `memory_candidates` in tool output, artifacts, state, or retrieved
+memory cannot change typed or protected memory. Explicit `derive` and `block-set` remain available
+for deliberate writes. The core does not infer unstated facts.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:

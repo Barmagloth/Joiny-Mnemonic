@@ -104,7 +104,7 @@ joiny-mnemonic verify
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
 | Configure different agents independently | project/global `context-limits.json` with seven model presets and explicit overrides | `test_seven_bundled_profiles_and_agent_specific_install_config` |
 | Count context before reducer/native compaction | raw `UserPromptSubmit` and `PostToolUse` increments with immutable receipts | `test_raw_hook_counter_warns_before_native_compaction_and_is_idempotent` |
-| Agent-assisted durable promotion | protected runtime instruction plus explicit marker parser; unmarked prose stays searchable | boundary test, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
+| Agent-assisted durable promotion | explicit trust policy: user records/blocks, assistant records only, external kinds neither | `test_trust_policy`, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
 | Checkpoint without premature handoff | audited `context_checkpoint`; recommendation starts only at handoff | `test_snapshot_checkpoint_does_not_recommend_handoff_early` |
 | Do not double-count retries | unique counter receipt and crossing-event replay behavior | same test |
 | Bound counter overhead | O(1) latest-total read and atomic append | benchmark `hook_counter_p95_under_25ms` gate |

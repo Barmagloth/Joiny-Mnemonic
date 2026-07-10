@@ -109,7 +109,9 @@ Every injected resume packet still includes the protected `[DURABLE MEMORY CAPTU
 The agent is told to promote durable, evidence-backed information with an available structured
 memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:`
 marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in
-compact resume.
+compact resume. Explicit user markers may update protected blocks; assistant markers create
+searchable records only. Marker-like text and crafted `memory_candidates` in tool output, state,
+artifacts or retrieved memory never change protected memory.
 ## What is captured
 
 The runtime accepts UTF-8 JSON on stdin and emits JSON only on stdout. A leading UTF-8 BOM is

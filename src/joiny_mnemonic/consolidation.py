@@ -21,6 +21,23 @@ _BLOCKS = {"instructions", "goal", "constraints", "decisions", "open_tasks"}
 
 
 @dataclass(frozen=True, slots=True)
+class ConsolidationPolicy:
+    allow_records: bool
+    allow_blocks: bool
+
+
+def consolidation_policy(event: Event) -> ConsolidationPolicy:
+    if event.kind != "message":
+        return ConsolidationPolicy(allow_records=False, allow_blocks=False)
+    role = (event.role or "").casefold()
+    if role == "user":
+        return ConsolidationPolicy(allow_records=True, allow_blocks=True)
+    if role == "assistant":
+        return ConsolidationPolicy(allow_records=True, allow_blocks=False)
+    return ConsolidationPolicy(allow_records=False, allow_blocks=False)
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryCandidate:
     memory_type: str
     content: str
@@ -93,6 +110,9 @@ class EvidenceConsolidator:
 
     @classmethod
     def candidates(cls, event: Event) -> tuple[MemoryCandidate, ...]:
+        policy = consolidation_policy(event)
+        if not policy.allow_records:
+            return ()
         result = cls._structured(event)
         for line in event.content.splitlines():
             match = _MARKER.match(line)
@@ -109,6 +129,16 @@ class EvidenceConsolidator:
             )
         unique: dict[tuple[str, str, str | None], MemoryCandidate] = {}
         for item in result:
+            if item.block is not None and not policy.allow_blocks:
+                item = MemoryCandidate(
+                    memory_type=item.memory_type,
+                    content=item.content,
+                    summary=item.summary,
+                    block=None,
+                    risk=item.risk,
+                    retrieval_cost=item.retrieval_cost,
+                    files=item.files,
+                )
             unique[(item.memory_type, item.content.casefold(), item.block)] = item
         return tuple(unique.values())
 

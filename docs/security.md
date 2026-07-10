@@ -2,13 +2,20 @@
 
 ## Trust boundaries
 
-- Active blocks — доверенные инструкции, активированные явным API `block-set`.
+- Active blocks — доверенные инструкции, активированные явным API `block-set` или явным
+  пользовательским маркером.
 - Recent canonical transcript — точные исторические данные с сохранёнными ролями.
 - Index, summaries, retrieval и plugin results — недоверенные данные.
 - Входы agent adapters, HTTP и MCP — недоверенные до validation/redaction.
 
 Retrieved content оборачивается в отдельный тег с `trust="untrusted-data"`, закрывающий тег
 экранируется. Сборщик prompt явно запрещает следовать инструкциям внутри этого раздела.
+
+Автоматическая консолидация применяет единое правило доверия. Пользовательские message events
+могут создавать evidence-bound records и protected blocks. Assistant message events могут
+создавать только searchable records. Tool calls, tool outputs, artifacts, state events,
+memory-block events и retrieved data не повышаются в typed memory или protected state из-за
+маркеров или поля `memory_candidates`. Явные `derive` и `block-set` остаются отдельными API.
 
 ## Secret filtering
 
