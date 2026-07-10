@@ -14,13 +14,15 @@ from .models import (
     ToolOutputView,
     UsageSample,
 )
+from .precheck import PrecheckFinding, PrecheckReport
 from .service import MemoryService
 from .staleness import MemoryStaleness
 from .storage import MemoryStore
 
 __all__ = [
     "ActiveBlock", "Artifact", "BudgetPolicy", "Event", "GovernorDecision",
-    "MemoryRecord", "MemoryService", "MemoryStaleness", "MemoryStore", "PromptPacket", "RetrievalHit",
+    "MemoryRecord", "MemoryService", "MemoryStaleness", "MemoryStore",
+    "PrecheckFinding", "PrecheckReport", "PromptPacket", "RetrievalHit",
     "Snapshot", "TaskRecord", "ToolOutputView", "UsageSample",
 ]
 

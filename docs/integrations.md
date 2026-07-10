@@ -6,8 +6,9 @@ The hook runtime does three things:
 2. captures hook deliveries with an idempotency receipt;
 3. returns a budgeted memory packet through the host's context-injection mechanism.
 
-For `PostToolUse`, the call and output are written in one SQLite transaction. The installer does
-not register `PreToolUse`, so resume views cannot observe an output without the matching call.
+For `PostToolUse`, the call and output are written in one SQLite transaction. Claude Code also
+registers `PreToolUse`: it records one idempotent state delivery and injects a bounded,
+warning-only precheck packet. The packet never heuristically denies the tool call.
 
 ## Prerequisite
 
@@ -39,7 +40,7 @@ failure restores the original bytes.
 | Host | Generated file | Capture | Resume injection | Compaction continuity |
 |---|---|---|---|---|
 | Codex | `.codex/hooks.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
-| Claude Code | `.claude/settings.json` | User prompt, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
+| Claude Code | `.claude/settings.json` | User prompt, pre-action check, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit`, `PreToolUse` warnings | `PreCompact` snapshot/summary, `PostCompact` reinjection |
 | OpenCode | `.opencode/plugins/joiny-mnemonic.js` | `chat.message`, `tool.execute.after` | `experimental.chat.system.transform` | `experimental.session.compacting` |
 | OpenHands | `.openhands/hooks.json` | User prompt, successful tool interaction, assistant stop/session events | `SessionStart`, `UserPromptSubmit` | No joiny-mnemonic compaction hook is installed |
 
@@ -121,6 +122,9 @@ accepted because native Windows PowerShell pipelines may prefix redirected text 
 - `SessionStart`: records lifecycle state and injects the resume packet.
 - `UserPromptSubmit`: records the prompt, applies evidence-bound consolidation, and injects
   query-relevant memory.
+- `PreToolUse` (Claude Code): resolves command/files, runs deterministic precheck, stores the
+  redacted report under the idempotent hook receipt and injects at most 4096 UTF-8 bytes. Tool input
+  remains untrusted state data and no heuristic finding blocks execution.
 - `PostToolUse`: records one atomic `tool_call` + `tool_output` pair.
 - `PostToolUseFailure` (Claude Code): records the same atomic pair and derives one concise
   evidence-bound `failure` sourced by both events. It does not infer a lesson or mutate a block.
@@ -130,6 +134,17 @@ accepted because native Windows PowerShell pipelines may prefix redirected text 
 
 Secrets are filtered before durable writes. Retrieved history is framed as untrusted data;
 protected blocks remain the only instruction-bearing memory.
+
+## Explicit Git pre-commit integration
+
+```powershell
+joiny-mnemonic --project-root . install-git-hook
+```
+
+This command is separate from agent-hook installation. It resolves Git's active hook path,
+preserves existing pre-commit content, adds one idempotent Joiny-Mnemonic block, and invokes the
+same JSON-producing `precheck --staged` engine. Warning-only reports exit zero. An active
+`core.hooksPath` outside the repository is rejected instead of modifying a shared hook directory.
 
 ## Verification
 
@@ -176,6 +191,7 @@ automatic capture is absent, database-split, configured but not yet observed, or
 - `hook_runtime_verified`: at least one native hook session reached this database.
 - `tool_failure_capture`: true only when the adapter/host exposes and installs
   `PostToolUseFailure`; unsupported hosts remain false.
+- `pre_action_precheck`: true only when the host installer configures `PreToolUse`.
 
 Until valid configuration is detected and a hook delivery is observed, automatic
 ingestion/resume/tool-capture capabilities remain false and the response includes an explicit

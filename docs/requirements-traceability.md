@@ -24,6 +24,7 @@
 | Точное актуальное содержимое файла | `SnapshotManager.read_project_source` + root containment | snapshot/source tests |
 | Query/freshness/risk/cost score | `_memory_hit` | retrieval unit path; параметры видны в metadata |
 | Per-memory Git staleness | on-demand `StalenessService`, CLI `stale`, optional search metadata | temporary-Git staleness tests and ranking-equivalence assertion |
+| Deterministic precheck | file/staged/command engine, bounded Claude `PreToolUse`, explicit Git hook installer | `test_precheck` ordering, IDs, branch, protocol, budget and installer tests |
 | Нет universal importance | score создаётся только из `RetrievalContext` | архитектурный инвариант |
 | Atomic incremental snapshots | recursive `json-patch-v2` delta внутри SQLite transaction | nested-memory delta + parent materialization tests |
 | Snapshot + replay tail | `SnapshotManager.restore` | stale/replay test |

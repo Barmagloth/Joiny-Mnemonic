@@ -7,7 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -217,6 +217,16 @@ def _explicit_failure_line(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _tool_command(value: dict[str, Any]) -> str | None:
+    inputs = value.get("tool_input", value.get("args", {}))
+    containers = (value, inputs if isinstance(inputs, dict) else {})
+    for container in containers:
+        for key in ("command", "cmd", "script", "query"):
+            if container.get(key):
+                return str(container[key])
+    return str(inputs) if isinstance(inputs, str) and inputs.strip() else None
+
+
 def _derive_native_failure(
     service: MemoryService,
     value: dict[str, Any],
@@ -346,10 +356,23 @@ def process_hook(
         service.consolidator.compact(service, branch_id=branch_id)
         service.create_snapshot(branch_id=branch_id)
 
+    precheck_report = None
+    capture_value = value
+    if event_name == "PreToolUse":
+        precheck_report = service.precheck(
+            files=_tool_files(value),
+            command=_tool_command(value),
+            branch_id=branch_id,
+        )
+        capture_value = {
+            **value,
+            "_joiny_precheck": asdict(precheck_report),
+        }
+
     receipt_key = _receipt_key(agent, external_session, value)
     events, _created = service.store.append_events_once(
         receipt_key,
-        _hook_events(value),
+        _hook_events(capture_value),
         branch_id=branch_id,
         session_id=session_id,
     )
@@ -393,6 +416,15 @@ def process_hook(
         source_event=events[-1],
         agent=agent,
     )
+
+    if event_name == "PreToolUse":
+        stored = events[-1].payload.get("_joiny_precheck")
+        if isinstance(stored, dict):
+            precheck_report = service.prechecks.from_dict(stored)
+        if precheck_report is not None:
+            warning_packet = service.prechecks.render(precheck_report, max_bytes=4096)
+            if warning_packet:
+                return _context_output(agent, event_name, warning_packet)
 
     inject_context = event_name in {"SessionStart", "UserPromptSubmit", "PostCompact"}
     if agent == "opencode" and event_name == "PreCompact":
@@ -501,6 +533,75 @@ def _durable_write(path: Path, data: bytes) -> None:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def install_git_precommit(project_root: str | Path) -> dict[str, str]:
+    root = Path(project_root).resolve()
+    def git_path(*arguments: str) -> Path:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ValueError(f"{root} is not a Git repository")
+        value = Path(completed.stdout.strip())
+        return value.resolve() if value.is_absolute() else (root / value).resolve()
+
+    common_dir = git_path("--git-common-dir")
+    hooks_dir = git_path("--git-path", "hooks")
+    allowed_roots = (root, common_dir)
+    if not any(
+        hooks_dir == allowed or allowed in hooks_dir.parents
+        for allowed in allowed_roots
+    ):
+        raise ValueError(
+            "active core.hooksPath is outside this repository; configure a "
+            "repository-local hooks path before installing"
+        )
+    path = hooks_dir / "pre-commit"
+    begin = "# joiny-mnemonic precheck begin"
+    end = "# joiny-mnemonic precheck end"
+    command = shlex.join(
+        [
+            sys.executable,
+            "-m",
+            "joiny_mnemonic",
+            "--db",
+            str(resolve_project_database(root)),
+            "--project-root",
+            str(root),
+            "precheck",
+            "--staged",
+        ]
+    )
+    block = f"{begin}\n{command}\n{end}"
+    if path.exists():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{path} is not UTF-8; hook was not modified") from exc
+    else:
+        existing = "#!/bin/sh\n"
+    if begin in existing:
+        start = existing.index(begin)
+        finish = existing.find(end, start)
+        if finish < 0:
+            raise ValueError(f"{path} contains an incomplete joiny-mnemonic block")
+        finish += len(end)
+        updated = existing[:start] + block + existing[finish:]
+        status = "updated"
+    else:
+        updated = existing.rstrip() + "\n\n" + block + "\n"
+        status = "installed"
+    _durable_write(path, updated.encode("utf-8"))
+    try:
+        path.chmod(path.stat().st_mode | 0o111)
+    except OSError:
+        pass
+    return {"path": str(path), "status": status, "command": command}
 
 
 def _json_backup_path(path: Path) -> Path:
@@ -823,7 +924,11 @@ def install_hooks(
         backup_path = _merge_command_hooks(
             path,
             command,
-            {**lifecycle_events, "PostToolUseFailure": "*"},
+            {
+                **lifecycle_events,
+                "PreToolUse": "*",
+                "PostToolUseFailure": "*",
+            },
             nested=True,
         )
         notes = (

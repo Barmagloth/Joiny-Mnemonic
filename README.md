@@ -20,6 +20,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
 | Memory staleness | On-demand Git commit counts for files referenced by live memories; warning-only and ranking-neutral |
+| Precheck | Deterministic file/staged/command warnings from failures, lessons, staleness, tasks and active constraints |
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
 | Tool-output reduction | Immutable raw output plus command-aware compact/summary views, exact promotion and no-expansion guard |
 | Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
@@ -98,6 +99,9 @@ joiny-mnemonic compact --keep-recent 8 --summary-budget 600
 joiny-mnemonic snapshot --track README.md
 joiny-mnemonic resume --budget 1500 --text-only
 joiny-mnemonic stale --file src/auth.py
+joiny-mnemonic precheck --file src/auth.py
+joiny-mnemonic precheck --staged
+joiny-mnemonic precheck --command "git push --force origin main"
 ```
 
 `consolidate` only promotes explicit evidence from trusted canonical message roles. User markers may
@@ -110,6 +114,17 @@ historical data unless explicitly promoted to a protected constraint. Per-memory
 the oldest source timestamp with later Git commits touching referenced files; it is a warning, not
 proof that a memory is false, and it does not change retrieval ranking. Add `--staleness` to
 `search` to include the inspection in hit metadata.
+
+`precheck` is dependency-free and warning-only by default. It reports exact memory/source IDs for
+relevant failures, lessons and stale records, adds active task/constraint context, and flags a
+small reviewed set of dangerous commands. It does not heuristically block native tool execution.
+Install the optional Git pre-commit integration explicitly:
+
+```powershell
+joiny-mnemonic --project-root . install-git-hook
+```
+
+The generated hook calls the same `precheck --staged` engine and preserves unrelated hook content.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:

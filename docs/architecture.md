@@ -81,6 +81,18 @@ short-lived Git subprocesses. Calls are memoized within one operation. Missing f
 non-repository roots, unavailable Git, timeouts and malformed timestamps produce explicit
 `missing_file`/`unknown` results. Results are not persisted and never change retrieval ranking.
 
+## Deterministic precheck
+
+`PrecheckService` combines explicit/staged files, optional command text, branch-visible live
+memories, on-demand staleness and active task/constraint context. Findings are deduplicated and
+ordered by severity, file, code and source ID. Every memory-backed finding carries exact
+`memory_ids` and `source_event_ids`. The built-in command rules cover only reviewed destructive
+patterns and inline credentials detected by the existing redactor. Reports are warning-only by
+default; no embeddings, daemon, LLM or heuristic native-tool denial is involved.
+
+Claude Code `PreToolUse` stores the redacted report inside the idempotent hook delivery and emits
+a bounded context packet. The explicit Git pre-commit installer delegates to the same CLI engine.
+
 ## Prompt budget
 
 Порядок включения:

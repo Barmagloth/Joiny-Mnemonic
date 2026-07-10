@@ -13,6 +13,7 @@ from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHi
 from .governor import BudgetGovernor
 from .plugins import PluginContext, PluginRegistry
 from .paths import resolve_project_database
+from .precheck import PrecheckReport, PrecheckService
 from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
@@ -56,6 +57,7 @@ class MemoryService:
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
         self.staleness = StalenessService(self.store, self.project_root)
+        self.prechecks = PrecheckService(self.store, self.staleness, self.project_root)
         self.prompts = PromptAssembler(self.store, self.retrieval)
         self.consolidator = EvidenceConsolidator()
         self.code = PythonCodeIndex(self.project_root)
@@ -222,6 +224,9 @@ class MemoryService:
     def stale(self, **values: Any) -> tuple[MemoryStaleness, ...]:
         return self.staleness.inspect(**values)
 
+    def precheck(self, **values: Any) -> PrecheckReport:
+        return self.prechecks.run(**values)
+
     def knowledge_neighbors(
         self, entity: str, *, branch_id: str = "main", limit: int = 20
     ) -> list[RetrievalHit]:
@@ -344,6 +349,7 @@ class MemoryService:
                 "automatic_resume",
                 "tool_capture",
                 "tool_failure_capture",
+                "pre_action_precheck",
                 "active_compaction",
             ):
                 values[key] = bool(values[key] and effective)
@@ -414,6 +420,7 @@ class MemoryService:
                     "Failed", "Failure", "Lesson",
                 ],
                 "active_session_compaction": True,
+                "precheck": "deterministic-warning-only",
                 "tool_output_reduction": "canonical-raw-plus-command-aware-derived-views",
                 "usage_observability": "provider-reported-plus-labelled-estimates",
                 "budget_governor": "versioned-policy-with-snapshot-compact-handoff-actions",

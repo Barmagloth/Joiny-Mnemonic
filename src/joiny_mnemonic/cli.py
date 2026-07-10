@@ -19,7 +19,12 @@ from .evaluation import (
     evaluate_policies,
     evaluate_with_runner,
 )
-from .hooks import install_hooks, process_hook, resolve_hook_project
+from .hooks import (
+    install_git_precommit,
+    install_hooks,
+    process_hook,
+    resolve_hook_project,
+)
 from .mcp import serve_stdio
 from .paths import (
     resolve_project_database,
@@ -171,6 +176,15 @@ def build_parser() -> argparse.ArgumentParser:
     selector.add_argument("--id")
     selector.add_argument("--file")
     stale.add_argument("--threshold", type=int, default=3)
+
+    precheck = commands.add_parser("precheck")
+    precheck.add_argument("--branch", default="main")
+    precheck.add_argument("--file", action="append", default=[])
+    precheck.add_argument("--staged", action="store_true")
+    precheck.add_argument("--command", dest="candidate_command")
+    precheck.add_argument("--strict", action="store_true")
+
+    commands.add_parser("install-git-hook")
 
     graph = commands.add_parser("graph-neighbors")
     graph.add_argument("entity")
@@ -359,6 +373,10 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    if args.command == "install-git-hook":
+        project_root = resolve_runtime_project(args.project_root)
+        _print(install_git_precommit(project_root))
+        return 0
     if args.command == "hook":
         value = _hook_json_input(sys.stdin)
         if args.global_scope:
@@ -402,6 +420,16 @@ def run(args: argparse.Namespace) -> int:
             _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness))
         elif args.command == "stale":
             _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
+        elif args.command == "precheck":
+            report = service.precheck(
+                branch_id=args.branch,
+                files=args.file,
+                staged=args.staged,
+                command=args.candidate_command,
+            )
+            _print(report)
+            if args.strict and report.blocked:
+                raise SystemExit(2)
         elif args.command == "graph-neighbors":
             _print(service.knowledge_neighbors(
                 args.entity, branch_id=args.branch, limit=args.limit

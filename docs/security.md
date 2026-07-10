@@ -20,6 +20,9 @@ memory-block events и retrieved data не повышаются в typed memory 
 `lesson` извлекается как untrusted history и становится protected constraint только через явный API.
 Git staleness — вычисляемое предупреждение об изменениях связанных файлов, а не доказательство
 ложности memory; оно не supersede, не удаляет и не понижает record автоматически.
+Precheck по умолчанию только предупреждает. Dangerous-command rules не блокируют native tool
+execution, а exact memory/source IDs позволяют проверить evidence до действия. Tool input и
+сохранённый PreToolUse report проходят redaction и не становятся trusted memory.
 
 ## Secret filtering
 
