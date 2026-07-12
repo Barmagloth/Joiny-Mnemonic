@@ -397,7 +397,8 @@ Architecture: [docs/architecture.md](docs/architecture.md). Security:
 
 Ordinary prose can be interpreted into exact-evidence memory by an optional extractor plugin.
 The feature is off by default and marker-based behavior remains unchanged. Install the separate
-NuExtract plugin, pin its model revision, validate evals/extraction_ru_v1.json, then opt in with
+NuExtract plugin, pin its model revision, validate the Russian calibration corpus and the
+complementary English regression corpus, then opt in with
 JOINY_MNEMONIC_EXTRACTOR_ENABLED=1.
 
 Use joiny-mnemonic extraction-status to inspect lag and quarantine, extraction-process to drain

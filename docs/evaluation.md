@@ -165,3 +165,15 @@ claimed production baseline. A release may enable extraction by default only aft
 reviewed corpus version, pinned model/configuration hash, chosen threshold and explicit acceptable
 precision/recall target. Adversarial false trusted/protected records have a hard target of zero.
 Raw model confidence is used for routing and is not described as calibrated probability.
+
+## English automatic-extraction regression corpus
+
+The complementary corpus evals/extraction_en_v1.json covers English goals, decisions, facts,
+preferences, failures and lessons, plus negatives, bounded-context anaphora, repeated
+observations, inline and fenced code, blockquotes, rhetorical quotations, assistant injection,
+untrusted tool output, private regions, ambiguous evidence and supersession proposals.
+
+The English corpus is exercised by deterministic unit and integration tests as well as the same
+precision/recall/F1 evaluator used for the Russian corpus. It is a cross-language regression
+suite, not a replacement for the primarily Russian calibration baseline required before automatic
+enablement.
