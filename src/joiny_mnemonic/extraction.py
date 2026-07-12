@@ -3,6 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import os
+import subprocess
+import sys
+import threading
+import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
@@ -214,6 +219,12 @@ class ExtractionService:
         self.extractor = extractor
         self.config = config
         self.enabled = bool(enabled and extractor is not None and config is not None)
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._idle = threading.Event()
+        self._idle.set()
+        self._worker_thread: threading.Thread | None = None
+        self.last_wakeup_error: str | None = None
         if config is not None:
             self.store.register_extractor_config(
                 config.canonical_hash, config.descriptor()
@@ -315,6 +326,100 @@ class ExtractionService:
         )
         self.enabled = self.extractor is not None
         return self.process_backlog(limit=limit)
+
+    def notify(self, *, detached: bool = False) -> bool:
+        """Persist one coalescible wakeup and return without running inference."""
+        if not self.enabled or self.config is None:
+            return False
+        try:
+            self.store.signal_extraction_worker(self.config.canonical_hash)
+            if detached:
+                self._launch_detached_worker()
+                return True
+            self._idle.clear()
+            if self._worker_thread is None or not self._worker_thread.is_alive():
+                self._worker_thread = threading.Thread(
+                    target=self._worker_loop,
+                    name="joiny-extraction-worker",
+                    daemon=True,
+                )
+                self._worker_thread.start()
+            self._wake.set()
+        except Exception as exc:
+            self.last_wakeup_error = f"{type(exc).__name__}: {exc}"
+            self._idle.set()
+            return False
+        self.last_wakeup_error = None
+        return True
+
+    def _launch_detached_worker(self) -> None:
+        command = [
+            sys.executable,
+            "-m",
+            "joiny_mnemonic",
+            "--db",
+            str(self.store.path),
+            "--project-root",
+            str(self.service.project_root),
+            "extraction-worker",
+        ]
+        env = os.environ.copy()
+        env["JOINY_MNEMONIC_EXTRACTOR_ENABLED"] = "1"
+        options: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "env": env,
+        }
+        if os.name == "nt":
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            options["start_new_session"] = True
+        subprocess.Popen(command, **options)
+
+    def _worker_loop(self) -> None:
+        while not self._stop.is_set():
+            self._wake.wait()
+            self._wake.clear()
+            if self._stop.is_set():
+                break
+            try:
+                self.run_worker()
+            except Exception as exc:
+                self.last_wakeup_error = f"{type(exc).__name__}: {exc}"
+            finally:
+                self._idle.set()
+
+    def run_worker(self) -> dict[str, int]:
+        """Drain durable work under a crash-recoverable single-consumer lease."""
+        if not self.enabled or self.config is None:
+            return {"processed": 0, "succeeded": 0, "failed": 0}
+        owner = f"worker_{uuid.uuid4().hex}"
+        observed = self.store.claim_extraction_worker(
+            self.config.canonical_hash, owner, lease_seconds=3600.0
+        )
+        total = {"processed": 0, "succeeded": 0, "failed": 0}
+        if observed is None:
+            return total
+        while True:
+            result = self.process_backlog()
+            for key in total:
+                total[key] += result[key]
+            done, observed = self.store.complete_extraction_worker_cycle(
+                self.config.canonical_hash, owner, observed, lease_seconds=3600.0
+            )
+            if done:
+                return total
+
+    def wait_until_idle(self, timeout: float = 10.0) -> bool:
+        return self._idle.wait(timeout)
+
+    def close(self, timeout: float | None = None) -> None:
+        self._stop.set()
+        self._wake.set()
+        thread = self._worker_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout)
 
     def status(self) -> ExtractionStatus:
         metrics = self.store.extraction_status(self.config_hash)

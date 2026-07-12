@@ -35,6 +35,7 @@ from .paths import (
 )
 from .physical import PhysicalCandidate, PhysicalMemoryGovernor, Placement
 from .service import MemoryService
+from .witness import WitnessRegistry
 
 
 def _plain(value: Any) -> Any:
@@ -193,6 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     precheck.add_argument("--strict", action="store_true")
 
     commands.add_parser("extraction-status")
+    commands.add_parser("extraction-worker", help=argparse.SUPPRESS)
 
     extraction_process = commands.add_parser("extraction-process")
     extraction_process.add_argument("--limit", type=int)
@@ -497,6 +499,8 @@ def run(args: argparse.Namespace) -> int:
                 raise SystemExit(2)
         elif args.command == "extraction-status":
             _print(service.extraction.status())
+        elif args.command == "extraction-worker":
+            _print(service.extraction.run_worker())
         elif args.command == "extraction-process":
             _print(service.extraction.process_backlog(limit=args.limit))
         elif args.command == "extraction-retry":

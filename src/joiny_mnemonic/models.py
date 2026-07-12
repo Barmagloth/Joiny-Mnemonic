@@ -41,6 +41,8 @@ class Event:
     session_id: str | None
     kind: str
     role: str | None
+    origin_channel: str
+    origin_adapter: str | None
     content: str
     payload: dict[str, Any]
     files: tuple[str, ...]

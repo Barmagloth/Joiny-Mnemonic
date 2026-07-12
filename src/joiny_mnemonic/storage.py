@@ -7,6 +7,7 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
 import zlib
 from collections.abc import Sequence
@@ -20,6 +21,8 @@ from .models import (
     Snapshot, TaskRecord,
     ToolOutputView, UsageSample,
 )
+from .provenance import origin_evidence_type
+
 from .security import SecretRedactor, redaction_counts
 
 
@@ -106,6 +109,8 @@ CREATE TABLE IF NOT EXISTS events (
     session_id TEXT REFERENCES sessions(id),
     kind TEXT NOT NULL,
     role TEXT,
+    origin_channel TEXT NOT NULL,
+    origin_adapter TEXT,
     content TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     files_json TEXT NOT NULL,
@@ -308,6 +313,14 @@ CREATE TABLE IF NOT EXISTS extractor_configs (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS extraction_wakeups (
+    config_hash TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    owner TEXT,
+    lease_until REAL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS extraction_runs (
     id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL REFERENCES events(id),
@@ -403,6 +416,7 @@ SELECT c.id AS candidate_id,
         WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS transitioned_at
 FROM extraction_candidates c;
 
+DROP VIEW IF EXISTS extraction_run_status;
 CREATE VIEW IF NOT EXISTS extraction_run_status AS
 SELECT r.id AS run_id,
        r.event_id,
@@ -420,6 +434,18 @@ SELECT r.id AS run_id,
            SELECT a.outcome FROM extraction_attempts a
            WHERE a.run_id=r.id ORDER BY a.attempt_no DESC LIMIT 1
          )='retryable_failure' THEN 'retryable'
+         WHEN EXISTS (
+           SELECT 1 FROM extraction_attempt_starts s
+           WHERE s.run_id=r.id AND NOT EXISTS (
+             SELECT 1 FROM extraction_attempts a
+             WHERE a.run_id=s.run_id AND a.attempt_no=s.attempt_no
+           )
+         ) AND EXISTS (
+           SELECT 1 FROM extraction_wakeups w
+           WHERE w.config_hash=r.extractor_config_hash
+             AND w.owner IS NOT NULL
+             AND w.lease_until > CAST(strftime('%s','now') AS REAL)
+         ) THEN 'running'
          WHEN EXISTS (
            SELECT 1 FROM extraction_attempt_starts s
            WHERE s.run_id=r.id AND NOT EXISTS (
@@ -673,6 +699,10 @@ class MemoryStore:
         with self._lock:
             self._conn.executescript(BASE_SCHEMA)
             self._ensure_column("memory_records", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(
+                "events", "origin_channel", "TEXT NOT NULL DEFAULT 'legacy_untrusted'"
+            )
+            self._ensure_column("events", "origin_adapter", "TEXT")
             try:
                 self._conn.executescript(FTS_SCHEMA)
                 self.fts_enabled = True
@@ -680,7 +710,7 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 self.fts_enabled = False
             self._conn.execute(
-                "INSERT INTO metadata(key, value) VALUES('schema_version', '4') "
+                "INSERT INTO metadata(key, value) VALUES('schema_version', '5') "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
             )
             self._conn.execute(
@@ -774,6 +804,8 @@ class MemoryStore:
         kind: str,
         role: str | None,
         content: str,
+        origin_channel: str = "internal",
+        origin_adapter: str | None = None,
         payload: dict[str, Any],
         files: Sequence[str],
     ) -> Event:
@@ -806,6 +838,8 @@ class MemoryStore:
                 "session_id": session_id,
                 "kind": str(kind),
                 "role": role,
+                "origin_channel": origin_channel,
+                "origin_adapter": origin_adapter,
                 "content": safe_content,
                 "payload": safe_payload,
                 "files": safe_files_value,
@@ -819,15 +853,17 @@ class MemoryStore:
         previous_hash = previous["chain_hash"] if previous else None
         chain_hash = _hash((previous_hash or "") + content_hash)
         cursor = conn.execute(
-            "INSERT INTO events(id, branch_id, session_id, kind, role, content, payload_json, "
-            "files_json, created_at, previous_hash, content_hash, chain_hash) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO events(id, branch_id, session_id, kind, role, origin_channel, "
+            "origin_adapter, content, payload_json, files_json, created_at, previous_hash, "
+            "content_hash, chain_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event_id,
                 branch_id,
                 session_id,
                 str(kind),
                 role,
+                origin_channel,
+                origin_adapter,
                 safe_content,
                 _json(safe_payload),
                 _json(safe_files_value),
@@ -849,6 +885,8 @@ class MemoryStore:
             session_id=session_id,
             kind=str(kind),
             role=role,
+            origin_channel=origin_channel,
+            origin_adapter=origin_adapter,
             content=safe_content,
             payload=dict(safe_payload),
             files=tuple(safe_files_value),
@@ -878,6 +916,36 @@ class MemoryStore:
                 kind=kind,
                 role=role,
                 content=content,
+                origin_channel="public_api",
+                payload=payload or {},
+                files=files,
+            )
+
+    def append_host_event(
+        self,
+        *,
+        adapter: str,
+        kind: str,
+        content: str,
+        branch_id: str = "main",
+        session_id: str | None = None,
+        role: str | None = None,
+        payload: dict[str, Any] | None = None,
+        files: Sequence[str] = (),
+    ) -> Event:
+        """Commit one event delivered by a configured host hook adapter."""
+        if not adapter:
+            raise ValueError("adapter must be non-empty")
+        with self._transaction() as conn:
+            return self._append_event_in_tx(
+                conn,
+                branch_id=branch_id,
+                session_id=session_id,
+                kind=kind,
+                role=role,
+                content=content,
+                origin_channel="host_hook",
+                origin_adapter=adapter,
                 payload=payload or {},
                 files=files,
             )
@@ -890,7 +958,47 @@ class MemoryStore:
         branch_id: str = "main",
         session_id: str | None = None,
     ) -> tuple[tuple[Event, ...], bool]:
-        """Append one hook delivery atomically; retries return the original events."""
+        """Append an untrusted batch atomically; retries return the original events."""
+        return self._append_events_once(
+            receipt_key,
+            events,
+            branch_id=branch_id,
+            session_id=session_id,
+            origin_channel="public_api",
+            origin_adapter=None,
+        )
+
+    def append_host_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        adapter: str,
+        branch_id: str = "main",
+        session_id: str | None = None,
+    ) -> tuple[tuple[Event, ...], bool]:
+        """Trusted ingress used only by an installed host hook adapter."""
+        if not adapter:
+            raise ValueError("adapter must be non-empty")
+        return self._append_events_once(
+            receipt_key,
+            events,
+            branch_id=branch_id,
+            session_id=session_id,
+            origin_channel="host_hook",
+            origin_adapter=adapter,
+        )
+
+    def _append_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        branch_id: str,
+        session_id: str | None,
+        origin_channel: str,
+        origin_adapter: str | None,
+    ) -> tuple[tuple[Event, ...], bool]:
         if not receipt_key:
             raise ValueError("receipt_key must be non-empty")
         if not events:
@@ -920,6 +1028,8 @@ class MemoryStore:
                         kind=str(item["kind"]),
                         role=item.get("role"),
                         content=str(item.get("content", "")),
+                        origin_channel=origin_channel,
+                        origin_adapter=origin_adapter,
                         payload=dict(item.get("payload", {})),
                         files=tuple(str(value) for value in item.get("files", ())),
                     )
@@ -1060,6 +1170,8 @@ class MemoryStore:
             session_id=row["session_id"],
             kind=row["kind"],
             role=row["role"],
+            origin_channel=row["origin_channel"],
+            origin_adapter=row["origin_adapter"],
             content=row["content"],
             payload=json.loads(row["payload_json"]),
             files=tuple(json.loads(row["files_json"])),
@@ -1068,6 +1180,10 @@ class MemoryStore:
             content_hash=row["content_hash"],
             chain_hash=row["chain_hash"],
         )
+
+    @staticmethod
+    def _event_origin_evidence(row: sqlite3.Row) -> str:
+        return origin_evidence_type(MemoryStore._event_from_row(row))
 
     @integrity_checked
     def get_event(self, event_id: str) -> Event:
@@ -2637,15 +2753,10 @@ class MemoryStore:
         *,
         source_event_id: str,
         actor: str,
-        origin_evidence_type: str,
+        origin_evidence_type: str | None = None,
     ) -> str:
         if to_status not in {"acknowledgement_requested", "acknowledged"}:
             raise ValueError("unsupported finding transition")
-        if to_status == "acknowledged" and origin_evidence_type not in {
-            "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-            "external_trusted_ui",
-        }:
-            raise PermissionError("finding acknowledgement requires trusted origin")
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT to_status FROM finding_transitions "
@@ -2654,6 +2765,19 @@ class MemoryStore:
             ).fetchone()
             if row is None:
                 raise KeyError(f"unknown security finding: {finding_id}")
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
+                raise KeyError(f"unknown source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if to_status == "acknowledged" and derived_origin not in {
+                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+                "external_trusted_ui",
+            }:
+                raise PermissionError("finding acknowledgement requires trusted origin")
             transition_id = f"ftr_{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO finding_transitions"
@@ -2661,7 +2785,7 @@ class MemoryStore:
                 "actor, origin_evidence_type, created_at) VALUES(?,?,?,?,?,?,?,?)",
                 (
                     transition_id, finding_id, row["to_status"], to_status,
-                    source_event_id, actor, origin_evidence_type, _now(),
+                    source_event_id, actor, derived_origin, _now(),
                 ),
             )
         return transition_id
@@ -2671,21 +2795,25 @@ class MemoryStore:
         policy: dict[str, Any],
         *,
         source_event_id: str,
-        origin_evidence_type: str,
+        origin_evidence_type: str | None = None,
         operation: str = "activated",
     ) -> dict[str, Any]:
-        if origin_evidence_type not in {
-            "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-            "external_trusted_ui",
-        }:
-            raise PermissionError("policy activation requires trusted origin")
         if operation not in {"activated", "replaced", "rollback"}:
             raise ValueError("unsupported policy operation")
         with self._transaction() as conn:
-            if conn.execute(
-                "SELECT 1 FROM events WHERE id=?", (source_event_id,)
-            ).fetchone() is None:
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
                 raise KeyError(f"unknown policy source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if derived_origin not in {
+                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+                "external_trusted_ui",
+            }:
+                raise PermissionError("policy activation requires trusted origin")
             previous = conn.execute(
                 "SELECT id, version FROM policy_ledger "
                 "ORDER BY version DESC LIMIT 1"
@@ -2700,7 +2828,7 @@ class MemoryStore:
                 (
                     policy_id, version, _hash(_json(policy)), _json(policy),
                     source_event_id, previous["id"] if previous else None,
-                    operation, origin_evidence_type, _now(),
+                    operation, derived_origin, _now(),
                 ),
             )
         return {
@@ -2711,9 +2839,9 @@ class MemoryStore:
             "activation_event_id": source_event_id,
             "previous_policy_id": previous["id"] if previous else None,
             "operation": operation,
-            "origin_evidence_type": origin_evidence_type,
+            "origin_evidence_type": derived_origin,
         }
-    @integrity_checked
+
     def active_policy(self) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
@@ -3185,7 +3313,7 @@ class MemoryStore:
         source_event_id: str,
         actor: str,
         rule_id: str,
-        origin_evidence_type: str,
+        origin_evidence_type: str | None = None,
         replacement_candidate_id: str | None = None,
         replacement_memory_id: str | None = None,
     ) -> str:
@@ -3203,10 +3331,6 @@ class MemoryStore:
         }
         if to_status not in allowed:
             raise ValueError(f"unsupported candidate status: {to_status}")
-        if to_status in boundary_statuses and origin_evidence_type not in trusted:
-            raise PermissionError(
-                "trust-boundary transition requires logical-user or stronger origin evidence"
-            )
         if to_status == "superseded" and not (
             replacement_candidate_id or replacement_memory_id
         ):
@@ -3216,10 +3340,18 @@ class MemoryStore:
             current = self._candidate_status_locked(conn, candidate_id)
             if current is None:
                 raise KeyError(f"unknown extraction candidate: {candidate_id}")
-            if conn.execute(
-                "SELECT 1 FROM events WHERE id=?", (source_event_id,)
-            ).fetchone() is None:
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
                 raise KeyError(f"unknown source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if to_status in boundary_statuses and derived_origin not in trusted:
+                raise PermissionError(
+                    "trust-boundary transition requires logical-user or stronger origin evidence"
+                )
             conn.execute(
                 "INSERT INTO candidate_transitions"
                 "(id, candidate_id, from_status, to_status, source_event_id, "
@@ -3228,7 +3360,7 @@ class MemoryStore:
                 "VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)",
                 (
                     transition_id, candidate_id, current, to_status,
-                    source_event_id, actor, rule_id, origin_evidence_type,
+                    source_event_id, actor, rule_id, derived_origin,
                     replacement_candidate_id, replacement_memory_id, _now(),
                 ),
             )
@@ -3258,7 +3390,6 @@ class MemoryStore:
         memory_id: str,
         *,
         source_event_id: str,
-        origin_evidence_type: str = "host_logical_user",
     ) -> None:
         self.transition_candidate(
             candidate_id,
@@ -3266,7 +3397,6 @@ class MemoryStore:
             source_event_id=source_event_id,
             actor="explicit_marker",
             rule_id="normalized_explicit_match",
-            origin_evidence_type=origin_evidence_type,
         )
         with self._transaction() as conn:
             conn.execute(
@@ -3361,20 +3491,99 @@ class MemoryStore:
             "oldest_quarantined_age": oldest_age(quarantined),
         }
 
+    def signal_extraction_worker(self, config_hash: str) -> int:
+        """Durably coalesce extraction wakeups into a monotonic generation."""
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT INTO extraction_wakeups"
+                "(config_hash, generation, owner, lease_until, updated_at) "
+                "VALUES(?,1,NULL,NULL,?) "
+                "ON CONFLICT(config_hash) DO UPDATE SET "
+                "generation=extraction_wakeups.generation+1, updated_at=excluded.updated_at",
+                (config_hash, _now()),
+            )
+            row = conn.execute(
+                "SELECT generation FROM extraction_wakeups WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+        return int(row["generation"])
+
+    def claim_extraction_worker(
+        self,
+        config_hash: str,
+        owner: str,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> int | None:
+        now = time.time()
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT generation, owner, lease_until FROM extraction_wakeups "
+                "WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            if (
+                row["owner"] is not None
+                and row["owner"] != owner
+                and float(row["lease_until"] or 0) > now
+            ):
+                return None
+            conn.execute(
+                "UPDATE extraction_wakeups SET owner=?, lease_until=?, updated_at=? "
+                "WHERE config_hash=?",
+                (owner, now + lease_seconds, _now(), config_hash),
+            )
+            return int(row["generation"])
+
+    def complete_extraction_worker_cycle(
+        self,
+        config_hash: str,
+        owner: str,
+        observed_generation: int,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> tuple[bool, int]:
+        """Release a stable generation or renew the lease when another wakeup arrived."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT generation, owner FROM extraction_wakeups WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+            if row is None or row["owner"] != owner:
+                return True, observed_generation
+            generation = int(row["generation"])
+            if generation == observed_generation:
+                conn.execute(
+                    "UPDATE extraction_wakeups SET owner=NULL, lease_until=NULL, updated_at=? "
+                    "WHERE config_hash=? AND owner=?",
+                    (_now(), config_hash, owner),
+                )
+                return True, generation
+            conn.execute(
+                "UPDATE extraction_wakeups SET lease_until=?, updated_at=? "
+                "WHERE config_hash=? AND owner=?",
+                (time.time() + lease_seconds, _now(), config_hash, owner),
+            )
+            return False, generation
+
     def verify_chain(self) -> tuple[bool, str | None]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM events ORDER BY seq").fetchall()
         previous: str | None = None
         for row in rows:
-            canonical = _json(
-                {
-                    "id": row["id"], "branch_id": row["branch_id"],
-                    "session_id": row["session_id"], "kind": row["kind"],
-                    "role": row["role"], "content": row["content"],
-                    "payload": json.loads(row["payload_json"]),
-                    "files": json.loads(row["files_json"]), "created_at": row["created_at"],
-                }
-            )
+            values = {
+                "id": row["id"], "branch_id": row["branch_id"],
+                "session_id": row["session_id"], "kind": row["kind"],
+                "role": row["role"], "content": row["content"],
+                "payload": json.loads(row["payload_json"]),
+                "files": json.loads(row["files_json"]), "created_at": row["created_at"],
+            }
+            if row["origin_channel"] != "legacy_untrusted":
+                values["origin_channel"] = row["origin_channel"]
+                values["origin_adapter"] = row["origin_adapter"]
+            canonical = _json(values)
             content_hash = _hash(canonical)
             chain_hash = _hash((previous or "") + content_hash)
             if row["previous_hash"] != previous:
@@ -3421,7 +3630,7 @@ class MemoryStore:
             "raw_extractor_payloads": ("extraction_raw_responses",),
             "rebuildable_projections": (
                 "events_fts", "memories_fts", "tool_output_views",
-                "snapshots", "consolidation_receipts",
+                "snapshots", "consolidation_receipts", "extraction_wakeups",
             ),
         }
         result: dict[str, int] = {}

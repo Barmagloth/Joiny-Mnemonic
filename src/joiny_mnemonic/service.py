@@ -67,6 +67,7 @@ class MemoryService:
             context=PluginContext(project_root=self.project_root, database_path=self.store.path)
         )
         selected_extractor = None
+        extractor_name = extractor_name or os.environ.get("JOINY_MNEMONIC_EXTRACTOR_NAME")
         if extractor_name is not None:
             selected_extractor = self.plugins.extractors.get(extractor_name)
             if selected_extractor is None and self.plugins.extractors:
@@ -237,6 +238,7 @@ class MemoryService:
         return self.store.get_budget_policy(branch_id=branch_id)
 
     def close(self) -> None:
+        self.extraction.close()
         closed: set[int] = set()
         for collection in (
             self.plugins.semantic,
@@ -263,10 +265,11 @@ class MemoryService:
         self._witness_status = self.witness.check_and_update(self.store)
         return self._witness_status
     def append_event(self, **values: Any) -> Event:
+        for untrusted_key in ("origin_channel", "origin_adapter", "origin_evidence_type"):
+            values.pop(untrusted_key, None)
         event = self.store.append_event(**values)
         self.consolidator.consolidate_event(self, event)
-        if self.extraction.enabled:
-            self.extraction.process_backlog()
+        self.extraction.notify()
         self.checkpoint_witness()
         return event
 
@@ -332,8 +335,7 @@ class MemoryService:
             event_id=event.id,
         )
         self.consolidator.consolidate_event(self, event)
-        if self.extraction.enabled:
-            self.extraction.process_backlog()
+        self.extraction.notify()
         self.checkpoint_witness()
         return event
 

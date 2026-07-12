@@ -19,6 +19,8 @@ def _event(index: int, item: dict[str, Any]) -> Event:
         session_id="eval",
         kind=item.get("kind", "message"),
         role=item.get("role", "user"),
+        origin_channel="public_api",
+        origin_adapter=None,
         content=item["current"],
         payload={},
         files=tuple(item.get("files", ())),

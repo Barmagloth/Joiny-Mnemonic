@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from .models import Event, MemoryRecord
 from .prompt import conservative_token_estimate
+
+from .provenance import is_host_logical_user, origin_evidence_type
 from .transcript import interaction_groups
 
 if TYPE_CHECKING:
@@ -32,9 +34,9 @@ def consolidation_policy(event: Event) -> ConsolidationPolicy:
     if event.kind != "message":
         return ConsolidationPolicy(allow_records=False, allow_blocks=False)
     role = (event.role or "").casefold()
-    if role == "user":
-        return ConsolidationPolicy(allow_records=True, allow_blocks=True)
-    if role == "assistant":
+    if role in {"user", "assistant"}:
+        if is_host_logical_user(event):
+            return ConsolidationPolicy(allow_records=True, allow_blocks=True)
         return ConsolidationPolicy(allow_records=True, allow_blocks=False)
     return ConsolidationPolicy(allow_records=False, allow_blocks=False)
 
@@ -179,7 +181,7 @@ class EvidenceConsolidator:
         )
         for candidate in self.candidates(event):
             record = None
-            if (event.role or "").casefold() == "user":
+            if is_host_logical_user(event):
                 matched = service.store.find_auto_candidate_match(
                     candidate.memory_type, candidate.content
                 )
@@ -189,7 +191,6 @@ class EvidenceConsolidator:
                         candidate_id,
                         memory_id,
                         source_event_id=event.id,
-                        origin_evidence_type="host_logical_user",
                     )
                     record = service.store.get_memory(memory_id)
             record = record or next(
@@ -215,14 +216,10 @@ class EvidenceConsolidator:
                         "origin": "explicit_marker",
                         "authority_level": (
                             "confirmed"
-                            if (event.role or "").casefold() == "user"
+                            if is_host_logical_user(event)
                             else "auto"
                         ),
-                        "origin_evidence_type": (
-                            "host_logical_user"
-                            if (event.role or "").casefold() == "user"
-                            else "extractor"
-                        ),
+                        "origin_evidence_type": origin_evidence_type(event),
                     },
                 )
                 existing_records.append(record)

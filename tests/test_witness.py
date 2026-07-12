@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import shutil
 import unittest
+import uuid
+from pathlib import Path
 
 from joiny_mnemonic.service import MemoryService
 from joiny_mnemonic.witness import WitnessRegistry
@@ -79,7 +82,8 @@ class WitnessTest(unittest.TestCase):
                     source_event_id=requested_policy.id,
                     origin_evidence_type="extractor",
                 )
-            approval = service.store.append_event(
+            approval = service.store.append_host_event(
+                adapter="claude",
                 kind="message", role="user", content="Подтверждаю новую политику."
             )
             activated = service.store.activate_policy(
@@ -110,6 +114,52 @@ class WitnessTest(unittest.TestCase):
                 findings[0]["id"], source_event_id=approval.id
             )
             self.assertTrue(service.store.list_security_findings()[0]["acknowledged"])
+
+
+    def test_missing_registry_after_checkpoint_is_reported(self) -> None:
+        registry = MemoryWitness()
+        store = FakeStore(1, {1: "h1"})
+        self.assertEqual(
+            registry.check_and_update(store, allow_first=True)["status"],
+            "first_checkpoint",
+        )
+        registry.value = None
+        result = registry.check_and_update(store)
+        self.assertEqual(result["status"], "external_witness_missing")
+        self.assertEqual(result["finding"], "external_witness_missing")
+
+    def test_known_project_database_disappearance_is_reported(self) -> None:
+        runtime = Path(__file__).resolve().parent / "runtime"
+        runtime.mkdir(exist_ok=True)
+        suffix = uuid.uuid4().hex
+        project = runtime / f"witness-project-{suffix}"
+        witness_path = runtime / f"witnesses-{suffix}.json"
+        project.mkdir()
+        try:
+            witness = WitnessRegistry(witness_path)
+            witness._write(
+                {
+                    "version": 1,
+                    "projects": {
+                        "project_missing": {
+                            "canonical_path": str(project.resolve()),
+                            "chains": {},
+                        }
+                    },
+                }
+            )
+            findings = witness.known_project_database_missing(project)
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(
+                findings[0]["finding"], "known_project_database_missing"
+            )
+            database = project / ".joiny-mnemonic" / "memory.db"
+            database.parent.mkdir()
+            database.touch()
+            self.assertEqual(witness.known_project_database_missing(project), ())
+        finally:
+            shutil.rmtree(project)
+            witness_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

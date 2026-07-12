@@ -370,9 +370,10 @@ def process_hook(
         }
 
     receipt_key = _receipt_key(agent, external_session, value)
-    events, _created = service.store.append_events_once(
+    events, _created = service.store.append_host_events_once(
         receipt_key,
         _hook_events(capture_value),
+        adapter=agent,
         branch_id=branch_id,
         session_id=session_id,
     )
@@ -410,8 +411,7 @@ def process_hook(
     # A retry may follow a crash after capture but before consolidation; receipts make
     # capture idempotent and every derived subsystem has its own idempotent receipt.
     service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
-    if service.extraction.enabled:
-        service.extraction.process_backlog()
+    service.extraction.notify(detached=True)
     service.checkpoint_witness()
     decision = service.governor.evaluate_and_apply(
         branch_id=branch_id,

@@ -33,7 +33,8 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.service.close()
 
     def test_explicit_markers_create_sourced_memory_and_protected_blocks(self) -> None:
-        event = self.service.store.append_event(
+        event = self.service.store.append_host_event(
+            adapter="claude",
             kind="message",
             role="user",
             content=(
@@ -136,6 +137,8 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertEqual(process_hook(self.service, "codex", value), {})
         events = self.service.store.query_events(kinds=("tool_call", "tool_output"))
         self.assertEqual([event.kind for event in events], ["tool_call", "tool_output"])
+        self.assertTrue(all(event.origin_channel == "host_hook" for event in events))
+        self.assertTrue(all(event.origin_adapter == "codex" for event in events))
         groups = interaction_groups(events)
         self.assertEqual(len(groups), 1)
         self.assertEqual(len(groups[0]), 2)

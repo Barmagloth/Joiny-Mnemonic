@@ -401,6 +401,8 @@ NuExtract plugin, pin its model revision, validate the Russian calibration corpu
 complementary English regression corpus, then opt in with
 JOINY_MNEMONIC_EXTRACTOR_ENABLED=1.
 
-Use joiny-mnemonic extraction-status to inspect lag and quarantine, extraction-process to drain
-the durable backlog, and extraction-reprocess with a changed structured configuration to preserve
-old audit history while creating new runs.
+Canonical append only emits a durable, coalescible wakeup; model inference runs in a bounded
+background worker and does not delay the append or hook response. Use joiny-mnemonic
+extraction-status to inspect lag and quarantine. extraction-process remains an explicit
+foreground drain/recovery command, while extraction-reprocess creates runs under a changed
+configuration hash without rewriting old audit history.

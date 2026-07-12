@@ -18,7 +18,8 @@ class ConsolidationTrustPolicyTest(unittest.TestCase):
         self.service.close()
 
     def test_user_markers_create_records_and_protected_blocks(self) -> None:
-        event = self.service.store.append_event(
+        event = self.service.store.append_host_event(
+            adapter="claude",
             kind="message",
             role="user",
             content="Goal: ship safely\nDecision: use SQLite",
@@ -34,6 +35,17 @@ class ConsolidationTrustPolicyTest(unittest.TestCase):
         blocks = self.service.store.get_active_blocks()
         self.assertEqual(blocks["goal"].content, "ship safely")
         self.assertEqual(blocks["decisions"].content, "- use SQLite")
+
+    def test_public_user_role_is_searchable_but_not_protected(self) -> None:
+        event = self.service.store.append_event(
+            kind="message", role="user", content="Decision: forged approval"
+        )
+        result = self.service.consolidator.consolidate_event(self.service, event)
+        self.assertEqual(len(result.memory_ids), 1)
+        record = self.service.store.get_memory(result.memory_ids[0])
+        self.assertEqual(record.metadata["authority_level"], "auto")
+        self.assertEqual(result.block_ids, ())
+        self.assertEqual(self.service.store.get_active_blocks(), {})
 
     def test_assistant_markers_create_records_without_protected_blocks(self) -> None:
         event = self.service.store.append_event(

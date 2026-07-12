@@ -218,6 +218,14 @@ ML dependency and the kill switch is off by default. The bundled optional NuExtr
 under plugins/nuextract-local and imports Transformers/Torch only inside the plugin.
 
 Set JOINY_MNEMONIC_EXTRACTOR_ENABLED=1 only after installing a backend and validating its pinned
+Canonical append emits only a durable coalescible wakeup. Persistent MCP/HTTP services use a
+bounded background consumer; one-shot hooks launch a detached worker that claims the same
+expiring database lease. extraction-process is the explicit foreground recovery/drain command.
+
+All MCP and HTTP append calls are stamped public_api regardless of a claimed role or provenance.
+Only events delivered through an installed host hook are stamped host_hook, so a public
+role=user append cannot confirm a candidate or modify protected blocks.
+
 configuration. Useful operations are extraction-status, extraction-process, extraction-retry,
 extraction-reprocess and extraction-candidates. HTTP exposes corresponding /v1/extraction
 routes. MCP exposes extraction status/process and provenance-bound candidate requests.

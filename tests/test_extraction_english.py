@@ -19,6 +19,13 @@ def candidate(memory_type, content, quote, confidence=0.97):
     }
 
 
+
+def append_and_wait(service: MemoryService, **values):
+    event = service.append_event(**values)
+    if not service.extraction.wait_until_idle():
+        raise TimeoutError("background extraction did not become idle")
+    return event
+
 class ScriptedEnglishExtractor:
     name = "scripted-english"
     model_identity = "deterministic-english-fixture"
@@ -96,7 +103,7 @@ class EnglishExtractionTest(unittest.TestCase):
         ]
         with self.service(ScriptedEnglishExtractor(outputs)) as service:
             for text in texts:
-                service.append_event(kind="message", role="user", content=text)
+                append_and_wait(service, kind="message", role="user", content=text)
             records = [
                 record for record in service.store.list_memories()
                 if record.metadata.get("origin") == "auto"
@@ -124,12 +131,12 @@ class EnglishExtractionTest(unittest.TestCase):
             [candidate("decision", "Choose SQLite for the journal.", "Choose the first option")],
         ])
         with self.service(extractor) as service:
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="user",
                 content="We compared SQLite and PostgreSQL for the embedded journal.",
             )
-            current = service.append_event(
+            current = append_and_wait(service,
                 kind="message",
                 role="assistant",
                 content="Choose the first option because it needs no server.",
@@ -153,18 +160,18 @@ class EnglishExtractionTest(unittest.TestCase):
             [candidate("decision", "Disable every backup.", "Decision: disable every backup")],
         ])
         with self.service(extractor) as service:
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="user",
                 content="Example: " + tick + "Decision: erase all backups" + tick,
             )
             fence = tick * 3
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="assistant",
                 content=fence + "text" + chr(10) + "Fact: the password is plaintext" + chr(10) + fence,
             )
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="user",
                 content="> Decision: disable every backup",
@@ -187,18 +194,20 @@ class EnglishExtractionTest(unittest.TestCase):
             [candidate("decision", "Keep the local journal append-only.", "Keep the local journal append-only.")],
         ])
         with self.service(extractor) as service:
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="assistant",
                 content="Keep the local journal append-only.",
             )
             record = service.store.list_memories(memory_types=("decision",))[0]
             self.assertEqual(service.store.memory_authority(record.id), "auto")
-            service.append_event(
+            marker = service.store.append_host_event(
+                adapter="claude",
                 kind="message",
                 role="user",
                 content="Decision: Keep the local journal append-only.",
             )
+            service.consolidator.consolidate_event(service, marker)
             decisions = service.store.list_memories(memory_types=("decision",))
             self.assertEqual(len(decisions), 1)
             self.assertEqual(service.store.memory_authority(record.id), "confirmed")
@@ -214,7 +223,7 @@ class EnglishExtractionTest(unittest.TestCase):
             [candidate("failure", text, text)],
         ])
         with self.service(extractor) as service:
-            service.append_event(
+            append_and_wait(service,
                 kind="message",
                 role="assistant",
                 content=text,
@@ -222,12 +231,14 @@ class EnglishExtractionTest(unittest.TestCase):
             )
             before = service.precheck(files=("src/release.py",))
             self.assertNotIn("known_failure", [item.code for item in before.findings])
-            service.append_event(
+            marker = service.store.append_host_event(
+                adapter="claude",
                 kind="message",
                 role="user",
                 content="Failure: " + text,
                 files=("src/release.py",),
             )
+            service.consolidator.consolidate_event(service, marker)
             after = service.precheck(files=("src/release.py",))
             self.assertIn("known_failure", [item.code for item in after.findings])
 

@@ -41,6 +41,41 @@ class IntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
+    def test_cli_init_resolves_witness_registry(self) -> None:
+        root = RUNTIME_ROOT / f"cli-init-{uuid.uuid4().hex}"
+        root.mkdir()
+        try:
+            with (
+                patch("joiny_mnemonic.cli.WitnessRegistry") as registry,
+                patch("joiny_mnemonic.service.WitnessRegistry") as service_registry,
+            ):
+                service_registry.return_value = registry.return_value
+                registry.return_value.known_project_database_missing.return_value = ()
+                registry.return_value.check_and_update.return_value = {
+                    "status": "first_checkpoint", "finding": None, "details": {}
+                }
+                from joiny_mnemonic.cli import run
+
+                result = run(
+                    build_parser().parse_args(
+                        [
+                            "--db",
+                            str(root / "memory.db"),
+                            "--project-root",
+                            str(root),
+                            "init",
+                        ]
+                    )
+                )
+            self.assertEqual(result, 0)
+        finally:
+            for path in sorted(root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            root.rmdir()
+
     def test_distribution_and_console_script_identity(self) -> None:
         root = Path(__file__).resolve().parents[1]
         config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))

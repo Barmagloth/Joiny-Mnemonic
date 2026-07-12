@@ -246,7 +246,18 @@ Joiny-Mnemonic separates three architectural data classes:
 A successful extraction transaction writes the completed attempt, candidate rows, initial
 transitions, candidate-memory links and auto memory together. The canonical event is already
 durable before that transaction begins. Global event sequence is the work-discovery cursor;
-in-memory signaling, if added by a host, may only wake a worker.
+a durable generation counter coalesces wakeups. A single consumer holds an expiring database
+lease; long-lived services use a background thread and one-shot hook processes launch a detached
+worker. A crashed consumer becomes claimable after lease expiry. Inference is never executed in
+the canonical append or hook response path.
+
+Canonical events also bind origin_channel and origin_adapter into the hash chain. Public CLI,
+HTTP and MCP append are always public_api, even when a caller claims role=user or supplies
+provenance-looking fields. Only the installed host-hook ingress writes host_hook;
+host_logical_user is derived from (role=user, origin_channel=host_hook). Candidate, finding and
+policy boundary transitions reload source_event_id and derive evidence type from that canonical
+event instead of trusting a caller string. Migrated pre-provenance events are
+legacy_untrusted and retain their historical hash format.
 
 The interpretation path is:
 
@@ -257,6 +268,17 @@ Extractor configuration is stored both as structured JSON and a canonical SHA-25
 descriptor covers model identity/version, inference parameters, prompt/schema/parser versions,
 evidence and validator policy versions, and context/normalization versions. Reprocessing uses a
 new hash and never resets an older run.
+
+
+### v1 authority and ledger vocabulary
+
+authority_level is intentionally a two-value projection (auto or confirmed), while
+origin_evidence_type is an independent trust dimension; neither is an ordinal ladder. v1 actor
+values are operational producers (extractor, request_reducer, explicit_marker, and related
+integrity actors), not a closed public enum. supports is an additional evidence relation.
+superseded_by remains reserved; current supersession is represented by the transition journal
+and its replacement candidate/memory IDs. Run status reports an unmatched live attempt as
+running only while its worker lease is live, and as retryable after lease expiry.
 
 Evidence offsets are computed by deterministic code from an exact quote. Missing or repeated
 ambiguous quotes cannot create auto memory. The same pass classifies prose, inline code, fenced
