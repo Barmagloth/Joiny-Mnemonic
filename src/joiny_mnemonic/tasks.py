@@ -172,6 +172,7 @@ class TaskManager:
             branch_id=task.branch_id,
             token_budget=token_budget,
             query=query or f"resume task {task.task_key}: {task.title}",
+            task_key=task.task_key,
         )
 
     def list(self, *, status: str | None = None) -> tuple[TaskRecord, ...]:

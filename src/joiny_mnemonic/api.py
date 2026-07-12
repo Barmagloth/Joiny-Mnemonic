@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from .extraction import ExtractorConfig
 from .service import MemoryService
 
 
@@ -24,7 +25,7 @@ def _json_default(value: Any) -> Any:
 
 def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
     class MemoryRequestHandler(BaseHTTPRequestHandler):
-        server_version = "Joiny-Mnemonic/0.4"
+        server_version = "Joiny-Mnemonic/0.5"
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -68,6 +69,23 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                 if parsed.path == "/v1/capabilities":
                     agent = query.get("agent", [None])[0]
                     self._send(HTTPStatus.OK, service.capabilities(agent))
+                    return
+                if parsed.path == "/v1/security/findings":
+                    self._send(HTTPStatus.OK, service.store.list_security_findings())
+                    return
+                if parsed.path == "/v1/security/status":
+                    self._send(HTTPStatus.OK, service.security_status())
+                    return
+                if parsed.path == "/v1/extraction/status":
+                    self._send(HTTPStatus.OK, service.extraction.status())
+                    return
+                if parsed.path == "/v1/extraction/candidates":
+                    self._send(
+                        HTTPStatus.OK,
+                        service.store.list_extraction_candidates(
+                            status=query.get("status", [None])[0]
+                        ),
+                    )
                     return
                 if parsed.path == "/v1/timeline":
                     branch = query.get("branch", ["main"])[0]
@@ -169,7 +187,7 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         )
                     }
                 elif path == "/v1/events":
-                    result = service.store.append_event(**body)
+                    result = service.append_event(**body)
                 elif path == "/v1/artifacts":
                     values = dict(body)
                     if "data_base64" in values:
@@ -185,6 +203,18 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     values = dict(body)
                     entity = values.pop("entity")
                     result = service.knowledge_neighbors(entity, **values)
+                elif path == "/v1/source":
+                    identifier = body.get("id")
+                    identifiers = body.get("ids")
+                    if (identifier is None) == (identifiers is None):
+                        raise ValueError("source requires exactly one of id or ids")
+                    result = (
+                        service.exact_source(identifier)
+                        if identifier is not None
+                        else service.exact_sources(identifiers)
+                    )
+                elif path == "/v1/context":
+                    result = service.context_around(**body)
                 elif path == "/v1/snapshots":
                     result = service.create_snapshot(**body)
                 elif path == "/v1/resume":
@@ -234,6 +264,20 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         token_budget=body.get("token_budget", 1500),
                         query=body.get("query"),
                     )
+                elif path == "/v1/security/findings/ack-request":
+                    result = service.request_finding_acknowledgement(**body)
+                elif path == "/v1/policy/request":
+                    result = service.request_policy_change(**body)
+                elif path == "/v1/extraction/process":
+                    result = service.extraction.process_backlog(**body)
+                elif path == "/v1/extraction/retry":
+                    result = service.extraction.retry_failures(**body)
+                elif path == "/v1/extraction/reprocess":
+                    values = dict(body)
+                    configuration = ExtractorConfig(**values.pop("config"))
+                    result = service.extraction.reprocess(configuration, **values)
+                elif path == "/v1/candidates/request":
+                    result = service.request_candidate_transition(**body)
                 elif path == "/v1/consolidate":
                     result = service.consolidate(**body)
                 elif path == "/v1/compact":

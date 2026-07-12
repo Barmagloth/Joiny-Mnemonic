@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .api import serve
+from .extraction import ExtractorConfig
+from .extraction_evaluation import evaluate_extractor
 from .evaluation import (
     EvaluationTask,
     FullHistoryPolicy,
@@ -19,7 +21,12 @@ from .evaluation import (
     evaluate_policies,
     evaluate_with_runner,
 )
-from .hooks import install_hooks, process_hook, resolve_hook_project
+from .hooks import (
+    install_git_precommit,
+    install_hooks,
+    process_hook,
+    resolve_hook_project,
+)
 from .mcp import serve_stdio
 from .paths import (
     resolve_project_database,
@@ -28,6 +35,7 @@ from .paths import (
 )
 from .physical import PhysicalCandidate, PhysicalMemoryGovernor, Placement
 from .service import MemoryService
+from .witness import WitnessRegistry
 
 
 def _plain(value: Any) -> Any:
@@ -60,6 +68,12 @@ def _json_array(value: str) -> list[str]:
     if not isinstance(result, list) or not result or not all(isinstance(item, str) for item in result):
         raise argparse.ArgumentTypeError("expected a non-empty JSON array of strings")
     return result
+
+
+def _identifier_list(values: list[str]) -> list[str]:
+    if len(values) == 1 and values[0].lstrip().startswith("["):
+        return _json_array(values[0])
+    return values
 
 
 def _hook_json_input(stream: Any) -> dict[str, Any]:
@@ -137,7 +151,12 @@ def build_parser() -> argparse.ArgumentParser:
     block.add_argument("--source", action="append", default=[])
 
     derive = commands.add_parser("derive")
-    derive.add_argument("memory_type", choices=["fact", "decision", "task", "preference", "summary", "index"])
+    derive.add_argument(
+        "memory_type",
+        choices=[
+            "fact", "decision", "task", "preference", "failure", "lesson", "summary", "index"
+        ],
+    )
     derive.add_argument("content")
     derive.add_argument("--summary", default="")
     derive.add_argument("--source", action="append", required=True)
@@ -158,13 +177,59 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--exact", action="store_true")
     search.add_argument("--no-events", action="store_true")
     search.add_argument("--no-semantic", action="store_true")
+    search.add_argument("--staleness", action="store_true")
+
+    stale = commands.add_parser("stale")
+    stale.add_argument("--branch", default="main")
+    selector = stale.add_mutually_exclusive_group()
+    selector.add_argument("--id")
+    selector.add_argument("--file")
+    stale.add_argument("--threshold", type=int, default=3)
+
+    precheck = commands.add_parser("precheck")
+    precheck.add_argument("--branch", default="main")
+    precheck.add_argument("--file", action="append", default=[])
+    precheck.add_argument("--staged", action="store_true")
+    precheck.add_argument("--command", dest="candidate_command")
+    precheck.add_argument("--strict", action="store_true")
+
+    commands.add_parser("extraction-status")
+    commands.add_parser("extraction-worker", help=argparse.SUPPRESS)
+
+    extraction_process = commands.add_parser("extraction-process")
+    extraction_process.add_argument("--limit", type=int)
+
+    extraction_retry = commands.add_parser("extraction-retry")
+    extraction_retry.add_argument("--limit", type=int)
+
+    extraction_reprocess = commands.add_parser("extraction-reprocess")
+    extraction_reprocess.add_argument("config", type=_json_object)
+    extraction_reprocess.add_argument("--limit", type=int)
+
+    extraction_candidates = commands.add_parser("extraction-candidates")
+    extraction_candidates.add_argument("--status")
+
+    candidate_request = commands.add_parser("candidate-request")
+    candidate_request.add_argument("candidate_id")
+    candidate_request.add_argument("action", choices=["confirm", "reject", "supersede"])
+    candidate_request.add_argument("--branch", default="main")
+    candidate_request.add_argument("--replacement-candidate")
+    candidate_request.add_argument("--replacement-memory")
+    commands.add_parser("install-git-hook")
 
     graph = commands.add_parser("graph-neighbors")
     graph.add_argument("entity")
     graph.add_argument("--branch", default="main")
     graph.add_argument("--limit", type=int, default=20)
     source = commands.add_parser("source")
-    source.add_argument("id")
+    source.add_argument("ids", nargs="+")
+
+    context = commands.add_parser("context")
+    context.add_argument("id")
+    context.add_argument("--branch")
+    context.add_argument("--before", type=int, default=3)
+    context.add_argument("--after", type=int, default=3)
+    context.add_argument("--include-source", action="store_true")
 
     project_source = commands.add_parser("project-source")
     project_source.add_argument("path")
@@ -295,6 +360,18 @@ def build_parser() -> argparse.ArgumentParser:
     task_list = commands.add_parser("task-list")
     task_list.add_argument("--status", choices=["active", "blocked", "completed", "cancelled"])
 
+    findings = commands.add_parser("findings")
+    findings.add_argument("--acknowledged", action="store_true")
+
+    finding_request = commands.add_parser("finding-ack-request")
+    finding_request.add_argument("finding_id")
+    finding_request.add_argument("--branch", default="main")
+
+    policy_request = commands.add_parser("policy-request")
+    policy_request.add_argument("policy", type=_json_object)
+    policy_request.add_argument("--branch", default="main")
+
+    commands.add_parser("doctor")
     commands.add_parser("verify")
 
     api = commands.add_parser("serve")
@@ -311,6 +388,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--resume-budget", type=int, default=1500)
     evaluate.add_argument("--minimum", type=float)
 
+    evaluate_extraction = commands.add_parser("evaluate-extraction")
+    evaluate_extraction.add_argument("corpus")
+    evaluate_extraction.add_argument("--minimum-precision", type=float)
     evaluate_runner = commands.add_parser("evaluate-runner")
     evaluate_runner.add_argument("tasks", help="JSON file containing task-level evaluation tasks")
     evaluate_runner.add_argument(
@@ -346,6 +426,10 @@ def run(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    if args.command == "install-git-hook":
+        project_root = resolve_runtime_project(args.project_root)
+        _print(install_git_precommit(project_root))
+        return 0
     if args.command == "hook":
         value = _hook_json_input(sys.stdin)
         if args.global_scope:
@@ -368,16 +452,30 @@ def run(args: argparse.Namespace) -> int:
         return 0
     project_root = resolve_runtime_project(args.project_root)
     database = resolve_runtime_database(args.db, project_root)
+    missing_database = (
+        WitnessRegistry().known_project_database_missing(project_root)
+        if args.command == "init" else ()
+    )
     service = MemoryService(database, project_root=project_root)
     try:
         if args.command == "init":
-            _print({"database": str(service.store.path), "initialized": True})
+            initialized = service.initialize_project()
+            for finding in missing_database:
+                service.store.record_security_finding(
+                    "known_project_database_missing",
+                    incident_key=(
+                        "known_project_database_missing:"
+                        + str(finding["project_instance_id"])
+                    ),
+                    details=dict(finding),
+                )
+            _print({"database": str(service.store.path), **initialized})
         elif args.command == "session-start":
             _print({"id": service.store.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
         elif args.command == "branch-create":
             _print({"id": service.store.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
         elif args.command == "append":
-            _print(service.store.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
+            _print(service.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
         elif args.command == "artifact":
             path = Path(args.path)
             _print(service.store.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
@@ -386,13 +484,60 @@ def run(args: argparse.Namespace) -> int:
         elif args.command == "derive":
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes))
         elif args.command == "search":
-            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic))
+            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness))
+        elif args.command == "stale":
+            _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
+        elif args.command == "precheck":
+            report = service.precheck(
+                branch_id=args.branch,
+                files=args.file,
+                staged=args.staged,
+                command=args.candidate_command,
+            )
+            _print(report)
+            if args.strict and report.blocked:
+                raise SystemExit(2)
+        elif args.command == "extraction-status":
+            _print(service.extraction.status())
+        elif args.command == "extraction-worker":
+            _print(service.extraction.run_worker())
+        elif args.command == "extraction-process":
+            _print(service.extraction.process_backlog(limit=args.limit))
+        elif args.command == "extraction-retry":
+            _print(service.extraction.retry_failures(limit=args.limit))
+        elif args.command == "extraction-reprocess":
+            _print(service.extraction.reprocess(
+                ExtractorConfig(**args.config), limit=args.limit
+            ))
+        elif args.command == "extraction-candidates":
+            _print(service.store.list_extraction_candidates(status=args.status))
+        elif args.command == "candidate-request":
+            _print(service.request_candidate_transition(
+                args.candidate_id,
+                args.action,
+                branch_id=args.branch,
+                replacement_candidate_id=args.replacement_candidate,
+                replacement_memory_id=args.replacement_memory,
+            ))
         elif args.command == "graph-neighbors":
             _print(service.knowledge_neighbors(
                 args.entity, branch_id=args.branch, limit=args.limit
             ))
         elif args.command == "source":
-            _print(service.exact_source(args.id))
+            identifiers = _identifier_list(args.ids)
+            _print(
+                service.exact_source(identifiers[0])
+                if len(identifiers) == 1
+                else service.exact_sources(identifiers)
+            )
+        elif args.command == "context":
+            _print(service.context_around(
+                args.id,
+                branch_id=args.branch,
+                before=args.before,
+                after=args.after,
+                include_source=args.include_source,
+            ))
         elif args.command == "project-source":
             _print(service.project_source(args.path, expected_hash=args.expected_hash))
         elif args.command == "timeline":
@@ -483,6 +628,24 @@ def run(args: argparse.Namespace) -> int:
             print(packet.text) if args.text_only else _print(packet)
         elif args.command == "task-list":
             _print(service.tasks.list(status=args.status))
+        elif args.command == "findings":
+            values = service.store.list_security_findings()
+            _print(
+                [item for item in values if item["acknowledged"]]
+                if args.acknowledged else values
+            )
+        elif args.command == "finding-ack-request":
+            _print(service.request_finding_acknowledgement(
+                args.finding_id, branch_id=args.branch
+            ))
+        elif args.command == "policy-request":
+            _print(service.request_policy_change(args.policy, branch_id=args.branch))
+        elif args.command == "doctor":
+            _print({
+                **service.verify(),
+                **service.security_status(),
+                "extraction": service.extraction.status(),
+            })
         elif args.command == "verify":
             result = service.verify()
             _print(result)
@@ -504,6 +667,24 @@ def run(args: argparse.Namespace) -> int:
             )
             if args.minimum is not None:
                 assert_resume_quality(report, args.minimum)
+            _print(report)
+        elif args.command == "evaluate-extraction":
+            if service.extraction.extractor is None or service.extraction.config is None:
+                raise ValueError("no extractor plugin/configuration is available")
+            report = evaluate_extractor(
+                service.extraction.extractor,
+                service.extraction.config,
+                args.corpus,
+            )
+            if (
+                args.minimum_precision is not None
+                and report["overall"]["precision"] < args.minimum_precision
+            ):
+                raise AssertionError(
+                    "extraction precision "
+                    f"{report['overall']['precision']:.4f} is below "
+                    f"{args.minimum_precision:.4f}"
+                )
             _print(report)
         elif args.command == "evaluate-runner":
             report = evaluate_with_runner(

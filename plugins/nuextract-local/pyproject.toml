@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joiny-mnemonic-nuextract"
+version = "0.1.0"
+description = "Optional local NuExtract backend for Joiny-Mnemonic"
+requires-python = ">=3.11"
+dependencies = [
+  "transformers>=4.45",
+  "torch>=2.2",
+  "accelerate>=0.34",
+]
+
+[project.entry-points."joiny_mnemonic.extractor"]
+nuextract-local = "joiny_mnemonic_nuextract:create_plugin"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

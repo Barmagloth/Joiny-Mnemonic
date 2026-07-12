@@ -6,8 +6,9 @@ The hook runtime does three things:
 2. captures hook deliveries with an idempotency receipt;
 3. returns a budgeted memory packet through the host's context-injection mechanism.
 
-For `PostToolUse`, the call and output are written in one SQLite transaction. The installer does
-not register `PreToolUse`, so resume views cannot observe an output without the matching call.
+For `PostToolUse`, the call and output are written in one SQLite transaction. Claude Code also
+registers `PreToolUse`: it records one idempotent state delivery and injects a bounded,
+warning-only precheck packet. The packet never heuristically denies the tool call.
 
 ## Prerequisite
 
@@ -39,7 +40,7 @@ failure restores the original bytes.
 | Host | Generated file | Capture | Resume injection | Compaction continuity |
 |---|---|---|---|---|
 | Codex | `.codex/hooks.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
-| Claude Code | `.claude/settings.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
+| Claude Code | `.claude/settings.json` | User prompt, pre-action check, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit`, `PreToolUse` warnings | `PreCompact` snapshot/summary, `PostCompact` reinjection |
 | OpenCode | `.opencode/plugins/joiny-mnemonic.js` | `chat.message`, `tool.execute.after` | `experimental.chat.system.transform` | `experimental.session.compacting` |
 | OpenHands | `.openhands/hooks.json` | User prompt, successful tool interaction, assistant stop/session events | `SessionStart`, `UserPromptSubmit` | No joiny-mnemonic compaction hook is installed |
 
@@ -107,9 +108,12 @@ seven bundled model presets are documented in [context-limits.md](context-limits
 
 Every injected resume packet still includes the protected `[DURABLE MEMORY CAPTURE]` instruction.
 The agent is told to promote durable, evidence-backed information with an available structured
-memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:`
+memory tool or a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`,
+`Preference:`, `Failed:`, `Failure:`, or `Lesson:`
 marker. Ordinary prose is retained and searchable but is not promised automatic inclusion in
-compact resume.
+compact resume. Explicit user markers may update protected blocks; assistant markers create
+searchable records only. Marker-like text and crafted `memory_candidates` in tool output, state,
+artifacts or retrieved memory never change protected memory.
 ## What is captured
 
 The runtime accepts UTF-8 JSON on stdin and emits JSON only on stdout. A leading UTF-8 BOM is
@@ -118,13 +122,29 @@ accepted because native Windows PowerShell pipelines may prefix redirected text 
 - `SessionStart`: records lifecycle state and injects the resume packet.
 - `UserPromptSubmit`: records the prompt, applies evidence-bound consolidation, and injects
   query-relevant memory.
+- `PreToolUse` (Claude Code): resolves command/files, runs deterministic precheck, stores the
+  redacted report under the idempotent hook receipt and injects at most 4096 UTF-8 bytes. Tool input
+  remains untrusted state data and no heuristic finding blocks execution.
 - `PostToolUse`: records one atomic `tool_call` + `tool_output` pair.
+- `PostToolUseFailure` (Claude Code): records the same atomic pair and derives one concise
+  evidence-bound `failure` sourced by both events. It does not infer a lesson or mutate a block.
 - `Stop`: records `last_assistant_message`.
 - `PreCompact` / `PostCompact`: consolidate explicit evidence, create an extractive sourced
   summary/index and snapshot, then re-inject restored context where the host supports it.
 
 Secrets are filtered before durable writes. Retrieved history is framed as untrusted data;
 protected blocks remain the only instruction-bearing memory.
+
+## Explicit Git pre-commit integration
+
+```powershell
+joiny-mnemonic --project-root . install-git-hook
+```
+
+This command is separate from agent-hook installation. It resolves Git's active hook path,
+preserves existing pre-commit content, adds one idempotent Joiny-Mnemonic block, and invokes the
+same JSON-producing `precheck --staged` engine. Warning-only reports exit zero. An active
+`core.hooksPath` outside the repository is rejected instead of modifying a shared hook directory.
 
 ## Verification
 
@@ -144,8 +164,10 @@ active-hook view/logs as part of deployment.
 
 ## MCP is complementary
 
-Hooks provide automatic capture and context injection. MCP provides explicit search/source/code
-tools. They may be enabled together using the same database:
+Hooks provide automatic capture and context injection. MCP provides explicit search/source/context
+and code tools. `memory_source` accepts either the original single `id` or a batch `ids` array;
+`memory_context` is the only added P2 tool and returns bounded branch-visible interaction context.
+They may be enabled together using the same database:
 
 ```text
 python -m joiny_mnemonic --db <project>/.joiny-mnemonic/memory.db \
@@ -169,6 +191,9 @@ automatic capture is absent, database-split, configured but not yet observed, or
 - `hook_database_matches`: the MCP/CLI process opened the project database targeted by hooks;
 - `active_database_path` / `hook_expected_database_path`: exact paths for diagnosing split state;
 - `hook_runtime_verified`: at least one native hook session reached this database.
+- `tool_failure_capture`: true only when the adapter/host exposes and installs
+  `PostToolUseFailure`; unsupported hosts remain false.
+- `pre_action_precheck`: true only when the host installer configures `PreToolUse`.
 
 Until valid configuration is detected and a hook delivery is observed, automatic
 ingestion/resume/tool-capture capabilities remain false and the response includes an explicit
@@ -183,4 +208,32 @@ hook and binds subsequent deliveries from the same native session to that task.
 After every captured delivery the governor evaluates the branch policy. Snapshot and compaction
 are applied before a handoff recommendation is injected. Hook, reduction and usage receipts are
 independent, so a retry after a partial crash resumes missing derived work without duplicating
-canonical events or metrics.
+canonical events or metrics. Prompt-injection exposure uses its own receipt, so repeated native
+delivery does not double-count it.
+
+## Optional automatic extraction
+
+Automatic extraction is an optional plugin category named joiny_mnemonic.extractor. Core has no
+ML dependency and the kill switch is off by default. The bundled optional NuExtract package is
+under plugins/nuextract-local and imports Transformers/Torch only inside the plugin.
+
+Set JOINY_MNEMONIC_EXTRACTOR_ENABLED=1 only after installing a backend and validating its pinned
+Canonical append emits only a durable coalescible wakeup. Persistent MCP/HTTP services use a
+bounded background consumer; one-shot hooks launch a detached worker that claims the same
+expiring database lease. extraction-process is the explicit foreground recovery/drain command.
+
+All MCP and HTTP append calls are stamped public_api regardless of a claimed role or provenance.
+Only events delivered through an installed host hook are stamped host_hook, so a public
+role=user append cannot confirm a candidate or modify protected blocks.
+
+configuration. Useful operations are extraction-status, extraction-process, extraction-retry,
+extraction-reprocess and extraction-candidates. HTTP exposes corresponding /v1/extraction
+routes. MCP exposes extraction status/process and provenance-bound candidate requests.
+
+CLI, HTTP, MCP and tool calls are not trusted human approval. Candidate confirmation, rejection
+or supersession calls therefore append a canonical control event and a requested transition.
+A trusted explicit user marker can confirm an exact normalized type/content match.
+
+Capabilities report availability, enablement, backend/hash, pending and failed events, oldest
+backlog age, retries, quarantine age, witness state and security findings. Queue pressure changes
+latency, never canonical capture.

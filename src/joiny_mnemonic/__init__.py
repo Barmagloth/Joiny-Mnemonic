@@ -5,6 +5,8 @@ from .models import (
     Artifact,
     BudgetPolicy,
     Event,
+    ExtractionCandidate,
+    ExtractionStatus,
     GovernorDecision,
     MemoryRecord,
     PromptPacket,
@@ -14,13 +16,20 @@ from .models import (
     ToolOutputView,
     UsageSample,
 )
+from .context import ContextIndexEntry, ContextWindow, ExactSourceResult
+from .extraction import ExtractorConfig
+from .precheck import PrecheckFinding, PrecheckReport
 from .service import MemoryService
+from .staleness import MemoryStaleness
 from .storage import MemoryStore
 
 __all__ = [
-    "ActiveBlock", "Artifact", "BudgetPolicy", "Event", "GovernorDecision",
-    "MemoryRecord", "MemoryService", "MemoryStore", "PromptPacket", "RetrievalHit",
+    "ActiveBlock", "Artifact", "BudgetPolicy", "ContextIndexEntry", "ContextWindow",
+    "Event", "ExactSourceResult", "ExtractionCandidate", "ExtractionStatus",
+    "ExtractorConfig", "GovernorDecision",
+    "MemoryRecord", "MemoryService", "MemoryStaleness", "MemoryStore",
+    "PrecheckFinding", "PrecheckReport", "PromptPacket", "RetrievalHit",
     "Snapshot", "TaskRecord", "ToolOutputView", "UsageSample",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

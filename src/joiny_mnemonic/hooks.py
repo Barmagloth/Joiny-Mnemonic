@@ -7,13 +7,14 @@ import re
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from .adapters import adapter_capabilities
 from .context_limits import ContextLimitConfig
 from .paths import resolve_project_database
+from .reducers import first_failure_line
 from .service import MemoryService
 
 
@@ -167,20 +168,119 @@ def _task_key(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _tool_files(value: dict[str, Any]) -> tuple[str, ...]:
+    found: list[str] = []
+
+    def add(candidate: Any) -> None:
+        values = candidate if isinstance(candidate, (list, tuple, set)) else (candidate,)
+        for item in values:
+            if item is None:
+                continue
+            path = str(item).strip()
+            if path and path not in found:
+                found.append(path)
+
+    inputs = value.get("tool_input", value.get("args", {}))
+    for container in (value, inputs if isinstance(inputs, dict) else {}):
+        for key in ("file_path", "path", "paths", "filename", "files"):
+            if key in container:
+                add(container[key])
+    return tuple(found)
+
+
+def _first_nonempty_line(value: Any) -> str | None:
+    text = _json_text(value) if not isinstance(value, str) else value
+    for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = " ".join(raw.split())
+        if line:
+            return line[:240]
+    return None
+
+
+def _explicit_failure_line(value: dict[str, Any]) -> str | None:
+    containers: list[dict[str, Any]] = [value]
+    for key in ("tool_response", "tool_output", "output"):
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for key in ("error", "message"):
+            candidate = container.get(key)
+            if isinstance(candidate, dict):
+                nested = _explicit_failure_line(candidate)
+                if nested:
+                    return nested
+            elif candidate is not None:
+                line = _first_nonempty_line(candidate)
+                if line:
+                    return line
+    return None
+
+
+def _tool_command(value: dict[str, Any]) -> str | None:
+    inputs = value.get("tool_input", value.get("args", {}))
+    containers = (value, inputs if isinstance(inputs, dict) else {})
+    for container in containers:
+        for key in ("command", "cmd", "script", "query"):
+            if container.get(key):
+                return str(container[key])
+    return str(inputs) if isinstance(inputs, str) and inputs.strip() else None
+
+
+def _derive_native_failure(
+    service: MemoryService,
+    value: dict[str, Any],
+    events: tuple[Any, ...],
+) -> None:
+    pair = tuple(event for event in events if event.kind in {"tool_call", "tool_output"})
+    if len(pair) != 2:
+        return
+    source_ids = tuple(event.id for event in pair)
+    output = next(event for event in pair if event.kind == "tool_output")
+    tool_name = str(
+        value.get("tool_name", value.get("tool", value.get("name", pair[0].content or "tool")))
+    ).strip() or "tool"
+    detail = (
+        _explicit_failure_line(value)
+        or first_failure_line(output.content)
+        or _first_nonempty_line(output.content)
+    )
+    content = f"{tool_name} failed" + (f": {detail}" if detail else "")
+    files = tuple(dict.fromkeys((*_tool_files(value), *(path for event in pair for path in event.files))))
+    for record in service.store.list_memories(
+        branch_id=pair[0].branch_id, include_superseded=True
+    ):
+        if (
+            record.memory_type == "failure"
+            and record.source_event_ids == source_ids
+            and record.content == content
+        ):
+            return
+    service.derive_memory(
+        memory_type="failure",
+        content=content,
+        source_event_ids=source_ids,
+        files=files,
+        branch_id=pair[0].branch_id,
+    )
+
+
 def _hook_events(value: dict[str, Any]) -> list[dict[str, Any]]:
     name = _event_name(value)
     payload = dict(value)
     if name == "UserPromptSubmit":
         return [{"kind": "message", "role": "user", "content": str(value.get("prompt", "")), "payload": payload}]
-    if name == "PostToolUse":
+    if name in {"PostToolUse", "PostToolUseFailure"}:
         call_id = _call_id(value)
         base = {**payload, "_memory_call_id": call_id}
+        files = _tool_files(value)
         return [
             {
                 "kind": "tool_call",
                 "role": "assistant",
                 "content": str(value.get("tool_name", value.get("tool", "tool"))),
                 "payload": {**base, "tool_input": value.get("tool_input", value.get("args", {}))},
+                "files": files,
             },
             {
                 "kind": "tool_output",
@@ -189,6 +289,7 @@ def _hook_events(value: dict[str, Any]) -> list[dict[str, Any]]:
                     value.get("tool_response", value.get("tool_output", value.get("output", "")))
                 ),
                 "payload": base,
+                "files": files,
             },
         ]
     if name == "Stop":
@@ -255,14 +356,30 @@ def process_hook(
         service.consolidator.compact(service, branch_id=branch_id)
         service.create_snapshot(branch_id=branch_id)
 
+    precheck_report = None
+    capture_value = value
+    if event_name == "PreToolUse":
+        precheck_report = service.precheck(
+            files=_tool_files(value),
+            command=_tool_command(value),
+            branch_id=branch_id,
+        )
+        capture_value = {
+            **value,
+            "_joiny_precheck": asdict(precheck_report),
+        }
+
     receipt_key = _receipt_key(agent, external_session, value)
-    events, _created = service.store.append_events_once(
+    events, _created = service.store.append_host_events_once(
         receipt_key,
-        _hook_events(value),
+        _hook_events(capture_value),
+        adapter=agent,
         branch_id=branch_id,
         session_id=session_id,
     )
     service.reduce_tool_outputs(events)
+    if event_name == "PostToolUseFailure":
+        _derive_native_failure(service, value, events)
     service.usage.capture_native(
         value,
         source=agent,
@@ -294,12 +411,23 @@ def process_hook(
     # A retry may follow a crash after capture but before consolidation; receipts make
     # capture idempotent and every derived subsystem has its own idempotent receipt.
     service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
+    service.extraction.notify(detached=True)
+    service.checkpoint_witness()
     decision = service.governor.evaluate_and_apply(
         branch_id=branch_id,
         session_id=session_id,
         source_event=events[-1],
         agent=agent,
     )
+
+    if event_name == "PreToolUse":
+        stored = events[-1].payload.get("_joiny_precheck")
+        if isinstance(stored, dict):
+            precheck_report = service.prechecks.from_dict(stored)
+        if precheck_report is not None:
+            warning_packet = service.prechecks.render(precheck_report, max_bytes=4096)
+            if warning_packet:
+                return _context_output(agent, event_name, warning_packet)
 
     inject_context = event_name in {"SessionStart", "UserPromptSubmit", "PostCompact"}
     if agent == "opencode" and event_name == "PreCompact":
@@ -308,7 +436,14 @@ def process_hook(
         inject_context = True
     if inject_context:
         query = str(value.get("prompt", "resume current goal constraints decisions and open tasks"))
-        packet = service.resume(branch_id=branch_id, token_budget=token_budget, query=query)
+        packet = service.resume(
+            branch_id=branch_id,
+            token_budget=token_budget,
+            query=query,
+            session_id=session_id,
+            task_key=task.task_key if task is not None else None,
+            telemetry_receipt=f"prompt-injection:{receipt_key}",
+        )
         context = packet.text
         thresholds = service.governor.thresholds(policy)
         if warning and counter is not None:
@@ -408,6 +543,75 @@ def _durable_write(path: Path, data: bytes) -> None:
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def install_git_precommit(project_root: str | Path) -> dict[str, str]:
+    root = Path(project_root).resolve()
+    def git_path(*arguments: str) -> Path:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ValueError(f"{root} is not a Git repository")
+        value = Path(completed.stdout.strip())
+        return value.resolve() if value.is_absolute() else (root / value).resolve()
+
+    common_dir = git_path("--git-common-dir")
+    hooks_dir = git_path("--git-path", "hooks")
+    allowed_roots = (root, common_dir)
+    if not any(
+        hooks_dir == allowed or allowed in hooks_dir.parents
+        for allowed in allowed_roots
+    ):
+        raise ValueError(
+            "active core.hooksPath is outside this repository; configure a "
+            "repository-local hooks path before installing"
+        )
+    path = hooks_dir / "pre-commit"
+    begin = "# joiny-mnemonic precheck begin"
+    end = "# joiny-mnemonic precheck end"
+    command = shlex.join(
+        [
+            sys.executable,
+            "-m",
+            "joiny_mnemonic",
+            "--db",
+            str(resolve_project_database(root)),
+            "--project-root",
+            str(root),
+            "precheck",
+            "--staged",
+        ]
+    )
+    block = f"{begin}\n{command}\n{end}"
+    if path.exists():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"{path} is not UTF-8; hook was not modified") from exc
+    else:
+        existing = "#!/bin/sh\n"
+    if begin in existing:
+        start = existing.index(begin)
+        finish = existing.find(end, start)
+        if finish < 0:
+            raise ValueError(f"{path} contains an incomplete joiny-mnemonic block")
+        finish += len(end)
+        updated = existing[:start] + block + existing[finish:]
+        status = "updated"
+    else:
+        updated = existing.rstrip() + "\n\n" + block + "\n"
+        status = "installed"
+    _durable_write(path, updated.encode("utf-8"))
+    try:
+        path.chmod(path.stat().st_mode | 0o111)
+    except OSError:
+        pass
+    return {"path": str(path), "status": status, "command": command}
 
 
 def _json_backup_path(path: Path) -> Path:
@@ -728,7 +932,14 @@ def install_hooks(
     backup_path: Path | None = None
     if agent == "claude-code":
         backup_path = _merge_command_hooks(
-            path, command, lifecycle_events, nested=True
+            path,
+            command,
+            {
+                **lifecycle_events,
+                "PreToolUse": "*",
+                "PostToolUseFailure": "*",
+            },
+            nested=True,
         )
         notes = (
             "Global hooks resolve project root from each native hook payload."

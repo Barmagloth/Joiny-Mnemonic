@@ -35,7 +35,11 @@ class ClaudeCodeAdapter:
     name = "claude-code"
     capabilities = AgentCapabilities(
         agent=name,
-        hooks=frozenset({"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "PostCompact"}),
+        hooks=frozenset({
+            "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+            "PostToolUseFailure",
+            "Stop", "PreCompact", "PostCompact",
+        }),
         kv_access=False,
         lifecycle_events=True,
     )
@@ -49,7 +53,7 @@ class ClaudeCodeAdapter:
                 "tool_call", str(native_event.get("tool_name", "tool")), "assistant",
                 _payload_with_call_id(native_event),
             )
-        if hook == "PostToolUse":
+        if hook in {"PostToolUse", "PostToolUseFailure"}:
             return NormalizedEvent(
                 "tool_output", str(native_event.get("tool_response", "")), "tool",
                 _payload_with_call_id(native_event),
@@ -63,7 +67,10 @@ class CodexAdapter:
     name = "codex"
     capabilities = AgentCapabilities(
         agent=name,
-        hooks=frozenset({"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "PreCompact", "PostCompact"}),
+        hooks=frozenset({
+            "SessionStart", "UserPromptSubmit", "PostToolUse",
+            "Stop", "PreCompact", "PostCompact",
+        }),
         kv_access=False,
         lifecycle_events=True,
     )
@@ -169,6 +176,8 @@ def adapter_capabilities(agent: str, supplied: dict[str, Any] | None = None) -> 
         "event_ingestion": bool(hooks),
         "automatic_resume": bool(hooks & {"SessionStart", "experimental.chat.system.transform"}),
         "tool_capture": bool(hooks & {"PostToolUse", "tool.execute.after"}),
+        "tool_failure_capture": "PostToolUseFailure" in hooks,
+        "pre_action_precheck": "PreToolUse" in hooks,
         "active_compaction": bool(hooks & {"PreCompact", "PostCompact", "experimental.session.compacting"}),
         "hook_installer": agent in {"claude-code", "codex", "opencode", "openhands"},
         "kv_cache_tiers": kv_access,

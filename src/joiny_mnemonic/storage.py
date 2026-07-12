@@ -7,7 +7,9 @@ import json
 import re
 import sqlite3
 import threading
+import time
 import uuid
+import zlib
 from collections.abc import Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -15,10 +17,13 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .models import (
-    ActiveBlock, Artifact, BudgetPolicy, Event, MemoryRecord, Snapshot, TaskRecord,
+    ActiveBlock, Artifact, BudgetPolicy, Event, ExtractionCandidate, MemoryRecord, MemoryType,
+    Snapshot, TaskRecord,
     ToolOutputView, UsageSample,
 )
-from .security import SecretRedactor
+from .provenance import origin_evidence_type
+
+from .security import SecretRedactor, redaction_counts
 
 
 def _now() -> str:
@@ -104,6 +109,8 @@ CREATE TABLE IF NOT EXISTS events (
     session_id TEXT REFERENCES sessions(id),
     kind TEXT NOT NULL,
     role TEXT,
+    origin_channel TEXT NOT NULL,
+    origin_adapter TEXT,
     content TEXT NOT NULL,
     payload_json TEXT NOT NULL,
     files_json TEXT NOT NULL,
@@ -149,7 +156,8 @@ CREATE TABLE IF NOT EXISTS memory_records (
     source_event_ids_json TEXT NOT NULL,
     supersedes_id TEXT REFERENCES memory_records(id),
     cursor_seq INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS tool_output_views (
@@ -264,6 +272,195 @@ CREATE TABLE IF NOT EXISTS snapshots (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS policy_ledger (
+    id TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    policy_hash TEXT NOT NULL,
+    policy_json TEXT NOT NULL,
+    activation_event_id TEXT NOT NULL REFERENCES events(id),
+    previous_policy_id TEXT REFERENCES policy_ledger(id),
+    operation TEXT NOT NULL,
+    origin_evidence_type TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS security_findings (
+    id TEXT PRIMARY KEY,
+    incident_key TEXT NOT NULL UNIQUE,
+    finding_type TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES events(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS finding_transitions (
+    id TEXT PRIMARY KEY,
+    finding_id TEXT NOT NULL REFERENCES security_findings(id),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES events(id),
+    actor TEXT NOT NULL,
+    origin_evidence_type TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_version ON policy_ledger(version);
+CREATE INDEX IF NOT EXISTS idx_findings_type ON security_findings(finding_type);
+CREATE INDEX IF NOT EXISTS idx_finding_transitions ON finding_transitions(finding_id, created_at);
+CREATE TABLE IF NOT EXISTS extractor_configs (
+    config_hash TEXT PRIMARY KEY,
+    descriptor_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS extraction_wakeups (
+    config_hash TEXT PRIMARY KEY,
+    generation INTEGER NOT NULL,
+    owner TEXT,
+    lease_until REAL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS extraction_runs (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES events(id),
+    extractor_config_hash TEXT NOT NULL REFERENCES extractor_configs(config_hash),
+    created_at TEXT NOT NULL,
+    UNIQUE(event_id, extractor_config_hash)
+);
+
+CREATE TABLE IF NOT EXISTS extraction_attempt_starts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES extraction_runs(id),
+    attempt_no INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    UNIQUE(run_id, attempt_no)
+);
+
+CREATE TABLE IF NOT EXISTS extraction_attempts (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES extraction_runs(id),
+    attempt_no INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL,
+    error_code TEXT,
+    redacted_error TEXT,
+    raw_response_ref TEXT,
+    UNIQUE(run_id, attempt_no)
+);
+
+CREATE TABLE IF NOT EXISTS extraction_raw_responses (
+    id TEXT PRIMARY KEY,
+    attempt_id TEXT NOT NULL UNIQUE REFERENCES extraction_attempts(id),
+    encoding TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS extraction_candidates (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES extraction_runs(id),
+    attempt_id TEXT NOT NULL REFERENCES extraction_attempts(id),
+    memory_type TEXT NOT NULL,
+    normalized_content TEXT NOT NULL,
+    evidence_quote TEXT NOT NULL,
+    evidence_start INTEGER NOT NULL,
+    evidence_end INTEGER NOT NULL,
+    evidence_zone TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(run_id, memory_type, normalized_content, evidence_start, evidence_end)
+);
+
+CREATE TABLE IF NOT EXISTS extraction_rejections (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES extraction_runs(id),
+    attempt_id TEXT NOT NULL REFERENCES extraction_attempts(id),
+    candidate_json TEXT NOT NULL,
+    error_code TEXT NOT NULL,
+    redacted_error TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_transitions (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL REFERENCES extraction_candidates(id),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES events(id),
+    actor TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    origin_evidence_type TEXT NOT NULL,
+    replacement_candidate_id TEXT REFERENCES extraction_candidates(id),
+    replacement_memory_id TEXT REFERENCES memory_records(id),
+    extractor_run_id TEXT REFERENCES extraction_runs(id),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_memory_links (
+    id TEXT PRIMARY KEY,
+    candidate_id TEXT NOT NULL REFERENCES extraction_candidates(id),
+    memory_id TEXT NOT NULL REFERENCES memory_records(id),
+    relation TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES events(id),
+    created_at TEXT NOT NULL,
+    UNIQUE(candidate_id, memory_id, relation, source_event_id)
+);
+
+CREATE VIEW IF NOT EXISTS candidate_current_status AS
+SELECT c.id AS candidate_id,
+       (SELECT t.to_status FROM candidate_transitions t
+        WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status,
+       (SELECT t.created_at FROM candidate_transitions t
+        WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS transitioned_at
+FROM extraction_candidates c;
+
+DROP VIEW IF EXISTS extraction_run_status;
+CREATE VIEW IF NOT EXISTS extraction_run_status AS
+SELECT r.id AS run_id,
+       r.event_id,
+       r.extractor_config_hash,
+       CASE
+         WHEN EXISTS (
+           SELECT 1 FROM extraction_attempts a
+           WHERE a.run_id=r.id AND a.outcome='succeeded'
+         ) THEN 'done'
+         WHEN (
+           SELECT a.outcome FROM extraction_attempts a
+           WHERE a.run_id=r.id ORDER BY a.attempt_no DESC LIMIT 1
+         )='terminal_failure' THEN 'failed'
+         WHEN (
+           SELECT a.outcome FROM extraction_attempts a
+           WHERE a.run_id=r.id ORDER BY a.attempt_no DESC LIMIT 1
+         )='retryable_failure' THEN 'retryable'
+         WHEN EXISTS (
+           SELECT 1 FROM extraction_attempt_starts s
+           WHERE s.run_id=r.id AND NOT EXISTS (
+             SELECT 1 FROM extraction_attempts a
+             WHERE a.run_id=s.run_id AND a.attempt_no=s.attempt_no
+           )
+         ) AND EXISTS (
+           SELECT 1 FROM extraction_wakeups w
+           WHERE w.config_hash=r.extractor_config_hash
+             AND w.owner IS NOT NULL
+             AND w.lease_until > CAST(strftime('%s','now') AS REAL)
+         ) THEN 'running'
+         WHEN EXISTS (
+           SELECT 1 FROM extraction_attempt_starts s
+           WHERE s.run_id=r.id AND NOT EXISTS (
+             SELECT 1 FROM extraction_attempts a
+             WHERE a.run_id=s.run_id AND a.attempt_no=s.attempt_no
+           )
+         ) THEN 'retryable'
+         ELSE 'pending'
+       END AS status
+FROM extraction_runs r;
+CREATE INDEX IF NOT EXISTS idx_extraction_runs_event ON extraction_runs(event_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_run ON extraction_attempts(run_id, attempt_no);
+CREATE INDEX IF NOT EXISTS idx_candidates_run ON extraction_candidates(run_id);
+CREATE INDEX IF NOT EXISTS idx_transitions_candidate ON candidate_transitions(candidate_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_candidate_links_memory ON candidate_memory_links(memory_id);
 CREATE INDEX IF NOT EXISTS idx_events_branch_seq ON events(branch_id, seq);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_memory_branch_type ON memory_records(branch_id, memory_type);
@@ -320,6 +517,54 @@ CREATE TRIGGER IF NOT EXISTS task_bindings_no_update BEFORE UPDATE ON task_sessi
 BEGIN SELECT RAISE(ABORT, 'task session bindings are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS task_bindings_no_delete BEFORE DELETE ON task_session_bindings
 BEGIN SELECT RAISE(ABORT, 'task session bindings cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS policy_ledger_no_update BEFORE UPDATE ON policy_ledger
+BEGIN SELECT RAISE(ABORT, 'policy ledger is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS policy_ledger_no_delete BEFORE DELETE ON policy_ledger
+BEGIN SELECT RAISE(ABORT, 'policy ledger cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS security_findings_no_update BEFORE UPDATE ON security_findings
+BEGIN SELECT RAISE(ABORT, 'security findings are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS security_findings_no_delete BEFORE DELETE ON security_findings
+BEGIN SELECT RAISE(ABORT, 'security findings cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS finding_transitions_no_update BEFORE UPDATE ON finding_transitions
+BEGIN SELECT RAISE(ABORT, 'finding transitions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS finding_transitions_no_delete BEFORE DELETE ON finding_transitions
+BEGIN SELECT RAISE(ABORT, 'finding transitions cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extractor_configs_no_update BEFORE UPDATE ON extractor_configs
+BEGIN SELECT RAISE(ABORT, 'extractor configurations are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extractor_configs_no_delete BEFORE DELETE ON extractor_configs
+BEGIN SELECT RAISE(ABORT, 'extractor configurations cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_runs_no_update BEFORE UPDATE ON extraction_runs
+BEGIN SELECT RAISE(ABORT, 'extraction runs are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_runs_no_delete BEFORE DELETE ON extraction_runs
+BEGIN SELECT RAISE(ABORT, 'extraction runs cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_attempt_starts_no_update BEFORE UPDATE ON extraction_attempt_starts
+BEGIN SELECT RAISE(ABORT, 'attempt starts are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_attempt_starts_no_delete BEFORE DELETE ON extraction_attempt_starts
+BEGIN SELECT RAISE(ABORT, 'attempt starts cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_attempts_no_update BEFORE UPDATE ON extraction_attempts
+BEGIN SELECT RAISE(ABORT, 'extraction attempts are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_attempts_no_delete BEFORE DELETE ON extraction_attempts
+BEGIN SELECT RAISE(ABORT, 'extraction attempts cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_raw_no_update BEFORE UPDATE ON extraction_raw_responses
+BEGIN SELECT RAISE(ABORT, 'raw extractor responses are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_raw_no_delete BEFORE DELETE ON extraction_raw_responses
+BEGIN SELECT RAISE(ABORT, 'raw extractor responses require explicit archival policy'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_candidates_no_update BEFORE UPDATE ON extraction_candidates
+BEGIN SELECT RAISE(ABORT, 'extraction candidates are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_candidates_no_delete BEFORE DELETE ON extraction_candidates
+BEGIN SELECT RAISE(ABORT, 'extraction candidates cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_rejections_no_update BEFORE UPDATE ON extraction_rejections
+BEGIN SELECT RAISE(ABORT, 'extraction rejections are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS extraction_rejections_no_delete BEFORE DELETE ON extraction_rejections
+BEGIN SELECT RAISE(ABORT, 'extraction rejections cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_transitions_no_update BEFORE UPDATE ON candidate_transitions
+BEGIN SELECT RAISE(ABORT, 'candidate transitions are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_transitions_no_delete BEFORE DELETE ON candidate_transitions
+BEGIN SELECT RAISE(ABORT, 'candidate transitions cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_memory_links_no_update BEFORE UPDATE ON candidate_memory_links
+BEGIN SELECT RAISE(ABORT, 'candidate memory links are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS candidate_memory_links_no_delete BEFORE DELETE ON candidate_memory_links
+BEGIN SELECT RAISE(ABORT, 'candidate memory links cannot be deleted'); END;
 CREATE TRIGGER IF NOT EXISTS snapshots_no_update BEFORE UPDATE ON snapshots
 BEGIN SELECT RAISE(ABORT, 'snapshots are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS snapshots_no_delete BEFORE DELETE ON snapshots
@@ -453,6 +698,11 @@ class MemoryStore:
     def _initialize(self) -> None:
         with self._lock:
             self._conn.executescript(BASE_SCHEMA)
+            self._ensure_column("memory_records", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(
+                "events", "origin_channel", "TEXT NOT NULL DEFAULT 'legacy_untrusted'"
+            )
+            self._ensure_column("events", "origin_adapter", "TEXT")
             try:
                 self._conn.executescript(FTS_SCHEMA)
                 self.fts_enabled = True
@@ -460,7 +710,7 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 self.fts_enabled = False
             self._conn.execute(
-                "INSERT INTO metadata(key, value) VALUES('schema_version', '3') "
+                "INSERT INTO metadata(key, value) VALUES('schema_version', '5') "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
             )
             self._conn.execute(
@@ -468,6 +718,13 @@ class MemoryStore:
                 "VALUES('main', NULL, NULL, ?)",
                 (_now(),),
             )
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = {
+            row["name"] for row in self._conn.execute(f"PRAGMA table_info({table})")
+        }
+        if column not in columns:
+            self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _ensure_fts_index(self) -> None:
         self._conn.execute(
@@ -547,6 +804,8 @@ class MemoryStore:
         kind: str,
         role: str | None,
         content: str,
+        origin_channel: str = "internal",
+        origin_adapter: str | None = None,
         payload: dict[str, Any],
         files: Sequence[str],
     ) -> Event:
@@ -567,11 +826,8 @@ class MemoryStore:
         safe_files_value, file_redactions = self.redactor.redact_value(list(files))
         redactions = content_redactions + payload_redactions + file_redactions
         if redactions:
-            counts: dict[str, int] = {}
-            for item in redactions:
-                counts[item.rule] = counts.get(item.rule, 0) + item.count
             safe_payload = dict(safe_payload)
-            safe_payload["_security_redactions"] = counts
+            safe_payload["_security_redactions"] = redaction_counts(redactions)
 
         event_id = f"evt_{uuid.uuid4().hex}"
         created_at = _now()
@@ -582,6 +838,8 @@ class MemoryStore:
                 "session_id": session_id,
                 "kind": str(kind),
                 "role": role,
+                "origin_channel": origin_channel,
+                "origin_adapter": origin_adapter,
                 "content": safe_content,
                 "payload": safe_payload,
                 "files": safe_files_value,
@@ -595,15 +853,17 @@ class MemoryStore:
         previous_hash = previous["chain_hash"] if previous else None
         chain_hash = _hash((previous_hash or "") + content_hash)
         cursor = conn.execute(
-            "INSERT INTO events(id, branch_id, session_id, kind, role, content, payload_json, "
-            "files_json, created_at, previous_hash, content_hash, chain_hash) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO events(id, branch_id, session_id, kind, role, origin_channel, "
+            "origin_adapter, content, payload_json, files_json, created_at, previous_hash, "
+            "content_hash, chain_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event_id,
                 branch_id,
                 session_id,
                 str(kind),
                 role,
+                origin_channel,
+                origin_adapter,
                 safe_content,
                 _json(safe_payload),
                 _json(safe_files_value),
@@ -625,6 +885,8 @@ class MemoryStore:
             session_id=session_id,
             kind=str(kind),
             role=role,
+            origin_channel=origin_channel,
+            origin_adapter=origin_adapter,
             content=safe_content,
             payload=dict(safe_payload),
             files=tuple(safe_files_value),
@@ -654,6 +916,36 @@ class MemoryStore:
                 kind=kind,
                 role=role,
                 content=content,
+                origin_channel="public_api",
+                payload=payload or {},
+                files=files,
+            )
+
+    def append_host_event(
+        self,
+        *,
+        adapter: str,
+        kind: str,
+        content: str,
+        branch_id: str = "main",
+        session_id: str | None = None,
+        role: str | None = None,
+        payload: dict[str, Any] | None = None,
+        files: Sequence[str] = (),
+    ) -> Event:
+        """Commit one event delivered by a configured host hook adapter."""
+        if not adapter:
+            raise ValueError("adapter must be non-empty")
+        with self._transaction() as conn:
+            return self._append_event_in_tx(
+                conn,
+                branch_id=branch_id,
+                session_id=session_id,
+                kind=kind,
+                role=role,
+                content=content,
+                origin_channel="host_hook",
+                origin_adapter=adapter,
                 payload=payload or {},
                 files=files,
             )
@@ -666,7 +958,47 @@ class MemoryStore:
         branch_id: str = "main",
         session_id: str | None = None,
     ) -> tuple[tuple[Event, ...], bool]:
-        """Append one hook delivery atomically; retries return the original events."""
+        """Append an untrusted batch atomically; retries return the original events."""
+        return self._append_events_once(
+            receipt_key,
+            events,
+            branch_id=branch_id,
+            session_id=session_id,
+            origin_channel="public_api",
+            origin_adapter=None,
+        )
+
+    def append_host_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        adapter: str,
+        branch_id: str = "main",
+        session_id: str | None = None,
+    ) -> tuple[tuple[Event, ...], bool]:
+        """Trusted ingress used only by an installed host hook adapter."""
+        if not adapter:
+            raise ValueError("adapter must be non-empty")
+        return self._append_events_once(
+            receipt_key,
+            events,
+            branch_id=branch_id,
+            session_id=session_id,
+            origin_channel="host_hook",
+            origin_adapter=adapter,
+        )
+
+    def _append_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        branch_id: str,
+        session_id: str | None,
+        origin_channel: str,
+        origin_adapter: str | None,
+    ) -> tuple[tuple[Event, ...], bool]:
         if not receipt_key:
             raise ValueError("receipt_key must be non-empty")
         if not events:
@@ -696,6 +1028,8 @@ class MemoryStore:
                         kind=str(item["kind"]),
                         role=item.get("role"),
                         content=str(item.get("content", "")),
+                        origin_channel=origin_channel,
+                        origin_adapter=origin_adapter,
                         payload=dict(item.get("payload", {})),
                         files=tuple(str(value) for value in item.get("files", ())),
                     )
@@ -772,8 +1106,8 @@ class MemoryStore:
         session_id: str | None = None,
         files: Sequence[str] = (),
     ) -> Artifact:
-        safe_name, _ = self.redactor.redact_text(name)
-        safe_mime, _ = self.redactor.redact_text(mime_type)
+        safe_name, name_redactions = self.redactor.redact_text(name)
+        safe_mime, mime_redactions = self.redactor.redact_text(mime_type)
         textual = isinstance(data, str) or safe_mime.startswith("text/") or safe_mime.endswith("json")
         if isinstance(data, str):
             decoded = data
@@ -781,10 +1115,13 @@ class MemoryStore:
             decoded = data.decode("utf-8")
         else:
             decoded = data.decode("latin-1")
-        safe_text, redactions = self.redactor.redact_text(decoded)
-        if redactions and not textual:
+        safe_text, data_redactions = self.redactor.redact_text(
+            decoded, private_regions=textual
+        )
+        if data_redactions and not textual:
             raise ValueError("binary artifact appears to contain a secret; refusing durable write")
         safe_data = safe_text.encode("utf-8") if textual else bytes(data)
+        artifact_redactions = name_redactions + mime_redactions + data_redactions
         artifact_id = f"art_{uuid.uuid4().hex}"
         created_at = _now()
         content_hash = _hash(safe_data)
@@ -801,6 +1138,11 @@ class MemoryStore:
                     "name": safe_name,
                     "mime_type": safe_mime,
                     "content_hash": content_hash,
+                    **(
+                        {"_security_redactions": redaction_counts(artifact_redactions)}
+                        if artifact_redactions
+                        else {}
+                    ),
                 },
                 files=files,
             )
@@ -828,6 +1170,8 @@ class MemoryStore:
             session_id=row["session_id"],
             kind=row["kind"],
             role=row["role"],
+            origin_channel=row["origin_channel"],
+            origin_adapter=row["origin_adapter"],
             content=row["content"],
             payload=json.loads(row["payload_json"]),
             files=tuple(json.loads(row["files_json"])),
@@ -836,6 +1180,10 @@ class MemoryStore:
             content_hash=row["content_hash"],
             chain_hash=row["chain_hash"],
         )
+
+    @staticmethod
+    def _event_origin_evidence(row: sqlite3.Row) -> str:
+        return origin_evidence_type(MemoryStore._event_from_row(row))
 
     @integrity_checked
     def get_event(self, event_id: str) -> Event:
@@ -1193,6 +1541,10 @@ class MemoryStore:
             retrieval_cost=float(row["retrieval_cost"]), version=int(row["version"]),
             source_event_ids=tuple(json.loads(row["source_event_ids_json"])),
             supersedes_id=row["supersedes_id"], created_at=row["created_at"],
+            metadata=(
+                json.loads(row["metadata_json"])
+                if "metadata_json" in row.keys() and row["metadata_json"] else {}
+            ),
         )
 
     def derive_memory(
@@ -1207,7 +1559,12 @@ class MemoryStore:
         risk: float = 0.0,
         retrieval_cost: float = 1.0,
         supersedes_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> MemoryRecord:
+        memory_type = str(memory_type)
+        allowed_types = {item.value for item in MemoryType}
+        if memory_type not in allowed_types:
+            raise ValueError(f"unsupported memory_type: {memory_type}")
         if not 0.0 <= risk <= 1.0:
             raise ValueError("risk must be between 0 and 1")
         if retrieval_cost < 0:
@@ -1215,6 +1572,7 @@ class MemoryStore:
         safe_content, _ = self.redactor.redact_text(content)
         safe_summary, _ = self.redactor.redact_text(summary or content[:240])
         safe_files, _ = self.redactor.redact_value(list(files))
+        safe_metadata, _ = self.redactor.redact_value(metadata or {})
         source_event_ids = tuple(dict.fromkeys(source_event_ids))
 
         with self._transaction() as conn:
@@ -1253,6 +1611,7 @@ class MemoryStore:
                     "risk": risk,
                     "retrieval_cost": retrieval_cost,
                     "supersedes_id": supersedes_id,
+                    "metadata": safe_metadata,
                 },
                 files=safe_files,
             )
@@ -1269,16 +1628,18 @@ class MemoryStore:
                 source_event_ids=source_event_ids,
                 supersedes_id=supersedes_id,
                 created_at=_now(),
+                metadata=dict(safe_metadata),
             )
             conn.execute(
                 "INSERT INTO memory_records(id, branch_id, memory_type, content, summary, "
                 "files_json, risk, retrieval_cost, version, source_event_ids_json, "
-                "supersedes_id, cursor_seq, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "supersedes_id, cursor_seq, created_at, metadata_json) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     record.id, record.branch_id, record.memory_type, record.content,
                     record.summary, _json(record.files), record.risk, record.retrieval_cost,
                     record.version, _json(record.source_event_ids), record.supersedes_id,
-                    derivation.seq, record.created_at,
+                    derivation.seq, record.created_at, _json(record.metadata),
                 ),
             )
             if self.fts_enabled:
@@ -1674,6 +2035,31 @@ class MemoryStore:
         return self._usage_from_row(row)
 
     @integrity_checked
+    def list_usage_samples(
+        self,
+        *,
+        branch_id: str = "main",
+        session_id: str | None = None,
+        operation: str | None = None,
+    ) -> tuple[UsageSample, ...]:
+        clauses = ["branch_id=?"]
+        params: list[Any] = [branch_id]
+        if session_id is not None:
+            clauses.append("session_id=?")
+            params.append(session_id)
+        if operation is not None:
+            clauses.append("operation=?")
+            params.append(operation)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM usage_samples WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY created_at",
+                params,
+            ).fetchall()
+        return tuple(self._usage_from_row(row) for row in rows)
+
+    @integrity_checked
     def usage_report(
         self, *, branch_id: str = "main", session_id: str | None = None
     ) -> dict[str, Any]:
@@ -1717,6 +2103,28 @@ class MemoryStore:
         totals["reducer_latency_ms_p95"] = (
             latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
             if latencies else 0.0
+        )
+        retrieval_exposures = [
+            item for item in samples if item.operation == "retrieval_search"
+        ]
+        prompt_exposures = [
+            item for item in samples if item.operation == "prompt_injection"
+        ]
+        totals["retrieval_search_count"] = len(retrieval_exposures)
+        totals["retrieval_result_count"] = sum(
+            len(item.metadata.get("results", ())) for item in retrieval_exposures
+        )
+        totals["prompt_injection_count"] = len(prompt_exposures)
+        totals["prompt_included_event_count"] = sum(
+            len(item.metadata.get("included_event_ids", ())) for item in prompt_exposures
+        )
+        totals["prompt_included_memory_count"] = sum(
+            len(item.metadata.get("included_memory_ids", ())) for item in prompt_exposures
+        )
+        totals["task_correlated_exposure_count"] = sum(
+            1
+            for item in (*retrieval_exposures, *prompt_exposures)
+            if item.metadata.get("task_key")
         )
         by_operation: dict[str, dict[str, Any]] = {}
         for item in samples:
@@ -2070,20 +2478,1112 @@ class MemoryStore:
             ).fetchone()
         return self._task_from_row(row) if row is not None else None
 
+    def initialize_project(
+        self,
+        *,
+        repository_identity: str,
+        canonical_path: str,
+        code_version: str,
+        policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT value FROM metadata WHERE key='project_instance_id'"
+            ).fetchone()
+            if existing is not None:
+                project_instance_id = str(existing["value"])
+                incident_key = f"policy_rebootstrapped:{project_instance_id}"
+                finding = conn.execute(
+                    "SELECT id FROM security_findings WHERE incident_key=?",
+                    (incident_key,),
+                ).fetchone()
+                if finding is None:
+                    event = self._append_event_in_tx(
+                        conn,
+                        branch_id="main",
+                        session_id=None,
+                        kind="state",
+                        role=None,
+                        content="security finding: repeated project bootstrap",
+                        payload={
+                            "operation": "security_finding",
+                            "finding_type": "policy_rebootstrapped",
+                            "project_instance_id": project_instance_id,
+                        },
+                        files=(),
+                    )
+                    finding_id = f"finding_{uuid.uuid4().hex}"
+                    conn.execute(
+                        "INSERT INTO security_findings"
+                        "(id, incident_key, finding_type, details_json, "
+                        "source_event_id, created_at) VALUES(?,?,?,?,?,?)",
+                        (
+                            finding_id, incident_key, "policy_rebootstrapped",
+                            _json({"project_instance_id": project_instance_id}),
+                            event.id, _now(),
+                        ),
+                    )
+                    conn.execute(
+                        "INSERT INTO finding_transitions"
+                        "(id, finding_id, from_status, to_status, source_event_id, "
+                        "actor, origin_evidence_type, created_at) "
+                        "VALUES(?,?,NULL,'active',?,?,?,?)",
+                        (
+                            f"ftr_{uuid.uuid4().hex}", finding_id, event.id,
+                            "bootstrap_guard", "bootstrap_tofu", _now(),
+                        ),
+                    )
+                return {
+                    "project_instance_id": project_instance_id,
+                    "initialized": False,
+                    "finding": "policy_rebootstrapped",
+                }
+
+            project_instance_id = f"project_{uuid.uuid4().hex}"
+            chain_id = f"chain_{uuid.uuid4().hex}"
+            bootstrap = {
+                "project_instance_id": project_instance_id,
+                "chain_id": chain_id,
+                "repository_identity": repository_identity,
+                "canonical_path": canonical_path,
+                "code_version": code_version,
+                "policy": policy,
+                "origin_evidence_type": "bootstrap_tofu",
+            }
+            bootstrap_hash = _hash(_json(bootstrap))
+            event = self._append_event_in_tx(
+                conn,
+                branch_id="main",
+                session_id=None,
+                kind="state",
+                role=None,
+                content="policy bootstrapped with trust-on-first-use",
+                payload={
+                    "operation": "policy_bootstrapped",
+                    **bootstrap,
+                    "bootstrap_hash": bootstrap_hash,
+                },
+                files=(),
+            )
+            for key, value in {
+                "project_instance_id": project_instance_id,
+                "chain_id": chain_id,
+                "repository_identity": repository_identity,
+                "canonical_path": canonical_path,
+                "bootstrap_hash": bootstrap_hash,
+                "bootstrap_event_id": event.id,
+            }.items():
+                conn.execute(
+                    "INSERT INTO metadata(key, value) VALUES(?,?)", (key, value)
+                )
+            policy_id = f"policy_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO policy_ledger"
+                "(id, version, policy_hash, policy_json, activation_event_id, "
+                "previous_policy_id, operation, origin_evidence_type, created_at) "
+                "VALUES(?,?,?,?,?,NULL,'bootstrapped','bootstrap_tofu',?)",
+                (
+                    policy_id, 1, _hash(_json(policy)), _json(policy), event.id, _now(),
+                ),
+            )
+        return {
+            "project_instance_id": project_instance_id,
+            "chain_id": chain_id,
+            "bootstrap_hash": bootstrap_hash,
+            "policy_id": policy_id,
+            "event_id": event.id,
+            "initialized": True,
+        }
+
+    @integrity_checked
+    def project_identity(self) -> dict[str, str] | None:
+        keys = (
+            "project_instance_id", "chain_id", "repository_identity",
+            "canonical_path", "bootstrap_hash", "bootstrap_event_id",
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, value FROM metadata WHERE key IN (%s)"
+                % ",".join("?" for _ in keys),
+                keys,
+            ).fetchall()
+        values = {row["key"]: row["value"] for row in rows}
+        return values if "project_instance_id" in values else None
+
+    @integrity_checked
+    def chain_checkpoint(self) -> dict[str, Any]:
+        with self._lock:
+            head = self._conn.execute(
+                "SELECT seq, chain_hash FROM events ORDER BY seq DESC LIMIT 1"
+            ).fetchone()
+        return {
+            "head_seq": int(head["seq"]) if head else 0,
+            "head_hash": str(head["chain_hash"]) if head else "",
+        }
+
+    @integrity_checked
+    def chain_hash_at(self, seq: int) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT chain_hash FROM events WHERE seq=?", (seq,)
+            ).fetchone()
+        return str(row["chain_hash"]) if row else None
+
+    def record_security_finding(
+        self,
+        finding_type: str,
+        *,
+        incident_key: str,
+        details: dict[str, Any],
+    ) -> str:
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT id FROM security_findings WHERE incident_key=?",
+                (incident_key,),
+            ).fetchone()
+            if existing is not None:
+                return str(existing["id"])
+            event = self._append_event_in_tx(
+                conn,
+                branch_id="main",
+                session_id=None,
+                kind="state",
+                role=None,
+                content=f"security finding: {finding_type}",
+                payload={
+                    "operation": "security_finding",
+                    "finding_type": finding_type,
+                    "incident_key": incident_key,
+                    "details": details,
+                },
+                files=(),
+            )
+            finding_id = f"finding_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO security_findings"
+                "(id, incident_key, finding_type, details_json, source_event_id, "
+                "created_at) VALUES(?,?,?,?,?,?)",
+                (
+                    finding_id, incident_key, finding_type, _json(details),
+                    event.id, _now(),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO finding_transitions"
+                "(id, finding_id, from_status, to_status, source_event_id, "
+                "actor, origin_evidence_type, created_at) "
+                "VALUES(?,?,NULL,'active',?,?,?,?)",
+                (
+                    f"ftr_{uuid.uuid4().hex}", finding_id, event.id,
+                    "integrity_monitor", "extractor", _now(),
+                ),
+            )
+        return finding_id
+
+    @integrity_checked
+    def list_security_findings(self) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT f.*, (SELECT t.to_status FROM finding_transitions t "
+                "WHERE t.finding_id=f.id ORDER BY t.rowid DESC LIMIT 1) status "
+                "FROM security_findings f ORDER BY f.created_at"
+            ).fetchall()
+        return tuple(
+            {
+                "id": row["id"],
+                "incident_key": row["incident_key"],
+                "finding_type": row["finding_type"],
+                "details": json.loads(row["details_json"]),
+                "source_event_id": row["source_event_id"],
+                "created_at": row["created_at"],
+                "status": row["status"],
+                "acknowledged": row["status"] == "acknowledged",
+            }
+            for row in rows
+        )
+
+    def append_finding_ack_request(
+        self,
+        finding_id: str,
+        *,
+        branch_id: str,
+        origin_evidence_type: str,
+    ) -> tuple[Event, str]:
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT to_status FROM finding_transitions "
+                "WHERE finding_id=? ORDER BY rowid DESC LIMIT 1",
+                (finding_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown security finding: {finding_id}")
+            event = self._append_event_in_tx(
+                conn,
+                branch_id=branch_id,
+                session_id=None,
+                kind="state",
+                role=None,
+                content=(
+                    "security finding acknowledgement requested: "
+                    f"{finding_id}"
+                ),
+                payload={
+                    "operation": "acknowledgement_requested",
+                    "finding_id": finding_id,
+                    "origin_evidence_type": origin_evidence_type,
+                },
+                files=(),
+            )
+            transition_id = f"ftr_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO finding_transitions"
+                "(id, finding_id, from_status, to_status, source_event_id, "
+                "actor, origin_evidence_type, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    transition_id, finding_id, row["to_status"],
+                    "acknowledgement_requested", event.id, "request_reducer",
+                    origin_evidence_type, _now(),
+                ),
+            )
+        return event, transition_id
+    def transition_finding(
+        self,
+        finding_id: str,
+        to_status: str,
+        *,
+        source_event_id: str,
+        actor: str,
+        origin_evidence_type: str | None = None,
+    ) -> str:
+        if to_status not in {"acknowledgement_requested", "acknowledged"}:
+            raise ValueError("unsupported finding transition")
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT to_status FROM finding_transitions "
+                "WHERE finding_id=? ORDER BY rowid DESC LIMIT 1",
+                (finding_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown security finding: {finding_id}")
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
+                raise KeyError(f"unknown source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if to_status == "acknowledged" and derived_origin not in {
+                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+                "external_trusted_ui",
+            }:
+                raise PermissionError("finding acknowledgement requires trusted origin")
+            transition_id = f"ftr_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO finding_transitions"
+                "(id, finding_id, from_status, to_status, source_event_id, "
+                "actor, origin_evidence_type, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    transition_id, finding_id, row["to_status"], to_status,
+                    source_event_id, actor, derived_origin, _now(),
+                ),
+            )
+        return transition_id
+
+    def activate_policy(
+        self,
+        policy: dict[str, Any],
+        *,
+        source_event_id: str,
+        origin_evidence_type: str | None = None,
+        operation: str = "activated",
+    ) -> dict[str, Any]:
+        if operation not in {"activated", "replaced", "rollback"}:
+            raise ValueError("unsupported policy operation")
+        with self._transaction() as conn:
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
+                raise KeyError(f"unknown policy source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if derived_origin not in {
+                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+                "external_trusted_ui",
+            }:
+                raise PermissionError("policy activation requires trusted origin")
+            previous = conn.execute(
+                "SELECT id, version FROM policy_ledger "
+                "ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+            version = int(previous["version"]) + 1 if previous else 1
+            policy_id = f"policy_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO policy_ledger"
+                "(id, version, policy_hash, policy_json, activation_event_id, "
+                "previous_policy_id, operation, origin_evidence_type, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    policy_id, version, _hash(_json(policy)), _json(policy),
+                    source_event_id, previous["id"] if previous else None,
+                    operation, derived_origin, _now(),
+                ),
+            )
+        return {
+            "id": policy_id,
+            "version": version,
+            "policy_hash": _hash(_json(policy)),
+            "policy": policy,
+            "activation_event_id": source_event_id,
+            "previous_policy_id": previous["id"] if previous else None,
+            "operation": operation,
+            "origin_evidence_type": derived_origin,
+        }
+
+    def active_policy(self) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM policy_ledger ORDER BY version DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"], "version": int(row["version"]),
+            "policy_hash": row["policy_hash"],
+            "policy": json.loads(row["policy_json"]),
+            "activation_event_id": row["activation_event_id"],
+            "operation": row["operation"],
+            "origin_evidence_type": row["origin_evidence_type"],
+        }
+    def register_extractor_config(
+        self, config_hash: str, descriptor: dict[str, Any]
+    ) -> None:
+        if not config_hash:
+            raise ValueError("extractor config hash must be non-empty")
+        with self._transaction() as conn:
+            existing = conn.execute(
+                "SELECT descriptor_json FROM extractor_configs WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+            encoded = _json(descriptor)
+            if existing is not None and existing["descriptor_json"] != encoded:
+                raise ValueError("extractor config hash collision")
+            conn.execute(
+                "INSERT OR IGNORE INTO extractor_configs"
+                "(config_hash, descriptor_json, created_at) VALUES(?,?,?)",
+                (config_hash, encoded, _now()),
+            )
+
+    @integrity_checked
+    def preceding_canonical_events(self, seq: int, limit: int) -> list[Event]:
+        if limit < 1:
+            return []
+        with self._lock:
+            current = self._conn.execute(
+                "SELECT branch_id, session_id FROM events WHERE seq=?", (seq,)
+            ).fetchone()
+            if current is None:
+                raise KeyError(f"unknown event seq: {seq}")
+            rows = self._conn.execute(
+                "SELECT * FROM events WHERE seq<? AND branch_id=? "
+                "AND kind='message' AND role IN ('user','assistant') "
+                "ORDER BY seq DESC LIMIT ?",
+                (seq, current["branch_id"], limit),
+            ).fetchall()
+        return [self._event_from_row(row) for row in reversed(rows)]
+
+    @integrity_checked
+    def pending_extraction_events(
+        self,
+        config_hash: str,
+        *,
+        limit: int | None = None,
+        retry_failed: bool = False,
+        max_retries: int = 3,
+    ) -> list[Event]:
+        query = (
+            "SELECT e.* FROM events e "
+            "LEFT JOIN extraction_runs r ON r.event_id=e.id "
+            "AND r.extractor_config_hash=? "
+            "WHERE e.kind='message' AND e.role IN ('user','assistant') "
+            "AND (r.id IS NULL OR NOT EXISTS ("
+            "SELECT 1 FROM extraction_attempts a "
+            "WHERE a.run_id=r.id AND a.outcome='succeeded'"
+            ")) ORDER BY e.seq"
+        )
+        with self._lock:
+            rows = self._conn.execute(query, (config_hash,)).fetchall()
+            selected: list[sqlite3.Row] = []
+            for row in rows:
+                run = self._conn.execute(
+                    "SELECT id FROM extraction_runs "
+                    "WHERE event_id=? AND extractor_config_hash=?",
+                    (row["id"], config_hash),
+                ).fetchone()
+                if run is None:
+                    selected.append(row)
+                    continue
+                latest = self._conn.execute(
+                    "SELECT outcome, attempt_no FROM extraction_attempts "
+                    "WHERE run_id=? ORDER BY attempt_no DESC LIMIT 1",
+                    (run["id"],),
+                ).fetchone()
+                if latest is None:
+                    selected.append(row)
+                elif latest["outcome"] == "retryable_failure" and int(
+                    latest["attempt_no"]
+                ) < max_retries:
+                    selected.append(row)
+                elif retry_failed and latest["outcome"] in {
+                    "retryable_failure", "terminal_failure"
+                }:
+                    selected.append(row)
+            if limit is not None:
+                selected = selected[: max(0, limit)]
+        return [self._event_from_row(row) for row in selected]
+
+    def ensure_extraction_run(self, event_id: str, config_hash: str) -> str:
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT id FROM extraction_runs "
+                "WHERE event_id=? AND extractor_config_hash=?",
+                (event_id, config_hash),
+            ).fetchone()
+            if row is not None:
+                return str(row["id"])
+            if conn.execute(
+                "SELECT 1 FROM events WHERE id=?", (event_id,)
+            ).fetchone() is None:
+                raise KeyError(f"unknown event: {event_id}")
+            run_id = f"run_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO extraction_runs"
+                "(id, event_id, extractor_config_hash, created_at) VALUES(?,?,?,?)",
+                (run_id, event_id, config_hash, _now()),
+            )
+            return run_id
+
+    def start_extraction_attempt(self, run_id: str) -> tuple[int, str]:
+        with self._transaction() as conn:
+            if conn.execute(
+                "SELECT 1 FROM extraction_runs WHERE id=?", (run_id,)
+            ).fetchone() is None:
+                raise KeyError(f"unknown extraction run: {run_id}")
+            row = conn.execute(
+                "SELECT COALESCE(MAX(attempt_no), 0) AS value "
+                "FROM extraction_attempt_starts WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            attempt_no = int(row["value"]) + 1
+            started_at = _now()
+            conn.execute(
+                "INSERT INTO extraction_attempt_starts"
+                "(id, run_id, attempt_no, started_at) VALUES(?,?,?,?)",
+                (f"start_{uuid.uuid4().hex}", run_id, attempt_no, started_at),
+            )
+        return attempt_no, started_at
+
+    def finish_extraction_failure(
+        self,
+        *,
+        run_id: str,
+        attempt_no: int,
+        started_at: str,
+        outcome: str,
+        error_code: str,
+        redacted_error: str,
+    ) -> str:
+        if outcome not in {"retryable_failure", "terminal_failure"}:
+            raise ValueError("invalid extraction failure outcome")
+        safe_error, _ = self.redactor.redact_text(redacted_error)
+        attempt_id = f"attempt_{uuid.uuid4().hex}"
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT INTO extraction_attempts"
+                "(id, run_id, attempt_no, outcome, started_at, finished_at, "
+                "error_code, redacted_error, raw_response_ref) "
+                "VALUES(?,?,?,?,?,?,?,?,NULL)",
+                (
+                    attempt_id, run_id, attempt_no, outcome, started_at, _now(),
+                    str(error_code), safe_error[:2000],
+                ),
+            )
+        return attempt_id
+
+    @staticmethod
+    def _normalized_key(value: str) -> str:
+        return " ".join(value.strip().split()).casefold()
+
+    def _existing_auto_memory_locked(
+        self, conn: sqlite3.Connection, memory_type: str, normalized: str
+    ) -> sqlite3.Row | None:
+        rows = conn.execute(
+            "SELECT * FROM memory_records WHERE memory_type=? ORDER BY created_at",
+            (memory_type,),
+        ).fetchall()
+        key = self._normalized_key(normalized)
+        for row in rows:
+            metadata = json.loads(row["metadata_json"] or "{}")
+            if self._normalized_key(row["content"]) == key:
+                return row
+        return None
+
+    def commit_extraction_success(
+        self,
+        *,
+        run_id: str,
+        attempt_no: int,
+        started_at: str,
+        event: Event,
+        candidates: Sequence[Any],
+        rejections: Sequence[dict[str, Any]],
+        raw_response: Any,
+        extractor_config_hash: str,
+    ) -> tuple[str, ...]:
+        safe_raw, _ = self.redactor.redact_value(raw_response)
+        try:
+            raw_text = _json(safe_raw)
+        except (TypeError, ValueError):
+            raw_text, _ = self.redactor.redact_text(repr(safe_raw))
+        attempt_id = f"attempt_{uuid.uuid4().hex}"
+        raw_id = f"raw_{uuid.uuid4().hex}"
+        created_candidate_ids: list[str] = []
+        with self._transaction() as conn:
+            run = conn.execute(
+                "SELECT event_id FROM extraction_runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if run is None or run["event_id"] != event.id:
+                raise ValueError("extraction run and canonical event do not match")
+            conn.execute(
+                "INSERT INTO extraction_attempts"
+                "(id, run_id, attempt_no, outcome, started_at, finished_at, "
+                "error_code, redacted_error, raw_response_ref) "
+                "VALUES(?,?,?,?,?,?,NULL,NULL,?)",
+                (
+                    attempt_id, run_id, attempt_no, "succeeded",
+                    started_at, _now(), raw_id,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO extraction_raw_responses"
+                "(id, attempt_id, encoding, payload, created_at) VALUES(?,?,?,?,?)",
+                (
+                    raw_id, attempt_id, "zlib+utf-8",
+                    sqlite3.Binary(zlib.compress(raw_text.encode("utf-8"))), _now(),
+                ),
+            )
+            for rejected in rejections:
+                safe_error, _ = self.redactor.redact_text(
+                    str(rejected.get("redacted_error", "validation failed"))
+                )
+                conn.execute(
+                    "INSERT INTO extraction_rejections"
+                    "(id, run_id, attempt_id, candidate_json, error_code, "
+                    "redacted_error, created_at) VALUES(?,?,?,?,?,?,?)",
+                    (
+                        f"reject_{uuid.uuid4().hex}", run_id, attempt_id,
+                        _json(rejected.get("candidate", {})),
+                        str(rejected.get("error_code", "validation_failed")),
+                        safe_error[:2000], _now(),
+                    ),
+                )
+            interpretations: dict[tuple[str, int, int], set[str]] = {}
+            for candidate in candidates:
+                key = (
+                    candidate.memory_type,
+                    candidate.evidence_start,
+                    candidate.evidence_end,
+                )
+                interpretations.setdefault(key, set()).add(
+                    self._normalized_key(candidate.normalized_content)
+                )
+            conflicts = {
+                key for key, values in interpretations.items() if len(values) > 1
+            }
+            for candidate in candidates:
+                candidate_id = f"cand_{uuid.uuid4().hex}"
+                candidate_key = (
+                    candidate.memory_type,
+                    candidate.evidence_start,
+                    candidate.evidence_end,
+                )
+                initial_status = (
+                    "quarantined"
+                    if candidate_key in conflicts else candidate.initial_status
+                )
+                initial_rule = (
+                    "conflicting_interpretations"
+                    if candidate_key in conflicts else candidate.rule_id
+                )
+                created_at = _now()
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO extraction_candidates"
+                    "(id, run_id, attempt_id, memory_type, normalized_content, "
+                    "evidence_quote, evidence_start, evidence_end, evidence_zone, "
+                    "confidence, created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        candidate_id, run_id, attempt_id, candidate.memory_type,
+                        candidate.normalized_content, candidate.evidence_quote,
+                        candidate.evidence_start, candidate.evidence_end,
+                        candidate.evidence_zone, candidate.confidence, created_at,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    continue
+                created_candidate_ids.append(candidate_id)
+                conn.execute(
+                    "INSERT INTO candidate_transitions"
+                    "(id, candidate_id, from_status, to_status, source_event_id, "
+                    "actor, rule_id, origin_evidence_type, replacement_candidate_id, "
+                    "replacement_memory_id, extractor_run_id, created_at) "
+                    "VALUES(?,?,NULL,?,?,?,?,?,NULL,NULL,?,?)",
+                    (
+                        f"ctr_{uuid.uuid4().hex}", candidate_id,
+                        initial_status, event.id, "extractor",
+                        initial_rule, "extractor", run_id, created_at,
+                    ),
+                )
+                if initial_status != "auto":
+                    continue
+                existing = self._existing_auto_memory_locked(
+                    conn, candidate.memory_type, candidate.normalized_content
+                )
+                if existing is not None:
+                    memory_id = str(existing["id"])
+                    relation = "supports"
+                else:
+                    memory_id = f"mem_{uuid.uuid4().hex}"
+                    summary = candidate.normalized_content[:240]
+                    derivation = self._append_event_in_tx(
+                        conn,
+                        branch_id=event.branch_id,
+                        session_id=None,
+                        kind="state",
+                        role=None,
+                        content=f"auto-derived {candidate.memory_type}: {summary}",
+                        payload={
+                            "operation": "auto_derive_memory",
+                            "memory_id": memory_id,
+                            "source_event_ids": [event.id],
+                            "extraction_run_id": run_id,
+                            "candidate_id": candidate_id,
+                            "extractor_config_hash": extractor_config_hash,
+                        },
+                        files=event.files,
+                    )
+                    metadata = {
+                        "origin": "auto",
+                        "authority_level": "auto",
+                        "origin_evidence_type": "extractor",
+                        "extraction_run_id": run_id,
+                        "candidate_id": candidate_id,
+                        "extractor_config_hash": extractor_config_hash,
+                        "confidence": candidate.confidence,
+                        "evidence_zone": candidate.evidence_zone,
+                    }
+                    conn.execute(
+                        "INSERT INTO memory_records"
+                        "(id, branch_id, memory_type, content, summary, files_json, "
+                        "risk, retrieval_cost, version, source_event_ids_json, "
+                        "supersedes_id, cursor_seq, created_at, metadata_json) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?,?,?)",
+                        (
+                            memory_id, event.branch_id, candidate.memory_type,
+                            candidate.normalized_content, summary, _json(event.files),
+                            0.0, 1.25, 1, _json([event.id]), derivation.seq,
+                            created_at, _json(metadata),
+                        ),
+                    )
+                    if self.fts_enabled:
+                        conn.execute(
+                            "INSERT INTO memories_fts(memory_id, content, summary) "
+                            "VALUES(?,?,?)",
+                            (memory_id, candidate.normalized_content, summary),
+                        )
+                    relation = "derived"
+                conn.execute(
+                    "INSERT INTO candidate_memory_links"
+                    "(id, candidate_id, memory_id, relation, source_event_id, created_at) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (
+                        f"cml_{uuid.uuid4().hex}", candidate_id, memory_id,
+                        relation, event.id, created_at,
+                    ),
+                )
+        return tuple(created_candidate_ids)
+
+    def _candidate_status_locked(
+        self, conn: sqlite3.Connection, candidate_id: str
+    ) -> str | None:
+        row = conn.execute(
+            "SELECT to_status FROM candidate_transitions "
+            "WHERE candidate_id=? ORDER BY rowid DESC LIMIT 1",
+            (candidate_id,),
+        ).fetchone()
+        return str(row["to_status"]) if row else None
+
+    @integrity_checked
+    def list_extraction_candidates(
+        self, *, status: str | None = None
+    ) -> tuple[ExtractionCandidate, ...]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT c.*, (SELECT t.to_status FROM candidate_transitions t "
+                "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) "
+                "AS current_status FROM extraction_candidates c ORDER BY c.created_at"
+            ).fetchall()
+        values = [
+            ExtractionCandidate(
+                id=row["id"], run_id=row["run_id"], attempt_id=row["attempt_id"],
+                memory_type=row["memory_type"],
+                normalized_content=row["normalized_content"],
+                evidence_quote=row["evidence_quote"],
+                evidence_start=int(row["evidence_start"]),
+                evidence_end=int(row["evidence_end"]),
+                evidence_zone=row["evidence_zone"],
+                confidence=float(row["confidence"]),
+                created_at=row["created_at"],
+                current_status=row["current_status"],
+            )
+            for row in rows
+        ]
+        if status is not None:
+            values = [item for item in values if item.current_status == status]
+        return tuple(values)
+
+    def append_candidate_request(
+        self,
+        candidate_id: str,
+        request_status: str,
+        *,
+        branch_id: str,
+        action: str,
+        origin_evidence_type: str,
+        replacement_candidate_id: str | None = None,
+        replacement_memory_id: str | None = None,
+    ) -> tuple[Event, str]:
+        allowed = {
+            "confirmation_requested", "rejection_requested",
+            "supersession_requested",
+        }
+        if request_status not in allowed:
+            raise ValueError("unsupported candidate request")
+        with self._transaction() as conn:
+            current = self._candidate_status_locked(conn, candidate_id)
+            if current is None:
+                raise KeyError(f"unknown extraction candidate: {candidate_id}")
+            event = self._append_event_in_tx(
+                conn,
+                branch_id=branch_id,
+                session_id=None,
+                kind="state",
+                role=None,
+                content=f"candidate {action} requested: {candidate_id}",
+                payload={
+                    "operation": request_status,
+                    "candidate_id": candidate_id,
+                    "replacement_candidate_id": replacement_candidate_id,
+                    "replacement_memory_id": replacement_memory_id,
+                    "origin_evidence_type": origin_evidence_type,
+                },
+                files=(),
+            )
+            transition_id = f"ctr_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO candidate_transitions"
+                "(id, candidate_id, from_status, to_status, source_event_id, "
+                "actor, rule_id, origin_evidence_type, replacement_candidate_id, "
+                "replacement_memory_id, extractor_run_id, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)",
+                (
+                    transition_id, candidate_id, current, request_status,
+                    event.id, "request_reducer", f"untrusted_{action}_request",
+                    origin_evidence_type, replacement_candidate_id,
+                    replacement_memory_id, _now(),
+                ),
+            )
+        return event, transition_id
+    def transition_candidate(
+        self,
+        candidate_id: str,
+        to_status: str,
+        *,
+        source_event_id: str,
+        actor: str,
+        rule_id: str,
+        origin_evidence_type: str | None = None,
+        replacement_candidate_id: str | None = None,
+        replacement_memory_id: str | None = None,
+    ) -> str:
+        trusted = {
+            "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+            "external_trusted_ui",
+        }
+        boundary_statuses = {"confirmed", "rejected", "superseded"}
+        request_statuses = {
+            "confirmation_requested", "rejection_requested",
+            "supersession_requested", "acknowledgement_requested",
+        }
+        allowed = {
+            "auto", "quarantined", *boundary_statuses, *request_statuses
+        }
+        if to_status not in allowed:
+            raise ValueError(f"unsupported candidate status: {to_status}")
+        if to_status == "superseded" and not (
+            replacement_candidate_id or replacement_memory_id
+        ):
+            raise ValueError("superseded transition requires a replacement")
+        transition_id = f"ctr_{uuid.uuid4().hex}"
+        with self._transaction() as conn:
+            current = self._candidate_status_locked(conn, candidate_id)
+            if current is None:
+                raise KeyError(f"unknown extraction candidate: {candidate_id}")
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
+                raise KeyError(f"unknown source event: {source_event_id}")
+            derived_origin = self._event_origin_evidence(source_row)
+            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
+                raise PermissionError("claimed origin evidence does not match source event")
+            if to_status in boundary_statuses and derived_origin not in trusted:
+                raise PermissionError(
+                    "trust-boundary transition requires logical-user or stronger origin evidence"
+                )
+            conn.execute(
+                "INSERT INTO candidate_transitions"
+                "(id, candidate_id, from_status, to_status, source_event_id, "
+                "actor, rule_id, origin_evidence_type, replacement_candidate_id, "
+                "replacement_memory_id, extractor_run_id, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)",
+                (
+                    transition_id, candidate_id, current, to_status,
+                    source_event_id, actor, rule_id, derived_origin,
+                    replacement_candidate_id, replacement_memory_id, _now(),
+                ),
+            )
+        return transition_id
+
+    @integrity_checked
+    def find_auto_candidate_match(
+        self, memory_type: str, content: str
+    ) -> tuple[str, str] | None:
+        key = self._normalized_key(content)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT c.id, c.normalized_content, l.memory_id "
+                "FROM extraction_candidates c "
+                "JOIN candidate_memory_links l ON l.candidate_id=c.id "
+                "WHERE c.memory_type=? ORDER BY c.created_at",
+                (memory_type,),
+            ).fetchall()
+        for row in rows:
+            if self._normalized_key(row["normalized_content"]) == key:
+                return str(row["id"]), str(row["memory_id"])
+        return None
+
+    def confirm_candidate_match(
+        self,
+        candidate_id: str,
+        memory_id: str,
+        *,
+        source_event_id: str,
+    ) -> None:
+        self.transition_candidate(
+            candidate_id,
+            "confirmed",
+            source_event_id=source_event_id,
+            actor="explicit_marker",
+            rule_id="normalized_explicit_match",
+        )
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO candidate_memory_links"
+                "(id, candidate_id, memory_id, relation, source_event_id, created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (
+                    f"cml_{uuid.uuid4().hex}", candidate_id, memory_id,
+                    "confirmed_as", source_event_id, _now(),
+                ),
+            )
+
+    @integrity_checked
+    def memory_authority(self, memory_id: str) -> str:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 AS confirmed FROM candidate_memory_links l "
+                "WHERE l.memory_id=? AND ("
+                "SELECT t.to_status FROM candidate_transitions t "
+                "WHERE t.candidate_id=l.candidate_id ORDER BY t.rowid DESC LIMIT 1"
+                ")='confirmed' LIMIT 1",
+                (memory_id,),
+            ).fetchone()
+        if row:
+            return "confirmed"
+        record = self.get_memory(memory_id)
+        return str(record.metadata.get("authority_level", "confirmed"))
+
+    @integrity_checked
+    def extraction_status(self, config_hash: str | None) -> dict[str, Any]:
+        with self._lock:
+            if config_hash is None:
+                pending_rows: list[sqlite3.Row] = []
+                failed = 0
+                retries = 0
+                last_success = None
+            else:
+                pending_rows = self._conn.execute(
+                    "SELECT e.created_at FROM events e "
+                    "LEFT JOIN extraction_runs r ON r.event_id=e.id "
+                    "AND r.extractor_config_hash=? "
+                    "WHERE e.kind='message' AND e.role IN ('user','assistant') "
+                    "AND (r.id IS NULL OR NOT EXISTS ("
+                    "SELECT 1 FROM extraction_attempts a "
+                    "WHERE a.run_id=r.id AND a.outcome='succeeded'))",
+                    (config_hash,),
+                ).fetchall()
+                failed = int(self._conn.execute(
+                    "SELECT COUNT(DISTINCT r.event_id) AS value "
+                    "FROM extraction_runs r JOIN extraction_attempts a ON a.run_id=r.id "
+                    "WHERE r.extractor_config_hash=? "
+                    "AND a.outcome='terminal_failure'",
+                    (config_hash,),
+                ).fetchone()["value"])
+                retries = int(self._conn.execute(
+                    "SELECT COUNT(*) AS value FROM extraction_attempts a "
+                    "JOIN extraction_runs r ON r.id=a.run_id "
+                    "WHERE r.extractor_config_hash=? AND a.attempt_no>1",
+                    (config_hash,),
+                ).fetchone()["value"])
+                row = self._conn.execute(
+                    "SELECT MAX(a.finished_at) AS value FROM extraction_attempts a "
+                    "JOIN extraction_runs r ON r.id=a.run_id "
+                    "WHERE r.extractor_config_hash=? AND a.outcome='succeeded'",
+                    (config_hash,),
+                ).fetchone()
+                last_success = row["value"]
+            quarantined = self._conn.execute(
+                "SELECT c.created_at FROM extraction_candidates c "
+                "WHERE (SELECT t.to_status FROM candidate_transitions t "
+                "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1)"
+                "='quarantined'"
+            ).fetchall()
+        now = datetime.now(UTC)
+        def oldest_age(rows: Sequence[sqlite3.Row]) -> float | None:
+            if not rows:
+                return None
+            values = []
+            for row in rows:
+                try:
+                    values.append((now - datetime.fromisoformat(row["created_at"])).total_seconds())
+                except ValueError:
+                    pass
+            return max(values) if values else None
+        return {
+            "pending_events": len(pending_rows),
+            "oldest_pending_age": oldest_age(pending_rows),
+            "failed_events": failed,
+            "last_success_at": last_success,
+            "retry_count": retries,
+            "quarantined_candidates": len(quarantined),
+            "oldest_quarantined_age": oldest_age(quarantined),
+        }
+
+    def signal_extraction_worker(self, config_hash: str) -> int:
+        """Durably coalesce extraction wakeups into a monotonic generation."""
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT INTO extraction_wakeups"
+                "(config_hash, generation, owner, lease_until, updated_at) "
+                "VALUES(?,1,NULL,NULL,?) "
+                "ON CONFLICT(config_hash) DO UPDATE SET "
+                "generation=extraction_wakeups.generation+1, updated_at=excluded.updated_at",
+                (config_hash, _now()),
+            )
+            row = conn.execute(
+                "SELECT generation FROM extraction_wakeups WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+        return int(row["generation"])
+
+    def claim_extraction_worker(
+        self,
+        config_hash: str,
+        owner: str,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> int | None:
+        now = time.time()
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT generation, owner, lease_until FROM extraction_wakeups "
+                "WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+            if row is None:
+                return None
+            if (
+                row["owner"] is not None
+                and row["owner"] != owner
+                and float(row["lease_until"] or 0) > now
+            ):
+                return None
+            conn.execute(
+                "UPDATE extraction_wakeups SET owner=?, lease_until=?, updated_at=? "
+                "WHERE config_hash=?",
+                (owner, now + lease_seconds, _now(), config_hash),
+            )
+            return int(row["generation"])
+
+    def complete_extraction_worker_cycle(
+        self,
+        config_hash: str,
+        owner: str,
+        observed_generation: int,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> tuple[bool, int]:
+        """Release a stable generation or renew the lease when another wakeup arrived."""
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT generation, owner FROM extraction_wakeups WHERE config_hash=?",
+                (config_hash,),
+            ).fetchone()
+            if row is None or row["owner"] != owner:
+                return True, observed_generation
+            generation = int(row["generation"])
+            if generation == observed_generation:
+                conn.execute(
+                    "UPDATE extraction_wakeups SET owner=NULL, lease_until=NULL, updated_at=? "
+                    "WHERE config_hash=? AND owner=?",
+                    (_now(), config_hash, owner),
+                )
+                return True, generation
+            conn.execute(
+                "UPDATE extraction_wakeups SET lease_until=?, updated_at=? "
+                "WHERE config_hash=? AND owner=?",
+                (time.time() + lease_seconds, _now(), config_hash, owner),
+            )
+            return False, generation
+
     def verify_chain(self) -> tuple[bool, str | None]:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM events ORDER BY seq").fetchall()
         previous: str | None = None
         for row in rows:
-            canonical = _json(
-                {
-                    "id": row["id"], "branch_id": row["branch_id"],
-                    "session_id": row["session_id"], "kind": row["kind"],
-                    "role": row["role"], "content": row["content"],
-                    "payload": json.loads(row["payload_json"]),
-                    "files": json.loads(row["files_json"]), "created_at": row["created_at"],
-                }
-            )
+            values = {
+                "id": row["id"], "branch_id": row["branch_id"],
+                "session_id": row["session_id"], "kind": row["kind"],
+                "role": row["role"], "content": row["content"],
+                "payload": json.loads(row["payload_json"]),
+                "files": json.loads(row["files_json"]), "created_at": row["created_at"],
+            }
+            if row["origin_channel"] != "legacy_untrusted":
+                values["origin_channel"] = row["origin_channel"]
+                values["origin_adapter"] = row["origin_adapter"]
+            canonical = _json(values)
             content_hash = _hash(canonical)
             chain_hash = _hash((previous or "") + content_hash)
             if row["previous_hash"] != previous:
@@ -2112,6 +3612,50 @@ class MemoryStore:
         with self._lock:
             self._conn.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
 
+    @integrity_checked
+    def storage_breakdown(self) -> dict[str, int]:
+        groups = {
+            "canonical_data": (
+                "events", "artifacts", "branches", "sessions",
+                "hook_sessions", "ingest_receipts",
+            ),
+            "interpretation_ledger": (
+                "extractor_configs", "extraction_runs",
+                "extraction_attempt_starts", "extraction_attempts",
+                "extraction_candidates", "extraction_rejections",
+                "candidate_transitions", "candidate_memory_links",
+                "memory_records", "policy_ledger", "security_findings",
+                "finding_transitions", "usage_samples",
+            ),
+            "raw_extractor_payloads": ("extraction_raw_responses",),
+            "rebuildable_projections": (
+                "events_fts", "memories_fts", "tool_output_views",
+                "snapshots", "consolidation_receipts", "extraction_wakeups",
+            ),
+        }
+        result: dict[str, int] = {}
+        with self._lock:
+            existing = {
+                row["name"] for row in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+                )
+            }
+            for group, tables in groups.items():
+                total = 0
+                for table in tables:
+                    if table not in existing:
+                        continue
+                    for row in self._conn.execute(f"SELECT * FROM {table}"):
+                        for value in row:
+                            if value is None:
+                                continue
+                            if isinstance(value, bytes):
+                                total += len(value)
+                            else:
+                                total += len(str(value).encode("utf-8"))
+                result[group] = total
+        result["database_file_bytes"] = self.database_size()
+        return result
     def database_size(self) -> int:
         if self._in_memory:
             return 0

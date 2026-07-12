@@ -23,6 +23,10 @@
 | Exact source promotion | `promote_to_source`, `MemoryService.exact_source` | provenance test |
 | Точное актуальное содержимое файла | `SnapshotManager.read_project_source` + root containment | snapshot/source tests |
 | Query/freshness/risk/cost score | `_memory_hit` | retrieval unit path; параметры видны в metadata |
+| Per-memory Git staleness | on-demand `StalenessService`, CLI `stale`, optional search metadata | temporary-Git staleness tests and ranking-equivalence assertion |
+| Deterministic precheck | file/staged/command engine, bounded Claude `PreToolUse`, explicit Git hook installer | `test_precheck` ordering, IDs, branch, protocol, budget and installer tests |
+| Retrieval exposure telemetry | append-only usage operations `retrieval_search` and `prompt_injection` with receipts/redaction | `test_telemetry` metadata, dedupe, isolation, aggregation and equivalence tests |
+| Progressive source expansion | branch-visible complete interaction groups, compact/exact `ContextWindow`, batch `exact_sources`, one `memory_context` MCP tool | `test_context_expansion` plus graph edge source/context assertion |
 | Нет universal importance | score создаётся только из `RetrievalContext` | архитектурный инвариант |
 | Atomic incremental snapshots | recursive `json-patch-v2` delta внутри SQLite transaction | nested-memory delta + parent materialization tests |
 | Snapshot + replay tail | `SnapshotManager.restore` | stale/replay test |
@@ -31,8 +35,8 @@
 | Git HEAD/file hashes/staleness | `fingerprint_project`, `compare_fingerprints` | stale snapshot test |
 | Независимое ядро + MCP/CLI/API | `MemoryService`, `mcp.py`, `cli.py`, `api.py` | MCP, stdio и HTTP tests |
 | Claude/Codex/OpenCode/OpenHands capture | `hooks.py` runtime + project installers | four-agent core test, hook idempotency/installer tests |
-| Complete tool interactions | atomic `append_events_once`, transcript grouping | `test_hook_retry_is_idempotent_and_tool_pair_is_atomic`, orphan-output test |
-| Automatic sourced consolidation | `EvidenceConsolidator` explicit markers/candidates | `test_explicit_markers_create_sourced_memory_and_protected_blocks` |
+| Complete tool interactions | atomic `append_events_once`, transcript grouping, explicit failure derivation | success-pair, orphan-output and `test_native_failure_capture` tests |
+| Automatic sourced consolidation | `EvidenceConsolidator` explicit markers/candidates including failure/lesson | marker, trust-policy and `test_failure_lesson` tests |
 | Active compaction continuity | extractive summary/index + lifecycle snapshot/reinjection | compaction provenance and session-hook tests |
 | Python codegraph | AST symbols, calls, exact context, reverse impact | `test_python_ast_call_graph_context_and_reverse_impact` |
 | Real task evaluation interface | `SubprocessTaskRunner`, `evaluate_with_runner` | task-runner/diagnostic separation test |
@@ -42,7 +46,7 @@
 | Store/recompute policy | `PhysicalMemoryGovernor.choose` | physical governor test |
 | Retrieved data не instructions | `memory_as_untrusted_data` | prompt-injection test |
 | Active instructions против compaction | hard budget error | active block test |
-| Secret filtering before save | `SecretRedactor` before transaction | secret filter test |
+| Secret/private-region filtering before save | `SecretRedactor` before transaction | secret filter and `test_private_regions` surface tests |
 
 ## Исключённые решения
 
@@ -104,7 +108,7 @@ joiny-mnemonic verify
 | Reject unsupported fake global integration | OpenHands global install raises with repository-local guidance | same test |
 | Configure different agents independently | project/global `context-limits.json` with seven model presets and explicit overrides | `test_seven_bundled_profiles_and_agent_specific_install_config` |
 | Count context before reducer/native compaction | raw `UserPromptSubmit` and `PostToolUse` increments with immutable receipts | `test_raw_hook_counter_warns_before_native_compaction_and_is_idempotent` |
-| Agent-assisted durable promotion | protected runtime instruction plus explicit marker parser; unmarked prose stays searchable | boundary test, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
+| Agent-assisted durable promotion | explicit trust policy: user records/blocks, assistant records only, external kinds neither | `test_trust_policy`, session-hook instruction test, and `test_agent_marker_in_stop_hook_is_promoted` |
 | Checkpoint without premature handoff | audited `context_checkpoint`; recommendation starts only at handoff | `test_snapshot_checkpoint_does_not_recommend_handoff_early` |
 | Do not double-count retries | unique counter receipt and crossing-event replay behavior | same test |
 | Bound counter overhead | O(1) latest-total read and atomic append | benchmark `hook_counter_p95_under_25ms` gate |

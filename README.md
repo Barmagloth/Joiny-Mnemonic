@@ -13,20 +13,22 @@ separately installable plugins; KV storage remains an extension protocol.
 
 | Area | Implemented behavior |
 |---|---|
-| Canonical history | SQLite append-only events/artifacts, hash chain, secret redaction, `synchronous=FULL`, SQL update/delete guards |
+| Canonical history | SQLite append-only events/artifacts, hash chain, secret/private-region redaction, `synchronous=FULL`, SQL update/delete guards |
 | Provenance | Every derived claim references existing events visible in the target branch lineage |
 | Protected state | Versioned `instructions`, `goal`, `constraints`, `decisions`, `open_tasks` |
 | Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
+| Memory staleness | On-demand Git commit counts for files referenced by live memories; warning-only and ranking-neutral |
+| Precheck | Deterministic file/staged/command warnings from failures, lessons, staleness, tasks and active constraints |
 | Transcript safety | Tool calls and outputs are selected atomically; orphan outputs are excluded from resume views |
 | Tool-output reduction | Immutable raw output plus command-aware compact/summary views, exact promotion and no-expansion guard |
-| Usage observability | Provider-reported samples and labelled local estimates for tokens, cache, cost, latency, bytes and savings |
+| Usage observability | Provider samples plus redacted `retrieval_search`/`prompt_injection` exposure IDs, measurements and task/session correlation |
 | Budget governor | Per-agent JSON profiles with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
-| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:` markers |
+| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
-| Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts and native-session bindings |
+| Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts, native-session bindings, and Claude `PostToolUseFailure` capture |
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
 | Evaluation | Evidence-presence diagnostic and a separate external task-runner protocol for real outcome scoring |
 | Interfaces | Python, CLI, local HTTP and MCP stdio share one `MemoryService` |
@@ -96,16 +98,57 @@ joiny-mnemonic consolidate
 joiny-mnemonic compact --keep-recent 8 --summary-budget 600
 joiny-mnemonic snapshot --track README.md
 joiny-mnemonic resume --budget 1500 --text-only
+joiny-mnemonic stale --file src/auth.py
+joiny-mnemonic precheck --file src/auth.py
+joiny-mnemonic precheck --staged
+joiny-mnemonic precheck --command "git push --force origin main"
 ```
 
-`consolidate` only promotes explicit evidence. It does not infer unstated facts. Every resume packet therefore includes a protected `[DURABLE MEMORY CAPTURE]` instruction: when the agent judges information important across sessions, it should use an available structured memory tool or emit a concise standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, or `Preference:` line. The agent should mark durable, evidence-backed information only, not every message.
+`consolidate` only promotes explicit evidence from trusted canonical message roles. User markers may
+create sourced records and protected blocks. Assistant markers create searchable sourced records
+only. Marker-like text or crafted `memory_candidates` in tool output, artifacts, state, or retrieved
+memory cannot change typed or protected memory. Explicit `derive` and `block-set` remain available
+for deliberate writes. The core does not infer unstated facts. `failure` records describe a
+specific unsuccessful attempt, not a universal prohibition. `lesson` records remain untrusted
+historical data unless explicitly promoted to a protected constraint. Per-memory staleness compares
+the oldest source timestamp with later Git commits touching referenced files; it is a warning, not
+proof that a memory is false, and it does not change retrieval ranking. Add `--staleness` to
+`search` to include the inspection in hit metadata.
+
+`precheck` is dependency-free and warning-only by default. It reports exact memory/source IDs for
+relevant failures, lessons and stale records, adds active task/constraint context, and flags a
+small reviewed set of dangerous commands. It does not heuristically block native tool execution.
+Install the optional Git pre-commit integration explicitly:
+
+```powershell
+joiny-mnemonic --project-root . install-git-hook
+```
+
+The generated hook calls the same `precheck --staged` engine and preserves unrelated hook content.
+
+Public search and prompt assembly append redacted exposure metadata to the existing usage stream.
+`retrieval_search` stores result IDs, scores, source kinds, positions and filters;
+`prompt_injection` stores included canonical/memory IDs, snapshot, budget and stale reasons.
+No memory content is duplicated. Exposure is correlation data for later task-outcome analysis, not
+proof that retrieval caused an outcome, and it never changes ranking.
 
 Unmarked prose remains immutable and searchable, but it is not guaranteed to enter the compact resume packet automatically. Exact promotion
 always returns the canonical source:
 
 ```powershell
 joiny-mnemonic source mem_0123456789abcdef
+joiny-mnemonic source mem_first mem_second
+joiny-mnemonic source '["mem_first","mem_second"]'
+joiny-mnemonic context mem_0123456789abcdef --before 3 --after 3
+joiny-mnemonic context view_0123456789abcdef --include-source
 ```
+
+`source` keeps its original single-ID response and returns per-ID results only for batch input.
+`context` resolves event, memory, tool-output-view, snapshot replay-memory and supported graph-edge
+IDs to canonical provenance. It selects complete interaction groups around every source, omits
+orphan tool output and respects branch fork cursors. `before` and `after` are each limited to 20
+groups. The default response is a compact chronological index; `--include-source` returns exact
+immutable events.
 
 ## Install agent hooks
 
@@ -162,6 +205,7 @@ verification steps are in [docs/integrations.md](docs/integrations.md).
 joiny-mnemonic search "snapshot provenance" --type decision --limit 10
 joiny-mnemonic timeline --limit 30
 joiny-mnemonic graph-neighbors "SQLite" --limit 20
+joiny-mnemonic context mem_0123456789abcdef --before 3 --after 3
 
 joiny-mnemonic code-index
 joiny-mnemonic code-search "resume"
@@ -169,8 +213,9 @@ joiny-mnemonic code-context "MemoryService.resume"
 joiny-mnemonic code-impact "MemoryStore.append_event" --depth 3
 ```
 
-MCP additionally exposes `memory_graph_neighbors`, `memory_code_search`, `memory_code_context`
-and `memory_code_impact`, alongside append, derive, search, source, snapshot and resume tools.
+MCP additionally exposes `memory_context`, `memory_graph_neighbors`, `memory_code_search`,
+`memory_code_context` and `memory_code_impact`, alongside append, derive, search, batch source,
+snapshot and resume tools.
 
 ## Output reduction, usage, governor and tasks
 
@@ -347,3 +392,17 @@ Licensed under the [MIT License](LICENSE).
 Architecture: [docs/architecture.md](docs/architecture.md). Security:
 [docs/security.md](docs/security.md). Evidence matrix:
 [docs/requirements-traceability.md](docs/requirements-traceability.md).
+
+## Optional evidence-bound automatic extraction
+
+Ordinary prose can be interpreted into exact-evidence memory by an optional extractor plugin.
+The feature is off by default and marker-based behavior remains unchanged. Install the separate
+NuExtract plugin, pin its model revision, validate the Russian calibration corpus and the
+complementary English regression corpus, then opt in with
+JOINY_MNEMONIC_EXTRACTOR_ENABLED=1.
+
+Canonical append only emits a durable, coalescible wakeup; model inference runs in a bounded
+background worker and does not delay the append or hook response. Use joiny-mnemonic
+extraction-status to inspect lag and quarantine. extraction-process remains an explicit
+foreground drain/recovery command, while extraction-reprocess creates runs under a changed
+configuration hash without rewriting old audit history.

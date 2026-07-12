@@ -248,6 +248,8 @@ class SnapshotManager:
                 Event(
                     seq=int(raw["seq"]), id=raw["id"], branch_id=raw["branch_id"],
                     session_id=raw.get("session_id"), kind=raw["kind"], role=raw.get("role"),
+                    origin_channel=raw.get("origin_channel", "legacy_untrusted"),
+                    origin_adapter=raw.get("origin_adapter"),
                     content=raw["content"], payload=dict(raw.get("payload", {})),
                     files=tuple(raw.get("files", ())), created_at=raw["created_at"],
                     previous_hash=raw.get("previous_hash"), content_hash=raw["content_hash"],

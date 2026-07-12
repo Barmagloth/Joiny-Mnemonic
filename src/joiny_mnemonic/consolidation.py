@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from .models import Event, MemoryRecord
 from .prompt import conservative_token_estimate
+
+from .provenance import is_host_logical_user, origin_evidence_type
 from .transcript import interaction_groups
 
 if TYPE_CHECKING:
@@ -13,11 +15,30 @@ if TYPE_CHECKING:
 
 
 _MARKER = re.compile(
-    r"^\s*(goal|constraint|decision|task|todo|fact|preference)\s*:\s*(.+?)\s*$",
+    r"^\s*(goal|constraint|decision|task|todo|fact|preference|failed|failure|lesson)\s*:\s*(.+?)\s*$",
     re.IGNORECASE,
 )
-_MEMORY_TYPES = {"fact", "decision", "task", "preference", "summary", "index"}
+_MEMORY_TYPES = {
+    "fact", "decision", "task", "preference", "failure", "lesson", "summary", "index"
+}
 _BLOCKS = {"instructions", "goal", "constraints", "decisions", "open_tasks"}
+
+
+@dataclass(frozen=True, slots=True)
+class ConsolidationPolicy:
+    allow_records: bool
+    allow_blocks: bool
+
+
+def consolidation_policy(event: Event) -> ConsolidationPolicy:
+    if event.kind != "message":
+        return ConsolidationPolicy(allow_records=False, allow_blocks=False)
+    role = (event.role or "").casefold()
+    if role in {"user", "assistant"}:
+        if is_host_logical_user(event):
+            return ConsolidationPolicy(allow_records=True, allow_blocks=True)
+        return ConsolidationPolicy(allow_records=True, allow_blocks=False)
+    return ConsolidationPolicy(allow_records=False, allow_blocks=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +79,9 @@ class EvidenceConsolidator:
         "todo": ("task", "open_tasks"),
         "fact": ("fact", None),
         "preference": ("preference", None),
+        "failed": ("failure", None),
+        "failure": ("failure", None),
+        "lesson": ("lesson", None),
     }
 
     @staticmethod
@@ -93,6 +117,9 @@ class EvidenceConsolidator:
 
     @classmethod
     def candidates(cls, event: Event) -> tuple[MemoryCandidate, ...]:
+        policy = consolidation_policy(event)
+        if not policy.allow_records:
+            return ()
         result = cls._structured(event)
         for line in event.content.splitlines():
             match = _MARKER.match(line)
@@ -109,6 +136,16 @@ class EvidenceConsolidator:
             )
         unique: dict[tuple[str, str, str | None], MemoryCandidate] = {}
         for item in result:
+            if item.block is not None and not policy.allow_blocks:
+                item = MemoryCandidate(
+                    memory_type=item.memory_type,
+                    content=item.content,
+                    summary=item.summary,
+                    block=None,
+                    risk=item.risk,
+                    retrieval_cost=item.retrieval_cost,
+                    files=item.files,
+                )
             unique[(item.memory_type, item.content.casefold(), item.block)] = item
         return tuple(unique.values())
 
@@ -143,7 +180,20 @@ class EvidenceConsolidator:
             include_superseded=True,
         )
         for candidate in self.candidates(event):
-            record = next(
+            record = None
+            if is_host_logical_user(event):
+                matched = service.store.find_auto_candidate_match(
+                    candidate.memory_type, candidate.content
+                )
+                if matched is not None:
+                    candidate_id, memory_id = matched
+                    service.store.confirm_candidate_match(
+                        candidate_id,
+                        memory_id,
+                        source_event_id=event.id,
+                    )
+                    record = service.store.get_memory(memory_id)
+            record = record or next(
                 (
                     item for item in existing_records
                     if item.memory_type == candidate.memory_type
@@ -162,6 +212,15 @@ class EvidenceConsolidator:
                     branch_id=event.branch_id,
                     risk=candidate.risk,
                     retrieval_cost=candidate.retrieval_cost,
+                    metadata={
+                        "origin": "explicit_marker",
+                        "authority_level": (
+                            "confirmed"
+                            if is_host_logical_user(event)
+                            else "auto"
+                        ),
+                        "origin_evidence_type": origin_evidence_type(event),
+                    },
                 )
                 existing_records.append(record)
             memory_ids.append(record.id)

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import os
+import json
 import sqlite3
 import subprocess
 import sys
+import uuid
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +14,7 @@ from unittest.mock import patch
 from joiny_mnemonic.prompt import BudgetExceededError
 from joiny_mnemonic.retrieval import RetrievalContext
 from joiny_mnemonic.service import MemoryService
+from joiny_mnemonic.storage import MemoryStore
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parent / "runtime"
@@ -34,6 +38,64 @@ class ServiceCase(unittest.TestCase):
             self.service.store._conn.execute("UPDATE events SET content='changed' WHERE id=?", (first.id,))
         with self.assertRaises(sqlite3.IntegrityError):
             self.service.store._conn.execute("DELETE FROM events WHERE id=?", (first.id,))
+
+    def test_legacy_event_migration_is_untrusted_and_hash_compatible(self) -> None:
+        database = RUNTIME_ROOT / f"legacy-origin-{uuid.uuid4().hex}.db"
+        event_id = "evt_legacy"
+        created_at = "2026-01-01T00:00:00+00:00"
+        canonical = json.dumps(
+            {
+                "id": event_id,
+                "branch_id": "main",
+                "session_id": None,
+                "kind": "message",
+                "role": "user",
+                "content": "Decision: legacy evidence",
+                "payload": {},
+                "files": [],
+                "created_at": created_at,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        content_hash = hashlib.sha256(canonical.encode()).hexdigest()
+        chain_hash = hashlib.sha256(content_hash.encode()).hexdigest()
+        connection = sqlite3.connect(database)
+        connection.execute(
+            "CREATE TABLE events("
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,"
+            "branch_id TEXT NOT NULL,session_id TEXT,kind TEXT NOT NULL,role TEXT,"
+            "content TEXT NOT NULL,payload_json TEXT NOT NULL,files_json TEXT NOT NULL,"
+            "created_at TEXT NOT NULL,previous_hash TEXT,content_hash TEXT NOT NULL,"
+            "chain_hash TEXT NOT NULL UNIQUE)"
+        )
+        connection.execute(
+            "INSERT INTO events VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                event_id, "main", None, "message", "user", "Decision: legacy evidence",
+                "{}", "[]", created_at, None, content_hash, chain_hash,
+            ),
+        )
+        connection.commit()
+        connection.close()
+        try:
+            with MemoryStore(database) as store:
+                legacy = store.get_event(event_id)
+                self.assertEqual(legacy.origin_channel, "legacy_untrusted")
+                self.assertEqual(store.verify_chain(), (True, None))
+                current = store.append_event(
+                    kind="message", role="user", content="Decision: public evidence"
+                )
+                self.assertEqual(current.origin_channel, "public_api")
+                self.assertEqual(store.verify_chain(), (True, None))
+                version = store._conn.execute(
+                    "SELECT value FROM metadata WHERE key='schema_version'"
+                ).fetchone()["value"]
+                self.assertEqual(version, "5")
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database) + suffix).unlink(missing_ok=True)
 
     def test_secret_filter_runs_before_durable_write(self) -> None:
         secret = "sk-abcdefghijklmnopqrstuvwxyz123456"

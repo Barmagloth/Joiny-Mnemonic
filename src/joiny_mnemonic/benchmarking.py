@@ -272,6 +272,7 @@ def run_benchmark(
             enriched.store.checkpoint()
             baseline_bytes = baseline.store.database_size()
             enriched_bytes = enriched.store.database_size()
+            storage_breakdown = enriched.store.storage_breakdown()
             usage = enriched.usage.report()
         finally:
             baseline.close()
@@ -360,6 +361,7 @@ def run_benchmark(
         "baseline_database_bytes": baseline_bytes,
         "enriched_database_bytes": enriched_bytes,
         "storage_overhead_bytes": storage_overhead,
+        "storage_breakdown_bytes": storage_breakdown,
         "storage_overhead_per_saved_token": storage_overhead / saved_once if saved_once > 0 else None,
         "critical_signal_recall": critical_retained / critical_expected if critical_expected else 1.0,
         "exact_source_recovery_rate": (
@@ -438,6 +440,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"- Enriched ingest latency p95: **{aggregate['enriched_ingest_ms_p95']:.3f} ms**.",
             f"- Hook counter committed-append latency p95: **{aggregate['hook_counter_append_ms_p95']:.3f} ms**.",
             f"- SQLite storage overhead: **{aggregate['storage_overhead_bytes']} bytes**.",
+            "- Storage classes: "
+            + ", ".join(
+                f"{name}={value} bytes"
+                for name, value in aggregate["storage_breakdown_bytes"].items()
+            )
+            + ".",
             f"- Critical signal recall: **{aggregate['critical_signal_recall']:.1%}**.",
             f"- Exact source recovery: **{aggregate['exact_source_recovery_rate']:.1%}**.",
             f"- Path/line reference recall: **{aggregate['path_reference_recall']:.1%}**.",

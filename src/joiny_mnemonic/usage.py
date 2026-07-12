@@ -185,6 +185,99 @@ class UsageMeter:
             receipt_key=f"reduce:{event.id}:v1",
         )
 
+    def record_retrieval_search(
+        self,
+        *,
+        branch_id: str,
+        query: str,
+        hits: list[Any],
+        semantic_enabled: bool,
+        filters: dict[str, Any],
+        limit: int,
+        session_id: str | None = None,
+        task_key: str | None = None,
+        receipt_key: str | None = None,
+    ) -> UsageSample:
+        return self.store.record_usage(
+            branch_id=branch_id,
+            session_id=session_id,
+            source="joiny-mnemonic",
+            operation="retrieval_search",
+            input_tokens=conservative_token_estimate(query),
+            estimated=True,
+            raw_bytes=len(query.encode("utf-8")),
+            metadata={
+                "query": query,
+                "task_key": task_key,
+                "semantic_enabled": semantic_enabled,
+                "filters": filters,
+                "limit": limit,
+                "results": [
+                    {
+                        "id": hit.id,
+                        "score": hit.score,
+                        "source_kind": hit.source_kind,
+                        "position": position,
+                        "origin": hit.metadata.get("origin"),
+                        "candidate_id": hit.metadata.get("candidate_id"),
+                        "extraction_run_id": hit.metadata.get("extraction_run_id"),
+                        "extractor_config_hash": hit.metadata.get("extractor_config_hash"),
+                    }
+                    for position, hit in enumerate(hits)
+                ],
+            },
+            receipt_key=receipt_key,
+        )
+
+    def record_prompt_injection(
+        self,
+        packet: PromptPacket,
+        *,
+        branch_id: str,
+        query: str,
+        session_id: str | None = None,
+        task_key: str | None = None,
+        latency_ms: float | None = None,
+        receipt_key: str | None = None,
+    ) -> UsageSample:
+        return self.store.record_usage(
+            branch_id=branch_id,
+            session_id=session_id,
+            source="joiny-mnemonic",
+            operation="prompt_injection",
+            input_tokens=conservative_token_estimate(query),
+            output_tokens=packet.estimated_tokens,
+            context_tokens=packet.estimated_tokens,
+            estimated=True,
+            latency_ms=latency_ms,
+            raw_bytes=len(query.encode("utf-8")),
+            emitted_bytes=len(packet.text.encode("utf-8")),
+            metadata={
+                "query": query,
+                "task_key": task_key,
+                "included_event_ids": packet.included_event_ids,
+                "included_memory_ids": packet.included_memory_ids,
+                "memory_lineage": [
+                    {
+                        "memory_id": memory_id,
+                        "origin": record.metadata.get("origin"),
+                        "candidate_id": record.metadata.get("candidate_id"),
+                        "extraction_run_id": record.metadata.get("extraction_run_id"),
+                        "extractor_config_hash": record.metadata.get(
+                            "extractor_config_hash"
+                        ),
+                    }
+                    for memory_id in packet.included_memory_ids
+                    for record in (self.store.get_memory(memory_id),)
+                ],
+                "snapshot_id": packet.snapshot_id,
+                "token_budget": packet.token_budget,
+                "estimated_emitted_tokens": packet.estimated_tokens,
+                "stale_reasons": packet.stale_reasons,
+            },
+            receipt_key=receipt_key,
+        )
+
     def record_prompt(
         self,
         packet: PromptPacket,

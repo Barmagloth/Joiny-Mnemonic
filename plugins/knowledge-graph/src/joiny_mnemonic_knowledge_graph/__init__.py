@@ -239,6 +239,22 @@ class SQLiteKnowledgeGraph:
                 break
         return hits
 
+    def resolve_source_ids(self, identifier: str) -> tuple[str, ...] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT source_event_ids_json FROM edges WHERE id=?", (identifier,)
+            ).fetchone()
+        if row is None:
+            return None
+        return tuple(json.loads(row["source_event_ids_json"]))
+
+    def resolve_branch_id(self, identifier: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT branch_id FROM edges WHERE id=?", (identifier,)
+            ).fetchone()
+        return str(row["branch_id"]) if row is not None else None
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

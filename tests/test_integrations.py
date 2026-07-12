@@ -41,6 +41,41 @@ class IntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
+    def test_cli_init_resolves_witness_registry(self) -> None:
+        root = RUNTIME_ROOT / f"cli-init-{uuid.uuid4().hex}"
+        root.mkdir()
+        try:
+            with (
+                patch("joiny_mnemonic.cli.WitnessRegistry") as registry,
+                patch("joiny_mnemonic.service.WitnessRegistry") as service_registry,
+            ):
+                service_registry.return_value = registry.return_value
+                registry.return_value.known_project_database_missing.return_value = ()
+                registry.return_value.check_and_update.return_value = {
+                    "status": "first_checkpoint", "finding": None, "details": {}
+                }
+                from joiny_mnemonic.cli import run
+
+                result = run(
+                    build_parser().parse_args(
+                        [
+                            "--db",
+                            str(root / "memory.db"),
+                            "--project-root",
+                            str(root),
+                            "init",
+                        ]
+                    )
+                )
+            self.assertEqual(result, 0)
+        finally:
+            for path in sorted(root.rglob("*"), reverse=True):
+                if path.is_file():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            root.rmdir()
+
     def test_distribution_and_console_script_identity(self) -> None:
         root = Path(__file__).resolve().parents[1]
         config = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
@@ -73,9 +108,11 @@ class IntegrationTest(unittest.TestCase):
                 "llm_memory.semantic",
                 "llm_memory.knowledge_graph",
                 "llm_memory.kv_tier",
+                "llm_memory.extractor",
                 "joiny_mnemonic.semantic",
                 "joiny_mnemonic.knowledge_graph",
                 "joiny_mnemonic.kv_tier",
+                "joiny_mnemonic.extractor",
             ],
         )
     def test_entry_point_factory_receives_project_context(self) -> None:
@@ -123,7 +160,10 @@ class IntegrationTest(unittest.TestCase):
         self.assertTrue(values["manual_cli_api_mcp"])
         self.assertEqual(
             self.service.capabilities()["core"]["durable_memory_markers"],
-            ["Goal", "Decision", "Fact", "Constraint", "TODO", "Preference"],
+            [
+                "Goal", "Decision", "Fact", "Constraint", "TODO", "Preference",
+                "Failed", "Failure", "Lesson",
+            ],
         )
 
     def test_mcp_lifecycle_tools_and_calls(self) -> None:
@@ -496,6 +536,26 @@ class IntegrationTest(unittest.TestCase):
             with urllib.request.urlopen(graph_request, timeout=5) as response:
                 graph = json.load(response)
             self.assertEqual(graph, [])
+
+            context_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/context",
+                data=json.dumps({"id": result["id"], "before": 0, "after": 0}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(context_request, timeout=5) as response:
+                context = json.load(response)
+            self.assertEqual(context["index"][0]["id"], result["id"])
+
+            source_request = urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/v1/source",
+                data=json.dumps({"ids": [result["id"]]}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(source_request, timeout=5) as response:
+                sources = json.load(response)
+            self.assertEqual(sources[0]["events"][0]["id"], result["id"])
         finally:
             server.shutdown()
             server.server_close()

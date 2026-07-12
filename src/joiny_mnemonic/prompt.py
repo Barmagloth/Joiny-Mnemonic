@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -33,10 +34,12 @@ class PromptAssembler:
         retrieval: RetrievalEngine,
         *,
         token_counter: Callable[[str], int] = conservative_token_estimate,
+        telemetry: Callable[[PromptPacket, dict[str, Any]], None] | None = None,
     ) -> None:
         self.store = store
         self.retrieval = retrieval
         self.token_counter = token_counter
+        self.telemetry = telemetry
 
     def _event_text(self, event: Event) -> str:
         role = event.role or "none"
@@ -58,8 +61,15 @@ class PromptAssembler:
     @staticmethod
     def _retrieval_text(hit: RetrievalHit) -> str:
         sources = ",".join(hit.source_event_ids)
+        origin = hit.metadata.get("origin", "explicit")
+        authority = hit.metadata.get("authority_level", "confirmed")
+        label = (
+            "[auto] " if origin == "auto"
+            else "[unconfirmed] " if authority != "confirmed"
+            else ""
+        )
         return memory_as_untrusted_data(
-            f"id={hit.id} type={hit.memory_type} representation={hit.representation} "
+            f"{label}id={hit.id} type={hit.memory_type} representation={hit.representation} "
             f"sources={sources}\n{hit.content}"
         )
 
@@ -78,6 +88,8 @@ class PromptAssembler:
                 Event(
                     seq=int(raw["seq"]), id=raw["id"], branch_id=raw["branch_id"],
                     session_id=raw.get("session_id"), kind=raw["kind"], role=raw.get("role"),
+                    origin_channel=raw.get("origin_channel", "legacy_untrusted"),
+                    origin_adapter=raw.get("origin_adapter"),
                     content=raw["content"], payload=dict(raw.get("payload", {})),
                     files=tuple(raw.get("files", ())), created_at=raw["created_at"],
                     previous_hash=raw.get("previous_hash"), content_hash=raw["content_hash"],
@@ -112,6 +124,7 @@ class PromptAssembler:
                     source_event_ids=tuple(raw.get("source_event_ids", ())),
                     supersedes_id=raw.get("supersedes_id"),
                     created_at=raw.get("created_at", "1970-01-01T00:00:00+00:00"),
+                    metadata=dict(raw.get("metadata", {})),
                 )
             )
         return records
@@ -128,7 +141,12 @@ class PromptAssembler:
         stale_reasons: tuple[str, ...] = (),
         state: dict[str, Any] | None = None,
         protected_instructions: tuple[str, ...] = (),
+        session_id: str | None = None,
+        task_key: str | None = None,
+        telemetry_receipt: str | None = None,
+        record_telemetry: bool = True,
     ) -> PromptPacket:
+        started = time.perf_counter()
         if token_budget < 1:
             raise ValueError("token_budget must be positive")
         parts = [
@@ -276,7 +294,7 @@ class PromptAssembler:
         tokens = self.token_counter(text)
         if tokens > token_budget:
             raise AssertionError("prompt budget governor emitted an oversized packet")
-        return PromptPacket(
+        packet = PromptPacket(
             text=text,
             estimated_tokens=tokens,
             token_budget=token_budget,
@@ -285,3 +303,19 @@ class PromptAssembler:
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
         )
+        if record_telemetry and self.telemetry is not None:
+            try:
+                self.telemetry(
+                    packet,
+                    {
+                        "branch_id": branch_id,
+                        "session_id": session_id,
+                        "task_key": task_key,
+                        "query": query,
+                        "latency_ms": (time.perf_counter() - started) * 1000,
+                        "receipt_key": telemetry_receipt,
+                    },
+                )
+            except Exception:
+                pass
+        return packet
