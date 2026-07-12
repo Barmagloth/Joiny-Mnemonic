@@ -61,8 +61,15 @@ class PromptAssembler:
     @staticmethod
     def _retrieval_text(hit: RetrievalHit) -> str:
         sources = ",".join(hit.source_event_ids)
+        origin = hit.metadata.get("origin", "explicit")
+        authority = hit.metadata.get("authority_level", "confirmed")
+        label = (
+            "[auto] " if origin == "auto"
+            else "[unconfirmed] " if authority != "confirmed"
+            else ""
+        )
         return memory_as_untrusted_data(
-            f"id={hit.id} type={hit.memory_type} representation={hit.representation} "
+            f"{label}id={hit.id} type={hit.memory_type} representation={hit.representation} "
             f"sources={sources}\n{hit.content}"
         )
 
@@ -115,6 +122,7 @@ class PromptAssembler:
                     source_event_ids=tuple(raw.get("source_event_ids", ())),
                     supersedes_id=raw.get("supersedes_id"),
                     created_at=raw.get("created_at", "1970-01-01T00:00:00+00:00"),
+                    metadata=dict(raw.get("metadata", {})),
                 )
             )
         return records

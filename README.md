@@ -392,3 +392,14 @@ Licensed under the [MIT License](LICENSE).
 Architecture: [docs/architecture.md](docs/architecture.md). Security:
 [docs/security.md](docs/security.md). Evidence matrix:
 [docs/requirements-traceability.md](docs/requirements-traceability.md).
+
+## Optional evidence-bound automatic extraction
+
+Ordinary prose can be interpreted into exact-evidence memory by an optional extractor plugin.
+The feature is off by default and marker-based behavior remains unchanged. Install the separate
+NuExtract plugin, pin its model revision, validate evals/extraction_ru_v1.json, then opt in with
+JOINY_MNEMONIC_EXTRACTOR_ENABLED=1.
+
+Use joiny-mnemonic extraction-status to inspect lag and quarantine, extraction-process to drain
+the durable backlog, and extraction-reprocess with a changed structured configuration to preserve
+old audit history while creating new runs.

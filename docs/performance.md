@@ -89,3 +89,14 @@ python benchmarks/run_benchmark.py --project-root . `
 
 Machine-readable and Markdown reports are written to `benchmarks/results/latest.json` and
 `benchmarks/results/latest.md`.
+
+## Extraction storage amplification
+
+Storage benchmarks must report four categories separately: canonical tables, immutable
+interpretation-ledger tables, optional compressed raw extractor payloads, and rebuildable
+projections/indexes. A single total database size is insufficient for retention planning.
+
+Runtime telemetry reports pending events, oldest pending age, failed events, retry count and last
+success. Worker concurrency is bounded by configuration. At-least-once inference means a crash
+may repeat model execution; uniqueness plus the atomic success transaction provides exactly-once
+durable candidate/memory effects for an event and configuration hash.

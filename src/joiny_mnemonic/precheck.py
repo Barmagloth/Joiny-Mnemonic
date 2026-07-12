@@ -129,7 +129,9 @@ class PrecheckService:
                 ("lesson", "known_lesson", f"Prior lessons reference {file}."),
             ):
                 selected = [
-                    record for record in records if record.memory_type == memory_type
+                    record for record in records
+                    if record.memory_type == memory_type
+                    and self.store.memory_authority(record.id) == "confirmed"
                 ]
                 if selected:
                     findings.append(

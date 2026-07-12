@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, replace
+import hashlib
+import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -11,6 +15,7 @@ from .context import ContextWindow, ExactSourceResult, build_context_window
 from .context_limits import ContextLimitConfig
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
+from .extraction import ExtractionService, ExtractorConfig
 from .plugins import PluginContext, PluginRegistry
 from .paths import resolve_project_database
 from .precheck import PrecheckReport, PrecheckService
@@ -22,6 +27,7 @@ from .staleness import MemoryStaleness, StalenessService
 from .storage import MemoryStore
 from .tasks import TaskManager
 from .usage import UsageMeter
+from .witness import WitnessRegistry
 
 
 DURABLE_MEMORY_INSTRUCTION = (
@@ -47,12 +53,45 @@ class MemoryService:
         *,
         project_root: str | Path = ".",
         plugins: PluginRegistry | None = None,
+        extractor_name: str | None = None,
+        extractor_config: ExtractorConfig | None = None,
+        extractor_enabled: bool | None = None,
+        witness_registry_path: str | Path | None = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.store = MemoryStore(database)
+        self.witness = WitnessRegistry(witness_registry_path)
+        self._witness_status: dict[str, Any] = {"status": "uninitialized"}
         self.context_limits = ContextLimitConfig(self.project_root)
         self.plugins = plugins or PluginRegistry(
             context=PluginContext(project_root=self.project_root, database_path=self.store.path)
+        )
+        selected_extractor = None
+        if extractor_name is not None:
+            selected_extractor = self.plugins.extractors.get(extractor_name)
+            if selected_extractor is None and self.plugins.extractors:
+                raise KeyError(f"unknown extractor plugin: {extractor_name}")
+        elif self.plugins.extractors:
+            selected_extractor = self.plugins.extractors[sorted(self.plugins.extractors)[0]]
+        if extractor_config is None and selected_extractor is not None:
+            extractor_config = ExtractorConfig(
+                model_identity=str(
+                    getattr(selected_extractor, "model_identity", selected_extractor.name)
+                ),
+                model_version=str(getattr(selected_extractor, "model_version", "unknown")),
+                inference_parameters=dict(
+                    getattr(selected_extractor, "inference_parameters", {})
+                ),
+            )
+        if extractor_enabled is None:
+            extractor_enabled = os.environ.get(
+                "JOINY_MNEMONIC_EXTRACTOR_ENABLED", ""
+            ).casefold() in {"1", "true", "yes", "on"}
+        self.extraction = ExtractionService(
+            self,
+            selected_extractor,
+            extractor_config,
+            enabled=extractor_enabled,
         )
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
@@ -71,6 +110,123 @@ class MemoryService:
         self.governor = BudgetGovernor(self)
         self.plugin_errors = self.plugins.errors
 
+    def _repository_identity(self) -> str:
+        try:
+            remote = subprocess.run(
+                ["git", "-C", str(self.project_root), "config", "--get", "remote.origin.url"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            ).stdout.strip()
+            initial = subprocess.run(
+                ["git", "-C", str(self.project_root), "rev-list", "--max-parents=0", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            ).stdout.splitlines()
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        return f"{remote}|{initial[0] if initial else ''}"
+
+    def initialize_project(self) -> dict[str, Any]:
+        policy = {
+            "version": 1,
+            "automatic_extraction_enabled": False,
+            "auto_threshold": (
+                self.extraction.config.auto_threshold
+                if self.extraction.config is not None else 0.85
+            ),
+            "untrusted_evidence_zones": [
+                "inline_code", "fenced_code", "blockquote"
+            ],
+            "auto_can_create_protected_blocks": False,
+        }
+        result = self.store.initialize_project(
+            repository_identity=self._repository_identity(),
+            canonical_path=str(self.project_root),
+            code_version="0.5.0",
+            policy=policy,
+        )
+        if result.get("initialized"):
+            self._witness_status = self.witness.check_and_update(
+                self.store, allow_first=True
+            )
+        else:
+            self._witness_status = self.security_status()["witness"]
+        return {**result, "witness": self._witness_status}
+
+    def security_status(self) -> dict[str, Any]:
+        witness = self.witness.check_and_update(self.store)
+        finding_type = witness.get("finding")
+        if finding_type:
+            details = dict(witness.get("details", {}))
+            digest = hashlib.sha256(
+                json.dumps(
+                    details, ensure_ascii=False, sort_keys=True
+                ).encode("utf-8")
+            ).hexdigest()[:24]
+            self.store.record_security_finding(
+                str(finding_type),
+                incident_key=f"{finding_type}:{digest}",
+                details=details,
+            )
+        self._witness_status = witness
+        findings = self.store.list_security_findings()
+        return {
+            "witness": witness,
+            "findings": findings,
+            "active_security_findings": sum(
+                item["status"] != "acknowledged" for item in findings
+            ),
+            "acknowledged_security_findings": sum(
+                item["status"] == "acknowledged" for item in findings
+            ),
+        }
+
+    def request_finding_acknowledgement(
+        self,
+        finding_id: str,
+        *,
+        branch_id: str = "main",
+        origin_evidence_type: str = "extractor",
+    ) -> dict[str, str]:
+        event, transition = self.store.append_finding_ack_request(
+            finding_id,
+            branch_id=branch_id,
+            origin_evidence_type=origin_evidence_type,
+        )
+        self.checkpoint_witness()
+        return {"event_id": event.id, "transition_id": transition}
+
+    def acknowledge_finding_from_user(
+        self, finding_id: str, *, source_event_id: str
+    ) -> str:
+        return self.store.transition_finding(
+            finding_id,
+            "acknowledged",
+            source_event_id=source_event_id,
+            actor="logical_user",
+            origin_evidence_type="host_logical_user",
+        )
+
+    def request_policy_change(
+        self, policy: dict[str, Any], *, branch_id: str = "main"
+    ) -> Event:
+        return self.store.append_event(
+            kind="state",
+            role=None,
+            branch_id=branch_id,
+            content="policy change requested",
+            payload={
+                "operation": "policy_change_requested",
+                "policy": policy,
+                "active_policy_id": (
+                    self.store.active_policy() or {}
+                ).get("id"),
+            },
+        )
     def budget_policy(
         self, *, branch_id: str = "main", agent: str | None = None
     ) -> BudgetPolicy:
@@ -86,6 +242,7 @@ class MemoryService:
             self.plugins.semantic,
             self.plugins.knowledge_graph,
             self.plugins.kv_tiers,
+            self.plugins.extractors,
         ):
             for plugin in collection.values():
                 if id(plugin) in closed:
@@ -101,6 +258,46 @@ class MemoryService:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+    def checkpoint_witness(self) -> dict[str, Any]:
+        self._witness_status = self.witness.check_and_update(self.store)
+        return self._witness_status
+    def append_event(self, **values: Any) -> Event:
+        event = self.store.append_event(**values)
+        self.consolidator.consolidate_event(self, event)
+        if self.extraction.enabled:
+            self.extraction.process_backlog()
+        self.checkpoint_witness()
+        return event
+
+    def request_candidate_transition(
+        self,
+        candidate_id: str,
+        action: str,
+        *,
+        branch_id: str = "main",
+        replacement_candidate_id: str | None = None,
+        replacement_memory_id: str | None = None,
+        origin_evidence_type: str = "extractor",
+    ) -> dict[str, str]:
+        mapping = {
+            "confirm": "confirmation_requested",
+            "reject": "rejection_requested",
+            "supersede": "supersession_requested",
+        }
+        if action not in mapping:
+            raise ValueError("action must be confirm, reject or supersede")
+        event, transition_id = self.store.append_candidate_request(
+            candidate_id,
+            mapping[action],
+            branch_id=branch_id,
+            action=action,
+            origin_evidence_type=origin_evidence_type,
+            replacement_candidate_id=replacement_candidate_id,
+            replacement_memory_id=replacement_memory_id,
+        )
+        self.checkpoint_witness()
+        return {"event_id": event.id, "transition_id": transition_id}
 
     def ingest_native(
         self,
@@ -135,6 +332,9 @@ class MemoryService:
             event_id=event.id,
         )
         self.consolidator.consolidate_event(self, event)
+        if self.extraction.enabled:
+            self.extraction.process_backlog()
+        self.checkpoint_witness()
         return event
 
     def reduce_tool_output(
@@ -182,6 +382,7 @@ class MemoryService:
         )
 
     def derive_memory(self, **values: Any) -> MemoryRecord:
+        values.setdefault("metadata", {"origin": "explicit", "authority_level": "confirmed"})
         record = self.store.derive_memory(**values)
         for plugin in self.plugins.semantic.values():
             try:
@@ -433,6 +634,27 @@ class MemoryService:
             state = restored.state
         else:
             state = self.snapshots.build_state(branch_id=branch_id)
+        security = self.security_status()
+        active_findings = [
+            item for item in security["findings"]
+            if item["status"] != "acknowledged"
+        ]
+        if active_findings:
+            stale_reasons = (
+                *stale_reasons,
+                *(
+                    "security finding "
+                    f"{item['finding_type']} id={item['id']} source={item['source_event_id']}"
+                    for item in active_findings
+                ),
+            )
+        extraction_status = self.extraction.status()
+        if extraction_status.oldest_pending_age is not None:
+            stale_reasons = (
+                *stale_reasons,
+                "automatic extraction backlog is incomplete; "
+                f"oldest_pending_age={extraction_status.oldest_pending_age:.1f}s",
+            )
         packet = self.prompts.assemble(
             token_budget=budget,
             branch_id=branch_id,
@@ -556,6 +778,7 @@ class MemoryService:
                 "semantic_retrieval": bool(self.plugins.semantic),
                 "knowledge_graph": bool(self.plugins.knowledge_graph),
                 "kv_tiers": sorted(self.plugins.kv_tiers),
+                "extractor_plugin_category": True,
                 "http_api": True,
                 "mcp": True,
                 "cli": True,
@@ -563,6 +786,14 @@ class MemoryService:
             "plugin_errors": list(self.plugin_errors),
             "warnings": [],
         }
+        result.update(asdict(self.extraction.status()))
+        security = self.security_status()
+        result.update({
+            "active_security_findings": security["active_security_findings"],
+            "acknowledged_security_findings": security["acknowledged_security_findings"],
+            "witness_status": security["witness"]["status"],
+            "security_findings": security["findings"],
+        })
         if agent:
             agent_values, warnings = self._agent_capabilities(agent, supplied)
             result["agent"] = agent_values

@@ -178,7 +178,21 @@ class EvidenceConsolidator:
             include_superseded=True,
         )
         for candidate in self.candidates(event):
-            record = next(
+            record = None
+            if (event.role or "").casefold() == "user":
+                matched = service.store.find_auto_candidate_match(
+                    candidate.memory_type, candidate.content
+                )
+                if matched is not None:
+                    candidate_id, memory_id = matched
+                    service.store.confirm_candidate_match(
+                        candidate_id,
+                        memory_id,
+                        source_event_id=event.id,
+                        origin_evidence_type="host_logical_user",
+                    )
+                    record = service.store.get_memory(memory_id)
+            record = record or next(
                 (
                     item for item in existing_records
                     if item.memory_type == candidate.memory_type
@@ -197,6 +211,19 @@ class EvidenceConsolidator:
                     branch_id=event.branch_id,
                     risk=candidate.risk,
                     retrieval_cost=candidate.retrieval_cost,
+                    metadata={
+                        "origin": "explicit_marker",
+                        "authority_level": (
+                            "confirmed"
+                            if (event.role or "").casefold() == "user"
+                            else "auto"
+                        ),
+                        "origin_evidence_type": (
+                            "host_logical_user"
+                            if (event.role or "").casefold() == "user"
+                            else "extractor"
+                        ),
+                    },
                 )
                 existing_records.append(record)
             memory_ids.append(record.id)

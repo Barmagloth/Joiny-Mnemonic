@@ -210,3 +210,22 @@ are applied before a handoff recommendation is injected. Hook, reduction and usa
 independent, so a retry after a partial crash resumes missing derived work without duplicating
 canonical events or metrics. Prompt-injection exposure uses its own receipt, so repeated native
 delivery does not double-count it.
+
+## Optional automatic extraction
+
+Automatic extraction is an optional plugin category named joiny_mnemonic.extractor. Core has no
+ML dependency and the kill switch is off by default. The bundled optional NuExtract package is
+under plugins/nuextract-local and imports Transformers/Torch only inside the plugin.
+
+Set JOINY_MNEMONIC_EXTRACTOR_ENABLED=1 only after installing a backend and validating its pinned
+configuration. Useful operations are extraction-status, extraction-process, extraction-retry,
+extraction-reprocess and extraction-candidates. HTTP exposes corresponding /v1/extraction
+routes. MCP exposes extraction status/process and provenance-bound candidate requests.
+
+CLI, HTTP, MCP and tool calls are not trusted human approval. Candidate confirmation, rejection
+or supersession calls therefore append a canonical control event and a requested transition.
+A trusted explicit user marker can confirm an exact normalized type/content match.
+
+Capabilities report availability, enablement, backend/hash, pending and failed events, oldest
+backlog age, retries, quarantine age, witness state and security findings. Queue pressure changes
+latency, never canonical capture.

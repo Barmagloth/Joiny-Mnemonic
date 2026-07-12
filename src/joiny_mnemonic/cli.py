@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from .api import serve
+from .extraction import ExtractorConfig
+from .extraction_evaluation import evaluate_extractor
 from .evaluation import (
     EvaluationTask,
     FullHistoryPolicy,
@@ -190,6 +192,27 @@ def build_parser() -> argparse.ArgumentParser:
     precheck.add_argument("--command", dest="candidate_command")
     precheck.add_argument("--strict", action="store_true")
 
+    commands.add_parser("extraction-status")
+
+    extraction_process = commands.add_parser("extraction-process")
+    extraction_process.add_argument("--limit", type=int)
+
+    extraction_retry = commands.add_parser("extraction-retry")
+    extraction_retry.add_argument("--limit", type=int)
+
+    extraction_reprocess = commands.add_parser("extraction-reprocess")
+    extraction_reprocess.add_argument("config", type=_json_object)
+    extraction_reprocess.add_argument("--limit", type=int)
+
+    extraction_candidates = commands.add_parser("extraction-candidates")
+    extraction_candidates.add_argument("--status")
+
+    candidate_request = commands.add_parser("candidate-request")
+    candidate_request.add_argument("candidate_id")
+    candidate_request.add_argument("action", choices=["confirm", "reject", "supersede"])
+    candidate_request.add_argument("--branch", default="main")
+    candidate_request.add_argument("--replacement-candidate")
+    candidate_request.add_argument("--replacement-memory")
     commands.add_parser("install-git-hook")
 
     graph = commands.add_parser("graph-neighbors")
@@ -335,6 +358,18 @@ def build_parser() -> argparse.ArgumentParser:
     task_list = commands.add_parser("task-list")
     task_list.add_argument("--status", choices=["active", "blocked", "completed", "cancelled"])
 
+    findings = commands.add_parser("findings")
+    findings.add_argument("--acknowledged", action="store_true")
+
+    finding_request = commands.add_parser("finding-ack-request")
+    finding_request.add_argument("finding_id")
+    finding_request.add_argument("--branch", default="main")
+
+    policy_request = commands.add_parser("policy-request")
+    policy_request.add_argument("policy", type=_json_object)
+    policy_request.add_argument("--branch", default="main")
+
+    commands.add_parser("doctor")
     commands.add_parser("verify")
 
     api = commands.add_parser("serve")
@@ -351,6 +386,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--resume-budget", type=int, default=1500)
     evaluate.add_argument("--minimum", type=float)
 
+    evaluate_extraction = commands.add_parser("evaluate-extraction")
+    evaluate_extraction.add_argument("corpus")
+    evaluate_extraction.add_argument("--minimum-precision", type=float)
     evaluate_runner = commands.add_parser("evaluate-runner")
     evaluate_runner.add_argument("tasks", help="JSON file containing task-level evaluation tasks")
     evaluate_runner.add_argument(
@@ -412,16 +450,30 @@ def run(args: argparse.Namespace) -> int:
         return 0
     project_root = resolve_runtime_project(args.project_root)
     database = resolve_runtime_database(args.db, project_root)
+    missing_database = (
+        WitnessRegistry().known_project_database_missing(project_root)
+        if args.command == "init" else ()
+    )
     service = MemoryService(database, project_root=project_root)
     try:
         if args.command == "init":
-            _print({"database": str(service.store.path), "initialized": True})
+            initialized = service.initialize_project()
+            for finding in missing_database:
+                service.store.record_security_finding(
+                    "known_project_database_missing",
+                    incident_key=(
+                        "known_project_database_missing:"
+                        + str(finding["project_instance_id"])
+                    ),
+                    details=dict(finding),
+                )
+            _print({"database": str(service.store.path), **initialized})
         elif args.command == "session-start":
             _print({"id": service.store.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
         elif args.command == "branch-create":
             _print({"id": service.store.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
         elif args.command == "append":
-            _print(service.store.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
+            _print(service.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
         elif args.command == "artifact":
             path = Path(args.path)
             _print(service.store.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
@@ -443,6 +495,26 @@ def run(args: argparse.Namespace) -> int:
             _print(report)
             if args.strict and report.blocked:
                 raise SystemExit(2)
+        elif args.command == "extraction-status":
+            _print(service.extraction.status())
+        elif args.command == "extraction-process":
+            _print(service.extraction.process_backlog(limit=args.limit))
+        elif args.command == "extraction-retry":
+            _print(service.extraction.retry_failures(limit=args.limit))
+        elif args.command == "extraction-reprocess":
+            _print(service.extraction.reprocess(
+                ExtractorConfig(**args.config), limit=args.limit
+            ))
+        elif args.command == "extraction-candidates":
+            _print(service.store.list_extraction_candidates(status=args.status))
+        elif args.command == "candidate-request":
+            _print(service.request_candidate_transition(
+                args.candidate_id,
+                args.action,
+                branch_id=args.branch,
+                replacement_candidate_id=args.replacement_candidate,
+                replacement_memory_id=args.replacement_memory,
+            ))
         elif args.command == "graph-neighbors":
             _print(service.knowledge_neighbors(
                 args.entity, branch_id=args.branch, limit=args.limit
@@ -552,6 +624,24 @@ def run(args: argparse.Namespace) -> int:
             print(packet.text) if args.text_only else _print(packet)
         elif args.command == "task-list":
             _print(service.tasks.list(status=args.status))
+        elif args.command == "findings":
+            values = service.store.list_security_findings()
+            _print(
+                [item for item in values if item["acknowledged"]]
+                if args.acknowledged else values
+            )
+        elif args.command == "finding-ack-request":
+            _print(service.request_finding_acknowledgement(
+                args.finding_id, branch_id=args.branch
+            ))
+        elif args.command == "policy-request":
+            _print(service.request_policy_change(args.policy, branch_id=args.branch))
+        elif args.command == "doctor":
+            _print({
+                **service.verify(),
+                **service.security_status(),
+                "extraction": service.extraction.status(),
+            })
         elif args.command == "verify":
             result = service.verify()
             _print(result)
@@ -573,6 +663,24 @@ def run(args: argparse.Namespace) -> int:
             )
             if args.minimum is not None:
                 assert_resume_quality(report, args.minimum)
+            _print(report)
+        elif args.command == "evaluate-extraction":
+            if service.extraction.extractor is None or service.extraction.config is None:
+                raise ValueError("no extractor plugin/configuration is available")
+            report = evaluate_extractor(
+                service.extraction.extractor,
+                service.extraction.config,
+                args.corpus,
+            )
+            if (
+                args.minimum_precision is not None
+                and report["overall"]["precision"] < args.minimum_precision
+            ):
+                raise AssertionError(
+                    "extraction precision "
+                    f"{report['overall']['precision']:.4f} is below "
+                    f"{args.minimum_precision:.4f}"
+                )
             _print(report)
         elif args.command == "evaluate-runner":
             report = evaluate_with_runner(

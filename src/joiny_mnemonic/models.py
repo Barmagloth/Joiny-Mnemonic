@@ -90,7 +90,38 @@ class MemoryRecord:
     source_event_ids: tuple[str, ...]
     supersedes_id: str | None
     created_at: str
+    metadata: dict[str, Any] = field(default_factory=dict)
 
+
+@dataclass(frozen=True, slots=True)
+class ExtractionCandidate:
+    id: str
+    run_id: str
+    attempt_id: str
+    memory_type: str
+    normalized_content: str
+    evidence_quote: str
+    evidence_start: int
+    evidence_end: int
+    evidence_zone: str
+    confidence: float
+    created_at: str
+    current_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractionStatus:
+    extractor_available: bool
+    extractor_enabled: bool
+    extractor_name: str | None
+    extractor_config_hash: str | None
+    pending_events: int
+    oldest_pending_age: float | None
+    failed_events: int
+    last_success_at: str | None
+    retry_count: int
+    quarantined_candidates: int
+    oldest_quarantined_age: float | None
 
 @dataclass(frozen=True, slots=True)
 class RetrievalHit:

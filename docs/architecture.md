@@ -227,3 +227,38 @@ makes retries idempotent. The governor uses `max(provider_context, hook_cumulati
 to raw canonical events, never compact views. Crossing the per-agent snapshot threshold emits one
 audited `context_checkpoint` and returns the same checkpoint for a retry of the crossing delivery.
 A handoff recommendation is not emitted until the separate handoff threshold.
+
+## Canonical data, interpretation ledger, and derived views
+
+Joiny-Mnemonic separates three architectural data classes:
+
+1. **Canonical events** are the authoritative, immutable source context. Ingestion applies
+   private-region and secret redaction before the event transaction commits. Extraction reads
+   event.content only after that commit; raw hook payloads are not extractor input.
+2. **Interpretation ledger** records concrete non-deterministic executions, attempts,
+   redacted raw-response references, candidates, exact evidence spans, transitions and memory
+   links. It is immutable and auditable, but it is not authoritative truth and cannot be
+   reconstructed exactly by rerunning a model. Cleanup must never treat it as a cache.
+3. **Derived views** are disposable projections rebuildable from canonical events and the
+   interpretation ledger. They include FTS/semantic indexes, graph projections, current
+   candidate status, backlog status and resume ranking.
+
+A successful extraction transaction writes the completed attempt, candidate rows, initial
+transitions, candidate-memory links and auto memory together. The canonical event is already
+durable before that transaction begins. Global event sequence is the work-discovery cursor;
+in-memory signaling, if added by a host, may only wake a worker.
+
+The interpretation path is:
+
+    canonical event -> extraction run -> attempt -> candidate -> transition
+                    -> candidate-memory link -> memory -> prompt exposure
+
+Extractor configuration is stored both as structured JSON and a canonical SHA-256. The
+descriptor covers model identity/version, inference parameters, prompt/schema/parser versions,
+evidence and validator policy versions, and context/normalization versions. Reprocessing uses a
+new hash and never resets an older run.
+
+Evidence offsets are computed by deterministic code from an exact quote. Missing or repeated
+ambiguous quotes cannot create auto memory. The same pass classifies prose, inline code, fenced
+code and blockquotes. Only high-confidence prose may start as auto; all other accepted spans
+start quarantined. Auto extraction cannot create protected blocks.

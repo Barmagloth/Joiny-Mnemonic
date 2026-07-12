@@ -80,6 +80,10 @@ class RetrievalEngine:
             + record.risk * context.risk_weight
             + cost_efficiency * context.cost_weight
         ) / total_weight
+        origin = str(record.metadata.get("origin", "explicit"))
+        authority = self.store.memory_authority(record.id)
+        if authority != "confirmed":
+            score *= 0.85
         content = record.content if context.exact else record.summary
         return RetrievalHit(
             id=record.id,
@@ -95,6 +99,11 @@ class RetrievalEngine:
                 "version": record.version,
                 "risk": record.risk,
                 "retrieval_cost": record.retrieval_cost,
+                "origin": origin,
+                "authority_level": authority,
+                "candidate_id": record.metadata.get("candidate_id"),
+                "extraction_run_id": record.metadata.get("extraction_run_id"),
+                "extractor_config_hash": record.metadata.get("extractor_config_hash"),
                 "scoring_context": {
                     "query": context.query,
                     "half_life_days": context.half_life_days,

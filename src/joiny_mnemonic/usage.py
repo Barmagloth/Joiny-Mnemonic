@@ -218,6 +218,10 @@ class UsageMeter:
                         "score": hit.score,
                         "source_kind": hit.source_kind,
                         "position": position,
+                        "origin": hit.metadata.get("origin"),
+                        "candidate_id": hit.metadata.get("candidate_id"),
+                        "extraction_run_id": hit.metadata.get("extraction_run_id"),
+                        "extractor_config_hash": hit.metadata.get("extractor_config_hash"),
                     }
                     for position, hit in enumerate(hits)
                 ],
@@ -253,6 +257,19 @@ class UsageMeter:
                 "task_key": task_key,
                 "included_event_ids": packet.included_event_ids,
                 "included_memory_ids": packet.included_memory_ids,
+                "memory_lineage": [
+                    {
+                        "memory_id": memory_id,
+                        "origin": record.metadata.get("origin"),
+                        "candidate_id": record.metadata.get("candidate_id"),
+                        "extraction_run_id": record.metadata.get("extraction_run_id"),
+                        "extractor_config_hash": record.metadata.get(
+                            "extractor_config_hash"
+                        ),
+                    }
+                    for memory_id in packet.included_memory_ids
+                    for record in (self.store.get_memory(memory_id),)
+                ],
                 "snapshot_id": packet.snapshot_id,
                 "token_budget": packet.token_budget,
                 "estimated_emitted_tokens": packet.estimated_tokens,

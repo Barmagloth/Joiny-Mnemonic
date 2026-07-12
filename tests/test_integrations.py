@@ -73,9 +73,11 @@ class IntegrationTest(unittest.TestCase):
                 "llm_memory.semantic",
                 "llm_memory.knowledge_graph",
                 "llm_memory.kv_tier",
+                "llm_memory.extractor",
                 "joiny_mnemonic.semantic",
                 "joiny_mnemonic.knowledge_graph",
                 "joiny_mnemonic.kv_tier",
+                "joiny_mnemonic.extractor",
             ],
         )
     def test_entry_point_factory_receives_project_context(self) -> None:

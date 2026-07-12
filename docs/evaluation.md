@@ -123,10 +123,10 @@ reports, so evidence recall cannot accidentally be presented as task-level quali
 
 The evidence-presence diagnostic intentionally exposes the boundary between canonical retention and automatic resume. A fact mentioned only in ordinary dialogue can score `quality_vs_full_history = 0.0` after enough later history: full history still contains it, and event search can recover it, but no typed memory or protected block was created for the compact resume packet.
 
-Joiny-Mnemonic does not silently infer facts to close this gap. Instead, each runtime resume packet gives the agent a protected `[DURABLE MEMORY CAPTURE]` instruction. Durable, evidence-backed information should be promoted with a structured memory tool when available, or with a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`,
+With the optional extractor disabled, Joiny-Mnemonic does not infer facts to close this gap. When an extractor is explicitly enabled, ordinary prose may create lower-ranked exact-evidence auto memory, while quarantine and backlog remain visible. Independently, each runtime resume packet gives the agent a protected `[DURABLE MEMORY CAPTURE]` instruction. Durable, evidence-backed information should be promoted with a structured memory tool when available, or with a standalone `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`,
 `Failure:`, or `Lesson:` marker. Tests cover both sides of this boundary: unmarked information remains searchable but can be absent from resume; the same fact explicitly marked as `Fact:` is recovered after an equally long distractor tail.
 
-This means a `>=95%` evidence-presence result is scoped to explicitly promoted evidence. It is not a claim that arbitrary unmarked dialogue will be reconstructed semantically.
+The original evidence-presence gate is scoped to explicitly promoted evidence. Automatic extraction is evaluated separately against the versioned Russian corpus and is not a claim that arbitrary unmarked dialogue will be reconstructed semantically.
 
 ## What is still deployment-specific
 
@@ -147,3 +147,21 @@ joiny-mnemonic-benchmark --project-root . --repetitions 100 `
 It executes real test/search/diff subprocesses, compares baseline and enriched SQLite stores, and
 gates critical signals, path references and byte-exact source recovery. Methodology and metric
 definitions are in [performance.md](performance.md).
+
+## Russian automatic-extraction corpus
+
+The versioned corpus evals/extraction_ru_v1.json is primarily Russian and covers goals,
+decisions, facts, failures, lessons, negatives, anaphora, repetition, code zones, blockquotes,
+rhetorical quotations, prompt injection, untrusted event kinds, private regions, ambiguous
+evidence and malformed negatives.
+
+The evaluate-extraction command reports precision, recall and F1 overall, by memory type and by
+evidence zone, plus exact-evidence acceptance, false trusted records, quarantine rate, duplicate
+rate and latency. Retry/backlog/storage behavior remains covered by deterministic integration and
+benchmark tests.
+
+Automatic extraction remains disabled by default. The v1 corpus is a labelled harness, not a
+claimed production baseline. A release may enable extraction by default only after recording a
+reviewed corpus version, pinned model/configuration hash, chosen threshold and explicit acceptable
+precision/recall target. Adversarial false trusted/protected records have a hard target of zero.
+Raw model confidence is used for routing and is not described as calibrated probability.

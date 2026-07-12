@@ -6,7 +6,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from .models import MemoryRecord, RetrievalHit
+from .models import Event, MemoryRecord, RetrievalHit
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +44,27 @@ class KVTier(Protocol):
     def delete(self, key: str) -> None: ...
 
 
+@runtime_checkable
+class Extractor(Protocol):
+    """Optional stateless structured-memory extractor."""
+
+    name: str
+
+    def extract(
+        self,
+        event: Event,
+        *,
+        context: tuple[Event, ...],
+        config: dict[str, Any],
+    ) -> Any: ...
+
+
 @dataclass(slots=True)
 class PluginRegistry:
     semantic: dict[str, SemanticRetriever]
     knowledge_graph: dict[str, KnowledgeGraphProjection]
     kv_tiers: dict[str, KVTier]
+    extractors: dict[str, Extractor]
     errors: list[str]
     context: PluginContext | None
 
@@ -58,6 +74,7 @@ class PluginRegistry:
         self.semantic = {}
         self.knowledge_graph = {}
         self.kv_tiers = {}
+        self.extractors = {}
         self.errors = []
         self.context = context
         if load_installed:
@@ -66,6 +83,7 @@ class PluginRegistry:
                 self._load_group(f"{namespace}.semantic", self.semantic)
                 self._load_group(f"{namespace}.knowledge_graph", self.knowledge_graph)
                 self._load_group(f"{namespace}.kv_tier", self.kv_tiers)
+                self._load_group(f"{namespace}.extractor", self.extractors)
 
     def _instantiate(self, loaded: Any) -> Any:
         if not callable(loaded):
@@ -99,3 +117,6 @@ class PluginRegistry:
 
     def register_kv_tier(self, plugin: KVTier) -> None:
         self.kv_tiers[plugin.name] = plugin
+
+    def register_extractor(self, plugin: Extractor) -> None:
+        self.extractors[plugin.name] = plugin
