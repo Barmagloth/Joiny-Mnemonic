@@ -156,6 +156,7 @@ class IntegrationTest(unittest.TestCase):
             {
                 "joiny-mnemonic": "joiny_mnemonic.cli:main",
                 "joiny-mnemonic-benchmark": "joiny_mnemonic.benchmark_cli:main",
+                "joiny-mnemonic-longmemeval": "joiny_mnemonic.longmemeval:main",
             },
         )
         self.assertEqual(
