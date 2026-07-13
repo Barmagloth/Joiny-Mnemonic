@@ -214,6 +214,28 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         installed = claude["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         self.assertNotIn("\\", installed)
         self.assertIn("-m joiny_mnemonic", installed)
+
+        # Regression (first live run, part two): a reinstall whose command
+        # line changed must REPLACE the stale own entry, not append a second
+        # delivery next to a dead one. Simulate an old-format leftover.
+        stale = claude
+        stale["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"] = (
+            "C:\\old\\python.exe -m joiny_mnemonic --db old.db hook --agent claude-code"
+        )
+        claude_settings.write_text(json.dumps(stale), encoding="utf-8")
+        install_hooks("claude-code", root)
+        refreshed = json.loads(claude_settings.read_text(encoding="utf-8"))
+        own = [
+            hook["command"]
+            for entry in refreshed["hooks"]["UserPromptSubmit"]
+            for hook in entry.get("hooks", [])
+            if "-m joiny_mnemonic" in hook.get("command", "")
+        ]
+        self.assertEqual(len(own), 1, own)
+        self.assertNotIn("\\", own[0])
+        self.assertEqual(
+            refreshed["hooks"]["Stop"][0]["hooks"][0]["command"], "existing"
+        )
         for section in codex["hooks"].values():
             for entry in section:
                 for hook in entry.get("hooks", []):

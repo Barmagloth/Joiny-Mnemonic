@@ -782,31 +782,48 @@ def hook_installation_status(
         "install_command": command,
     }
 
+_OWN_HOOK_COMMAND = re.compile(
+    r"(?:^|\s)-m\s+[\"']?(?:joiny_mnemonic|llm_memory)(?:[\"']?\s|$)"
+)
+
+
 def _upsert_hook_command(
     groups: list[Any], command: str, *, typed: bool
 ) -> bool:
-    """Replace generated pre-rename commands and avoid duplicate hook delivery."""
+    """Replace every previously generated command and avoid duplicate delivery.
+
+    Own entries are recognized by the ``-m joiny_mnemonic``/``-m llm_memory``
+    signature, never by exact string equality: an upgraded installer renders a
+    different command line, and exact matching appended the new hook next to
+    the stale broken one (first live-run regression), so every event fired one
+    working and one dead hook.
+    """
+    found = False
     for group in groups:
         if not isinstance(group, dict):
             continue
-        handlers = group.get("hooks", ())
+        handlers = group.get("hooks")
         if not isinstance(handlers, list):
             continue
+        kept: list[Any] = []
         for handler in handlers:
-            if not isinstance(handler, dict):
-                continue
-            existing = handler.get("command")
-            if existing == command:
-                return True
-            if isinstance(existing, str) and re.search(
-                r"(?:^|\s)-m\s+[\"']?llm_memory(?:[\"']?\s|$)", existing
-            ):
+            existing = handler.get("command") if isinstance(handler, dict) else None
+            if isinstance(existing, str) and _OWN_HOOK_COMMAND.search(existing):
+                if found:
+                    continue  # drop duplicate own handler
                 handler["command"] = command
                 handler["timeout"] = 30
                 if typed:
                     handler["type"] = "command"
-                return True
-    return False
+                found = True
+            kept.append(handler)
+        group["hooks"] = kept
+    groups[:] = [
+        group
+        for group in groups
+        if not (isinstance(group, dict) and group.get("hooks") == [])
+    ]
+    return found
 
 
 def _merge_command_hooks(
