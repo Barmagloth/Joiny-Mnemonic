@@ -750,10 +750,13 @@ def _ask_yes_no(
     *,
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
+    default: bool = False,
 ) -> bool:
     while True:
         value = input_fn(prompt).strip().casefold()
-        if value in {"", "n", "no"}:
+        if not value:
+            return default
+        if value in {"n", "no"}:
             return False
         if value in {"y", "yes"}:
             return True
@@ -832,7 +835,11 @@ def select_interactively(
             output_fn=output_fn,
         )
     with_mcp = _ask_yes_no(
-        "Register MCP servers too? [y/N]: ",
+        # Default yes since task5.md A4: injection alone is proven
+        # insufficient — the agent needs tools to QUOTE protected state,
+        # not recall it.
+        "Register MCP servers too? [Y/n]: ",
+        default=True,
         input_fn=input_fn,
         output_fn=output_fn,
     )

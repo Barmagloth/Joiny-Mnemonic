@@ -158,6 +158,34 @@ class ReconcilerCase(unittest.TestCase):
         kinds = {item["finding"] for item in findings}
         self.assertIn("decision_entry_is_a_question", kinds)
 
+    def test_memory_blocks_tool_returns_verbatim_protected_state(self) -> None:
+        from joiny_mnemonic.mcp import MCPServer
+
+        self.service.initialize_project()
+        self._open_task("создать файл quoted.md")
+        server = MCPServer(self.service)
+        server.handle(
+            {
+                "jsonrpc": "2.0", "id": 0, "method": "initialize",
+                "params": {"protocolVersion": "2025-06-18", "capabilities": {}},
+            }
+        )
+        server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        listed = server.handle(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+        )
+        names = {tool["name"] for tool in listed["result"]["tools"]}
+        self.assertIn("memory_blocks", names)
+        response = server.handle(
+            {
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": "memory_blocks", "arguments": {}},
+            }
+        )
+        blocks = response["result"]["structuredContent"]
+        self.assertIn("создать файл quoted.md", blocks["open_tasks"]["content"])
+        self.assertTrue(blocks["open_tasks"]["source_event_ids"])
+
     def test_capabilities_expose_state_maintenance(self) -> None:
         self.service.initialize_project()
         state = self.service.capabilities()["core"]["state_maintenance"]

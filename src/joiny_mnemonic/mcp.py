@@ -127,6 +127,18 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     },
     {
+        "name": "memory_blocks",
+        "description": (
+            "Return the protected ACTIVE MEMORY blocks verbatim (goal, constraints, "
+            "decisions, open_tasks, instructions). Quote this output when asked what was "
+            "decided or what is open — restating from recalled context drifts."
+        ),
+        "inputSchema": _schema(
+            {"branch_id": {"type": "string", "default": "main"}}
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
         "name": "memory_graph_neighbors",
         "description": "Return provenance-backed knowledge-graph edges for an entity.",
         "inputSchema": _schema(
@@ -436,6 +448,18 @@ class MCPServer:
             return self.service.derive_memory(**arguments)
         if name == "memory_search":
             return self.service.search(**arguments)
+        if name == "memory_blocks":
+            blocks = self.service.store.get_active_blocks(
+                branch_id=arguments.get("branch_id", "main")
+            )
+            return {
+                name_: {
+                    "content": block.content,
+                    "version": block.version,
+                    "source_event_ids": list(block.source_event_ids),
+                }
+                for name_, block in blocks.items()
+            }
         if name == "memory_graph_neighbors":
             return self.service.knowledge_neighbors(
                 arguments["entity"],
