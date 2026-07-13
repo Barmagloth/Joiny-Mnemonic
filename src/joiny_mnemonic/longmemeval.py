@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import re
+import os
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -168,24 +169,55 @@ class SubprocessLLMRunner:
         self.command = tuple(command)
         self.timeout_seconds = timeout_seconds
 
+    _ATTEMPTS = 3
+    _BACKOFF_SECONDS = (5.0, 20.0)
+
     def call(self, request: dict[str, Any]) -> str:
-        completed = subprocess.run(
-            self.command,
-            input=json.dumps(request, ensure_ascii=False),
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
-            timeout=self.timeout_seconds,
-            check=False,
+        # Field finding (2026-07-14): a Windows child Python writes piped
+        # stderr in the ANSI code page, and a strict-utf8 reader thread
+        # crash then masked the real error — decode tolerantly and pin the
+        # child to UTF-8. Transient runner failures retry with backoff; one
+        # flake out of a thousand calls must not kill a two-hour run.
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        last_error: Exception | None = None
+        for attempt in range(self._ATTEMPTS):
+            if attempt:
+                time.sleep(self._BACKOFF_SECONDS[min(attempt - 1, 1)])
+            try:
+                completed = subprocess.run(
+                    self.command,
+                    input=json.dumps(request, ensure_ascii=False),
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    capture_output=True,
+                    timeout=self.timeout_seconds,
+                    check=False,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired as exc:
+                last_error = exc
+                continue
+            if completed.returncode != 0:
+                last_error = RuntimeError(
+                    f"runner failed ({completed.returncode}): "
+                    f"{completed.stderr[-2000:]}"
+                )
+                continue
+            try:
+                value = json.loads(completed.stdout)
+            except json.JSONDecodeError as exc:
+                last_error = RuntimeError(
+                    f"runner emitted invalid JSON: {exc}; "
+                    f"stdout tail: {completed.stdout[-500:]}"
+                )
+                continue
+            if not isinstance(value, dict) or "output" not in value:
+                raise ValueError("runner must return a JSON object with 'output'")
+            return str(value["output"])
+        raise RuntimeError(
+            f"runner failed after {self._ATTEMPTS} attempts: {last_error}"
         )
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"runner failed ({completed.returncode}): {completed.stderr[-2000:]}"
-            )
-        value = json.loads(completed.stdout)
-        if not isinstance(value, dict) or "output" not in value:
-            raise ValueError("runner must return a JSON object with 'output'")
-        return str(value["output"])
 
 
 @dataclass
