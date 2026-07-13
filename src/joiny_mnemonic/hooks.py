@@ -487,6 +487,16 @@ class InstallResult:
     notes: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class UninstallResult:
+    agent: str
+    files: tuple[str, ...]
+    status: str
+    scope: str = "project"
+    backup_file: str | None = None
+    notes: tuple[str, ...] = ()
+
+
 def _command(
     project_root: Path | None,
     agent: str,
@@ -824,6 +834,149 @@ def _merge_openhands(path: Path, command: str) -> Path | None:
             group["matcher"] = matcher
         groups.append(group)
     return _write_json(path, config)
+
+
+def _remove_command_hooks(
+    path: Path, agent: str, *, nested: bool
+) -> tuple[bool, Path | None]:
+    if not path.exists():
+        return False, None
+    config = _read_json(path)
+    hooks: Any = config.get("hooks") if nested else config
+    if nested and hooks is None:
+        return False, None
+    if not isinstance(hooks, dict):
+        raise ValueError(f"hooks in {path} must be an object")
+    removed = False
+    for event in tuple(hooks):
+        groups = hooks[event]
+        if not isinstance(groups, list):
+            continue
+        event_removed = False
+        kept_groups: list[Any] = []
+        for group in groups:
+            if not isinstance(group, dict):
+                kept_groups.append(group)
+                continue
+            handlers = group.get("hooks")
+            if not isinstance(handlers, list):
+                kept_groups.append(group)
+                continue
+            kept_handlers = [
+                handler
+                for handler in handlers
+                if not _contains_hook_command(handler, agent)
+            ]
+            if len(kept_handlers) == len(handlers):
+                kept_groups.append(group)
+                continue
+            removed = True
+            event_removed = True
+            if kept_handlers:
+                kept_group = dict(group)
+                kept_group["hooks"] = kept_handlers
+                kept_groups.append(kept_group)
+        if kept_groups:
+            hooks[event] = kept_groups
+        elif event_removed:
+            hooks.pop(event, None)
+    if not removed:
+        return False, None
+    if nested and not hooks:
+        config.pop("hooks", None)
+    return True, _write_json(path, config)
+
+
+def _remove_context_limits(
+    root: Path | None,
+    agent: str,
+    *,
+    global_scope: bool,
+    environ: dict[str, str] | None,
+    home: str | Path | None,
+) -> Path | None:
+    limits = ContextLimitConfig(root or Path.cwd(), environ=environ, home=home)
+    path = limits.global_path if global_scope else limits.project_path
+    if not path.exists():
+        return None
+    document = _read_json(path)
+    agents = document.get("agents")
+    if not isinstance(agents, dict) or agent not in agents:
+        return None
+    agents.pop(agent)
+    if agents:
+        _write_json(path, document)
+    else:
+        path.unlink()
+    return path
+
+
+def uninstall_hooks(
+    agent: str,
+    project_root: str | Path | None = None,
+    *,
+    global_scope: bool = False,
+    environ: dict[str, str] | None = None,
+    home: str | Path | None = None,
+    dry_run: bool = False,
+) -> UninstallResult:
+    root: Path | None
+    if global_scope:
+        root = None
+        path = resolve_global_install_path(agent, environ=environ, home=home)
+    else:
+        root = Path(project_root or ".").resolve()
+        path = resolve_project_install_path(agent, root)
+
+    scope = "global" if global_scope else "project"
+    if dry_run:
+        return UninstallResult(
+            agent=agent,
+            files=(str(path),),
+            status="planned",
+            scope=scope,
+            notes=("Durable memory data is preserved.",),
+        )
+
+    backup_path: Path | None = None
+    removed = False
+    if agent == "opencode":
+        if path.exists():
+            source = path.read_text(encoding="utf-8")
+            if "JoinyMnemonicPlugin" not in source or "joiny_mnemonic" not in source:
+                raise ValueError(
+                    f"refusing to remove an unmanaged OpenCode plugin: {path}"
+                )
+            path.unlink()
+            removed = True
+    elif agent in {"claude-code", "codex"}:
+        removed, backup_path = _remove_command_hooks(path, agent, nested=True)
+    elif agent == "openhands":
+        if global_scope:
+            raise ValueError("OpenHands does not support user-global hook files")
+        removed, backup_path = _remove_command_hooks(path, agent, nested=False)
+    else:
+        raise ValueError(f"unsupported hook installer: {agent}")
+
+    limits_path = _remove_context_limits(
+        root,
+        agent,
+        global_scope=global_scope,
+        environ=environ,
+        home=home,
+    )
+    files = [str(path)]
+    if limits_path is not None:
+        files.append(str(limits_path))
+    return UninstallResult(
+        agent=agent,
+        files=tuple(files),
+        status="removed" if removed or limits_path is not None else "not-configured",
+        scope=scope,
+        backup_file=str(backup_path) if backup_path is not None else None,
+        notes=("Durable memory data was preserved.",),
+    )
+
 
 def _opencode_plugin(command: str) -> str:
     encoded = json.dumps(command)

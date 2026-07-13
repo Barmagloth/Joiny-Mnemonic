@@ -25,7 +25,7 @@ from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
 from .snapshots import SnapshotManager
 from .staleness import MemoryStaleness, StalenessService
-from .storage import MemoryStore
+from .storage import CURRENT_SCHEMA_VERSION, MemoryStore
 from .tasks import TaskManager
 from .usage import UsageMeter
 from .witness import WitnessRegistry
@@ -811,6 +811,8 @@ class MemoryService:
                 "snapshots": True,
                 "snapshot_format": "full-zlib-v1",
                 "legacy_snapshot_reader": "json-patch-v2",
+                "schema_version": CURRENT_SCHEMA_VERSION,
+                "schema_migrations": "versioned-backup-before-migrate-future-version-fail-closed",
                 "lexical_retrieval": "sqlite-fts5-bm25" if self.store.fts_enabled else "python-fallback",
                 "automatic_consolidation": "explicit-evidence-only",
                 "durable_memory_markers": [

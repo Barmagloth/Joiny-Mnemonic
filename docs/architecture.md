@@ -45,8 +45,20 @@ locking; `synchronous=FULL` сохраняется в обоих режимах.
 
 Обновления родителя после fork не протекают в дочерний контекст.
 
-## Snapshots
+## Database schema compatibility
 
+The SQLite format has an explicit monotonically increasing `metadata.schema_version` and an
+immutable `schema_migrations` ledger. Existing on-disk databases are backed up and integrity-checked
+before forward migration. Each migration step advances the version in the same transaction as its
+ledger entry. A binary must reject a database with a newer schema version before applying any DDL;
+downgrade-in-place is unsupported.
+
+`BASE_SCHEMA` is the bootstrap/reconciliation baseline. Future schema changes require a numbered
+`_migrate_to_vN` step plus `CURRENT_SCHEMA_VERSION` increment and upgrade/reopen/future-version
+tests. Canonical events and trust ledgers are never rewritten merely to adopt a new schema; derived
+views may be rebuilt only where their class permits it.
+
+## Snapshots
 Every new snapshot is a full `full-zlib-v1` derived view. The canonically serialized state uses
 sorted keys and fixed separators, is hashed with SHA-256, and is stored as a stdlib zlib-compressed
 BLOB. `replay_code_version` identifies the deterministic materializer version. Parent snapshot ID,

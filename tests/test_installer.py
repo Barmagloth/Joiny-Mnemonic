@@ -20,10 +20,13 @@ from joiny_mnemonic.configuration import (
 from joiny_mnemonic.hooks import InstallResult
 from joiny_mnemonic.installer import (
     AgentDetection,
+    confirm_data_deletion,
     detect_agents,
     mcp_command,
+    mcp_remove_command,
     plugin_install_spec,
     run_setup,
+    run_uninstall,
     select_interactively,
 )
 from joiny_mnemonic.plugins import PluginRegistry
@@ -386,6 +389,260 @@ class InstallerTest(unittest.TestCase):
         )
         self.assertEqual(parsed.command, "setup")
         self.assertTrue(parsed.enable_extraction)
+
+    def test_uninstall_removes_only_owned_integrations_and_preserves_data(self) -> None:
+        root = self.project()
+        home = root / "home"
+        home.mkdir()
+        settings = root / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_text(
+            json.dumps(
+                {
+                    "theme": "dark",
+                    "hooks": {
+                        "SessionStart": [
+                            {"hooks": [{"type": "command", "command": "foreign-hook"}]}
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        opencode = root / "opencode.json"
+        opencode.write_text(
+            json.dumps(
+                {
+                    "theme": "dark",
+                    "mcp": {"existing": {"type": "remote"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(list(command))
+            return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+        with patch("joiny_mnemonic.installer.shutil.which", return_value="host"):
+            setup = run_setup(
+                root,
+                agents=("claude-code", "opencode"),
+                install_mcp=True,
+                install_plugins=False,
+                runner=runner,
+                home=home,
+            )
+            with MemoryService(setup.database, project_root=root) as service:
+                original_identity = service.store.project_identity()["project_instance_id"]
+                retained_event = service.append_event(
+                    kind="message", content="retained across reinstall"
+                )
+            result = run_uninstall(
+                root,
+                runner=runner,
+                home=home,
+            )
+
+        self.assertTrue(result.configuration_removed)
+        self.assertFalse(Path(setup.configuration_file).exists())
+        self.assertTrue(Path(setup.database).exists())
+        self.assertIn(str(Path(setup.database)), result.data_preserved)
+        self.assertFalse((root / ".opencode" / "plugins" / "joiny-mnemonic.js").exists())
+        remaining_settings = json.loads(settings.read_text(encoding="utf-8"))
+        self.assertEqual(remaining_settings["theme"], "dark")
+        self.assertEqual(
+            remaining_settings["hooks"]["SessionStart"][0]["hooks"][0]["command"],
+            "foreign-hook",
+        )
+        remaining_opencode = json.loads(opencode.read_text(encoding="utf-8"))
+        self.assertEqual(remaining_opencode["theme"], "dark")
+        self.assertIn("existing", remaining_opencode["mcp"])
+        self.assertNotIn("joiny-mnemonic", remaining_opencode["mcp"])
+        self.assertIn(
+            ["claude", "mcp", "remove", "--scope", "local", "joiny-mnemonic"],
+            calls,
+        )
+
+        reinstalled = run_setup(
+            root,
+            agents=(),
+            install_hook_adapters=False,
+            install_mcp=False,
+            install_plugins=False,
+            home=home,
+        )
+        self.assertEqual(reinstalled.database, setup.database)
+        with MemoryService(reinstalled.database, project_root=root) as service:
+            self.assertEqual(
+                service.store.project_identity()["project_instance_id"],
+                original_identity,
+            )
+            self.assertEqual(service.store.get_event(retained_event.id).content, retained_event.content)
+
+    def test_codex_project_uninstall_checks_live_registration_ownership(self) -> None:
+        root = self.project()
+
+        def setup_runner(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+        with patch("joiny_mnemonic.installer.shutil.which", return_value="codex"):
+            setup = run_setup(
+                root,
+                agents=("codex",),
+                install_mcp=True,
+                install_plugins=False,
+                runner=setup_runner,
+            )
+
+        mismatch_calls = []
+
+        def mismatch_runner(command, **kwargs):
+            mismatch_calls.append(list(command))
+            if list(command[:3]) == ["codex", "mcp", "get"]:
+                value = {
+                    "transport": {
+                        "command": "python",
+                        "args": [
+                            "-m", "joiny_mnemonic", "--db", "C:/other/memory.db",
+                            "--project-root", "C:/other",
+                        ],
+                    }
+                }
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=json.dumps(value), stderr=""
+                )
+            return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+        with patch("joiny_mnemonic.installer.shutil.which", return_value="codex"):
+            mismatch = run_uninstall(root, runner=mismatch_runner)
+        self.assertEqual(mismatch.mcp[0]["status"], "ownership-mismatch")
+        self.assertFalse(mismatch.configuration_removed)
+        self.assertTrue(Path(setup.configuration_file).exists())
+        self.assertNotIn(
+            ["codex", "mcp", "remove", "joiny-mnemonic"], mismatch_calls
+        )
+
+        matching_calls = []
+
+        def matching_runner(command, **kwargs):
+            matching_calls.append(list(command))
+            if list(command[:3]) == ["codex", "mcp", "get"]:
+                value = {
+                    "transport": {
+                        "command": "python",
+                        "args": [
+                            "-m", "joiny_mnemonic", "--db", setup.database,
+                            "--project-root", str(root.resolve()),
+                        ],
+                    }
+                }
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=json.dumps(value), stderr=""
+                )
+            return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+        with patch("joiny_mnemonic.installer.shutil.which", return_value="codex"):
+            matching = run_uninstall(root, runner=matching_runner)
+        self.assertEqual(matching.mcp[0]["status"], "removed")
+        self.assertTrue(matching.configuration_removed)
+        self.assertIn(
+            ["codex", "mcp", "remove", "joiny-mnemonic"], matching_calls
+        )
+
+    def test_global_uninstall_removes_global_hooks_and_keeps_home_data(self) -> None:
+        root = self.project()
+        home = root / "home"
+        home.mkdir()
+        setup = run_setup(
+            root,
+            agents=("claude-code", "opencode"),
+            scope="global",
+            install_mcp=False,
+            install_plugins=False,
+            home=home,
+            environ={},
+        )
+        settings = home / ".claude" / "settings.json"
+        plugin = home / ".config" / "opencode" / "plugins" / "joiny-mnemonic.js"
+        self.assertTrue(settings.exists())
+        self.assertTrue(plugin.exists())
+        result = run_uninstall(root, scope="global", home=home, environ={})
+        self.assertTrue(result.configuration_removed)
+        self.assertFalse(Path(setup.configuration_file).exists())
+        self.assertFalse(plugin.exists())
+        self.assertNotIn(
+            "joiny_mnemonic", settings.read_text(encoding="utf-8")
+        )
+        self.assertEqual(result.data_preserved, ())
+
+    def test_uninstall_delete_data_is_explicit_and_removes_backups(self) -> None:
+        root = self.project()
+        setup = run_setup(
+            root,
+            agents=("codex",),
+            install_hook_adapters=False,
+            install_mcp=False,
+            install_plugins=False,
+        )
+        database = Path(setup.database)
+        migration_backup = database.with_name(
+            database.name + ".pre-migration-v6-to-v7-test.bak"
+        )
+        migration_backup.write_bytes(b"backup")
+        artifacts = root / ".joiny-mnemonic" / "artifacts"
+        artifacts.mkdir()
+        (artifacts / "sample.bin").write_bytes(b"data")
+
+        result = run_uninstall(root, delete_data=True)
+        self.assertTrue(result.configuration_removed)
+        self.assertFalse(database.exists())
+        self.assertFalse(migration_backup.exists())
+        self.assertFalse(artifacts.exists())
+        self.assertIn(str(database), result.data_deleted)
+        self.assertEqual(result.data_preserved, ())
+
+    def test_interactive_data_choice_defaults_to_keep(self) -> None:
+        output = []
+        self.assertFalse(
+            confirm_data_deletion(
+                input_fn=lambda _: "",
+                output_fn=output.append,
+            )
+        )
+        self.assertTrue(
+            confirm_data_deletion(
+                input_fn=lambda _: "y",
+                output_fn=output.append,
+            )
+        )
+        self.assertTrue(any("memory.db" in line for line in output))
+
+    def test_uninstall_dry_run_and_remove_command_contract(self) -> None:
+        root = self.project()
+        setup = run_setup(
+            root,
+            agents=("codex",),
+            install_mcp=False,
+            install_plugins=False,
+        )
+        before = (root / ".codex" / "hooks.json").read_bytes()
+        result = run_uninstall(root, dry_run=True)
+        self.assertTrue(result.dry_run)
+        self.assertFalse(result.configuration_removed)
+        self.assertEqual((root / ".codex" / "hooks.json").read_bytes(), before)
+        self.assertTrue(Path(setup.configuration_file).exists())
+        self.assertEqual(
+            mcp_remove_command("codex", scope="project"),
+            ["codex", "mcp", "remove", "joiny-mnemonic"],
+        )
+        parsed = build_parser().parse_args(
+            ["uninstall", "--scope", "global", "--agent", "claude-code", "--keep-data", "--dry-run"]
+        )
+        self.assertEqual(parsed.command, "uninstall")
+        self.assertTrue(parsed.dry_run)
+
     def test_bootstrap_scripts_delegate_to_setup(self) -> None:
         repository = Path(__file__).resolve().parents[1]
         powershell = (repository / "install.ps1").read_text(encoding="utf-8")

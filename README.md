@@ -65,8 +65,10 @@ The conservative default selects detected products for hooks, installs no heavy 
 component, and leaves MCP registration off. Installing NuExtract is also passive; the separate
 `--enable-extraction` flag writes a fresh TOFU policy or requests a trusted change on an existing
 project. Use `--revision <tag-or-commit>` for a pinned source checkout and
-`joiny-mnemonic setup --dry-run --yes` to inspect a plan. Detailed flags, global scope and Bash examples are in
-[docs/installation.md](docs/installation.md).
+`joiny-mnemonic setup --dry-run --yes` to inspect a plan. Safe removal uses
+`joiny-mnemonic --project-root . uninstall --scope project`; it removes owned host integrations
+but preserves `.joiny-mnemonic/memory.db` and artifacts. Detailed setup, uninstall, global-scope
+and Bash instructions are in [docs/installation.md](docs/installation.md).
 
 ## Install and inspect
 

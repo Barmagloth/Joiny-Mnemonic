@@ -101,6 +101,50 @@ project setup the registered command still contains the exact project/database p
 merged into `opencode.json`. If a selected product executable is absent, setup reports
 `not-installed` rather than silently claiming that MCP is active.
 
+## Safe uninstallation
+
+Run uninstall with the same scope used during setup. The command reads the installer configuration,
+removes only Joiny-owned hook handlers and MCP registrations, and removes the installer intent
+file. In an interactive terminal it separately asks whether to delete durable project data; the
+default is to keep it:
+
+```powershell
+& "$HOME\.joiny-mnemonic\runtime\venv\Scripts\python.exe" -m joiny_mnemonic `
+  --project-root . uninstall --scope project
+```
+
+```bash
+"$HOME/.joiny-mnemonic/runtime/venv/bin/python" -m joiny_mnemonic \
+  --project-root . uninstall --scope project
+```
+
+Use `--dry-run` to inspect the cleanup plan. For non-interactive automation, pass `--keep-data`
+(the safe default even when omitted) or the explicit destructive option `--delete-data`. Deletion
+covers both current and legacy project databases, SQLite WAL/SHM sidecars, pre-migration database
+backups and durable artifacts. It is refused for global scope and deferred if host-integration
+cleanup is incomplete.
+
+If the installer configuration is missing, pass one or more explicit `--agent` values.
+`--without-hooks` and `--without-mcp` deliberately leave those surfaces untouched. A global
+installation must be removed separately with `--scope global`.
+
+Host JSON is edited structurally: unrelated hooks and MCP servers are retained. The OpenCode hook
+file is deleted only when it has the generated Joiny signature. If an MCP host executable is not
+available, uninstall reports an incomplete cleanup and retains `config.json` so the operation can
+be retried instead of silently leaving a dead registration. Because Codex stores project MCP
+servers in user configuration, project uninstall also verifies that the live registration still
+targets the same project before removing it; an ownership mismatch is left untouched.
+
+With the default keep choice, project `.joiny-mnemonic/memory.db`, artifacts, event history and the
+policy ledger remain in place. A later setup at the same project root reopens that database,
+preserves `project_instance_id` and history, and applies any required forward schema migrations.
+Uninstall does not rewrite the active policy; without hooks or MCP there is no active delivery path.
+The external witness registry remains as audit evidence even after an explicit local data deletion.
+
+The runtime under `~/.joiny-mnemonic/runtime` can be shared by multiple projects. Remove that
+directory only after uninstalling every project and any global integration, and only after the
+uninstall process has exited. A custom `--install-root` must be removed at its corresponding path.
+
 ## Manual fallback
 
 The lower-level commands remain supported:

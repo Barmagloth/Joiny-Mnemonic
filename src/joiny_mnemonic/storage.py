@@ -4,6 +4,7 @@ import copy
 import functools
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -49,6 +50,10 @@ class StoreIntegrityError(RuntimeError):
     """Raised when canonical storage fails automatic integrity verification."""
 
 
+class SchemaCompatibilityError(RuntimeError):
+    """Raised before mutation when the database schema is unsupported or malformed."""
+
+
 class SnapshotIntegrityError(RuntimeError):
     """Raised internally when materialized snapshot state fails hash verification."""
 
@@ -59,6 +64,8 @@ class SnapshotIntegrityError(RuntimeError):
         super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
+CURRENT_SCHEMA_VERSION = 7
+FIRST_VERSIONED_MIGRATION = 7
 SNAPSHOT_REPLAY_CODE_VERSION = "snapshot-materializer-v1"
 
 
@@ -78,6 +85,21 @@ CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    from_version INTEGER NOT NULL,
+    applied_at TEXT NOT NULL,
+    code_version TEXT NOT NULL,
+    backup_path TEXT
+);
+
+CREATE TRIGGER IF NOT EXISTS schema_migrations_no_update
+BEFORE UPDATE ON schema_migrations
+BEGIN SELECT RAISE(ABORT, 'schema migration history is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS schema_migrations_no_delete
+BEFORE DELETE ON schema_migrations
+BEGIN SELECT RAISE(ABORT, 'schema migration history cannot be deleted'); END;
 
 CREATE TABLE IF NOT EXISTS branches (
     id TEXT PRIMARY KEY,
@@ -662,6 +684,12 @@ class MemoryStore:
                     f"cannot initialize durable SQLite store at {self.path}; "
                     "the filesystem supports neither WAL nor exclusive rollback journaling"
                 ) from fallback_exc
+            except BaseException:
+                self._conn.close()
+                raise
+        except BaseException:
+            self._conn.close()
+            raise
         try:
             self.assert_integrity()
         except Exception:
@@ -725,8 +753,127 @@ class MemoryStore:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA busy_timeout=5000")
 
+    def _stored_storage_schema_version(self) -> int:
+        try:
+            metadata_exists = self._conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='metadata'"
+            ).fetchone()
+            if metadata_exists is None:
+                return 0
+            row = self._conn.execute(
+                "SELECT value FROM metadata WHERE key='schema_version'"
+            ).fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise SchemaCompatibilityError(
+                "database schema metadata is unreadable; no migration was attempted"
+            ) from exc
+        if row is None:
+            return 0
+        try:
+            version = int(row[0])
+        except (TypeError, ValueError) as exc:
+            raise SchemaCompatibilityError(
+                f"invalid database schema version: {row[0]!r}"
+            ) from exc
+        if version < 0:
+            raise SchemaCompatibilityError(
+                f"invalid database schema version: {version}"
+            )
+        return version
+
+    def _has_existing_schema(self) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+        ).fetchone()
+        return row is not None
+
+    def _create_schema_backup(self, from_version: int) -> Path:
+        if self._in_memory:
+            raise RuntimeError("cannot back up an in-memory database")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = self.path.with_name(
+            self.path.name
+            + f".pre-migration-v{from_version}-to-v{CURRENT_SCHEMA_VERSION}-{stamp}.bak"
+        )
+        temporary = backup.with_suffix(backup.suffix + ".tmp")
+        destination = sqlite3.connect(temporary)
+        try:
+            self._conn.backup(destination)
+            result = destination.execute("PRAGMA integrity_check").fetchone()
+            if result is None or str(result[0]).casefold() != "ok":
+                raise StoreIntegrityError(
+                    f"pre-migration backup failed integrity_check: {result}"
+                )
+            destination.close()
+            with temporary.open("rb+") as stream:
+                os.fsync(stream.fileno())
+            temporary.replace(backup)
+        except BaseException:
+            destination.close()
+            temporary.unlink(missing_ok=True)
+            raise
+        return backup
+
+    def _migrate_to_v7(self) -> None:
+        # v7 establishes the immutable migration ledger and future-version gate.
+        # BASE_SCHEMA creates the ledger so this step intentionally has no other DDL.
+        return None
+
+    def _apply_schema_migrations(
+        self, from_version: int, backup_path: Path | None
+    ) -> None:
+        current = from_version
+        first_target = max(FIRST_VERSIONED_MIGRATION, current + 1)
+        for target in range(first_target, CURRENT_SCHEMA_VERSION + 1):
+            migration = getattr(self, f"_migrate_to_v{target}", None)
+            if migration is None:
+                raise SchemaCompatibilityError(
+                    f"missing schema migration implementation for version {target}"
+                )
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                migration()
+                self._conn.execute(
+                    "INSERT INTO metadata(key,value) VALUES('schema_version',?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(target),),
+                )
+                self._conn.execute(
+                    "INSERT INTO schema_migrations(version,from_version,applied_at,"
+                    "code_version,backup_path) VALUES(?,?,?,?,?)",
+                    (
+                        target,
+                        current,
+                        _now(),
+                        f"joiny-mnemonic-schema-v{target}",
+                        str(backup_path) if backup_path is not None else None,
+                    ),
+                )
+            except BaseException:
+                self._conn.rollback()
+                raise
+            else:
+                self._conn.commit()
+            current = target
+
     def _initialize(self) -> None:
         with self._lock:
+            stored_version = self._stored_storage_schema_version()
+            if stored_version > CURRENT_SCHEMA_VERSION:
+                raise SchemaCompatibilityError(
+                    "database schema version "
+                    f"{stored_version} is newer than supported version "
+                    f"{CURRENT_SCHEMA_VERSION}; upgrade Joiny-Mnemonic before opening it"
+                )
+            had_schema = self._has_existing_schema()
+            backup_path = None
+            if (
+                stored_version < CURRENT_SCHEMA_VERSION
+                and had_schema
+                and not self._in_memory
+            ):
+                backup_path = self._create_schema_backup(stored_version)
             self._conn.executescript(BASE_SCHEMA)
             self._ensure_column("memory_records", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(
@@ -740,10 +887,7 @@ class MemoryStore:
                 self._ensure_fts_index()
             except sqlite3.OperationalError:
                 self.fts_enabled = False
-            self._conn.execute(
-                "INSERT INTO metadata(key, value) VALUES('schema_version', '6') "
-                "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
-            )
+            self._apply_schema_migrations(stored_version, backup_path)
             self._conn.execute(
                 "INSERT OR IGNORE INTO branches(id, parent_id, fork_event_seq, created_at) "
                 "VALUES('main', NULL, NULL, ?)",

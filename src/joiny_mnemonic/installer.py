@@ -15,9 +15,10 @@ from .configuration import (
     PLUGINS,
     global_config_path,
     project_config_path,
+    read_configuration,
     write_configuration,
 )
-from .hooks import install_hooks
+from .hooks import install_hooks, uninstall_hooks
 from .paths import resolve_project_database
 
 
@@ -48,6 +49,21 @@ class SetupResult:
     plugin_installs: tuple[dict[str, Any], ...]
     configuration_file: str
     database: str | None
+    dry_run: bool
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UninstallSummary:
+    scope: str
+    project_root: str
+    agents: tuple[str, ...]
+    hooks: tuple[dict[str, Any], ...]
+    mcp: tuple[dict[str, Any], ...]
+    configuration_file: str
+    configuration_removed: bool
+    data_preserved: tuple[str, ...]
+    data_deleted: tuple[str, ...]
     dry_run: bool
     notes: tuple[str, ...] = ()
 
@@ -147,6 +163,46 @@ def mcp_command(
     return None
 
 
+def mcp_remove_command(agent: str, *, scope: str) -> list[str] | None:
+    if scope not in {"project", "global"}:
+        raise ValueError("scope must be project or global")
+    if agent == "claude-code":
+        claude_scope = "local" if scope == "project" else "user"
+        return [
+            "claude", "mcp", "remove", "--scope", claude_scope,
+            "joiny-mnemonic",
+        ]
+    if agent == "codex":
+        return ["codex", "mcp", "remove", "joiny-mnemonic"]
+    if agent == "openhands":
+        return ["openhands", "mcp", "remove", "joiny-mnemonic"]
+    return None
+
+
+def _nested_strings(value: Any) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, dict):
+        return tuple(
+            item
+            for child in value.values()
+            for item in _nested_strings(child)
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(item for child in value for item in _nested_strings(child))
+    return ()
+
+
+def _codex_registration_matches_project(value: Any, project_root: Path) -> bool:
+    strings = _nested_strings(value)
+    expected = (
+        "joiny_mnemonic",
+        str(project_root),
+        str(resolve_project_database(project_root)),
+    )
+    return all(any(item in candidate for candidate in strings) for item in expected)
+
+
 def _write_host_json(path: Path, value: dict[str, Any]) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -174,6 +230,35 @@ def _write_host_json(path: Path, value: dict[str, Any]) -> Path | None:
             path.write_bytes(original)
         raise
     return backup
+
+
+def _remove_opencode_mcp(
+    project_root: Path,
+    *,
+    scope: str,
+    home: Path,
+    dry_run: bool,
+) -> dict[str, Any]:
+    path = (
+        project_root / "opencode.json"
+        if scope == "project"
+        else home / ".config" / "opencode" / "opencode.json"
+    )
+    if not path.exists():
+        return {"agent": "opencode", "status": "not-configured", "path": str(path)}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"OpenCode configuration must be an object: {path}")
+    mcp = value.get("mcp")
+    if not isinstance(mcp, dict) or "joiny-mnemonic" not in mcp:
+        return {"agent": "opencode", "status": "not-configured", "path": str(path)}
+    if dry_run:
+        return {"agent": "opencode", "status": "planned", "path": str(path)}
+    mcp.pop("joiny-mnemonic")
+    if not mcp:
+        value.pop("mcp", None)
+    _write_host_json(path, value)
+    return {"agent": "opencode", "status": "removed", "path": str(path)}
 
 
 def _merge_opencode_mcp(
@@ -399,6 +484,244 @@ def run_setup(
     )
 
 
+def _project_data_paths(project_root: Path) -> tuple[Path, ...]:
+    root = project_root.resolve()
+    data_roots = (
+        (root / ".joiny-mnemonic").resolve(),
+        (root / ".llm-memory").resolve(),
+    )
+    candidates: list[Path] = []
+    for data_root in data_roots:
+        if not data_root.is_relative_to(root):
+            raise ValueError(f"project data path escaped project root: {data_root}")
+        database = data_root / "memory.db"
+        candidates.extend(
+            (
+                database,
+                Path(str(database) + "-wal"),
+                Path(str(database) + "-shm"),
+                data_root / "artifacts",
+            )
+        )
+        candidates.extend(data_root.glob("memory.db.pre-migration-*.bak"))
+    result: list[Path] = []
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if not any(
+            resolved == allowed or resolved.is_relative_to(allowed)
+            for allowed in data_roots
+        ):
+            raise ValueError(f"refusing to delete data outside project storage: {resolved}")
+        if resolved.exists() and resolved not in result:
+            result.append(resolved)
+    return tuple(result)
+
+
+def _delete_project_data(project_root: Path) -> tuple[str, ...]:
+    targets = _project_data_paths(project_root)
+    removed: list[str] = []
+    for target in targets:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink(missing_ok=True)
+        removed.append(str(target))
+    return tuple(removed)
+
+
+def run_uninstall(
+    project_root: str | Path,
+    *,
+    agents: Iterable[str] = (),
+    scope: str = "project",
+    remove_hook_adapters: bool | None = None,
+    remove_mcp: bool | None = None,
+    delete_data: bool = False,
+    dry_run: bool = False,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    environ: Mapping[str, str] | None = None,
+    home: str | Path | None = None,
+) -> UninstallSummary:
+    if scope not in {"project", "global"}:
+        raise ValueError("scope must be project or global")
+    if delete_data and scope != "project":
+        raise ValueError("durable data deletion is supported only for project scope")
+    root = Path(project_root).expanduser().resolve()
+    user_home = Path(home).expanduser().resolve() if home is not None else Path.home().resolve()
+    env = os.environ if environ is None else environ
+    config_path = (
+        project_config_path(root)
+        if scope == "project"
+        else global_config_path(environ=environ, home=user_home)
+    )
+    config = read_configuration(config_path)
+    requested_agents = tuple(dict.fromkeys(str(item) for item in agents))
+    selected_agents = requested_agents or tuple((config or {}).get("agents", ()))
+    if not selected_agents:
+        raise ValueError(
+            "no configured products found; pass --agent to select products explicitly"
+        )
+    if not set(selected_agents) <= AGENTS:
+        raise ValueError("unsupported agent selection")
+    remove_hooks = (
+        bool((config or {}).get("hooks_enabled", True))
+        if remove_hook_adapters is None else remove_hook_adapters
+    )
+    remove_registered_mcp = (
+        bool((config or {}).get("mcp_enabled", bool(requested_agents)))
+        if remove_mcp is None else remove_mcp
+    )
+
+    hook_results: list[dict[str, Any]] = []
+    mcp_results: list[dict[str, Any]] = []
+    notes: list[str] = []
+    incomplete = False
+    if remove_hooks:
+        for agent in selected_agents:
+            if scope == "global" and agent == "openhands":
+                notes.append("OpenHands has no user-global hooks.")
+                continue
+            hook_results.append(
+                asdict(
+                    uninstall_hooks(
+                        agent,
+                        root,
+                        global_scope=scope == "global",
+                        environ=dict(environ) if environ is not None else None,
+                        home=user_home,
+                        dry_run=dry_run,
+                    )
+                )
+            )
+
+    if remove_registered_mcp:
+        for agent in selected_agents:
+            if agent == "opencode":
+                mcp_results.append(
+                    _remove_opencode_mcp(
+                        root, scope=scope, home=user_home, dry_run=dry_run
+                    )
+                )
+                continue
+            command = mcp_remove_command(agent, scope=scope)
+            assert command is not None
+            executable = shutil.which(command[0], path=env.get("PATH"))
+            if executable is None:
+                mcp_results.append(
+                    {"agent": agent, "status": "not-installed", "command": command}
+                )
+                incomplete = True
+                continue
+            if dry_run:
+                mcp_results.append(
+                    {"agent": agent, "status": "planned", "command": command}
+                )
+                continue
+            if agent == "codex" and scope == "project":
+                inspection_command = [
+                    "codex", "mcp", "get", "joiny-mnemonic", "--json"
+                ]
+                inspected = runner(
+                    inspection_command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    cwd=root,
+                )
+                if inspected.returncode:
+                    detail = (inspected.stderr or inspected.stdout).strip()
+                    if "not found" in detail.casefold() or "does not exist" in detail.casefold():
+                        mcp_results.append(
+                            {
+                                "agent": agent,
+                                "status": "not-configured",
+                                "command": command,
+                            }
+                        )
+                        continue
+                    raise RuntimeError(f"failed to inspect MCP for {agent}: {detail}")
+                try:
+                    registration = json.loads(inspected.stdout)
+                except json.JSONDecodeError:
+                    mcp_results.append(
+                        {
+                            "agent": agent,
+                            "status": "ownership-unverified",
+                            "command": command,
+                        }
+                    )
+                    incomplete = True
+                    continue
+                if not _codex_registration_matches_project(registration, root):
+                    mcp_results.append(
+                        {
+                            "agent": agent,
+                            "status": "ownership-mismatch",
+                            "command": command,
+                        }
+                    )
+                    incomplete = True
+                    continue
+            completed = runner(
+                command, check=False, capture_output=True, text=True, cwd=root
+            )
+            if completed.returncode:
+                detail = (completed.stderr or completed.stdout).strip()
+                if "not found" in detail.casefold() or "does not exist" in detail.casefold():
+                    mcp_results.append(
+                        {"agent": agent, "status": "not-configured", "command": command}
+                    )
+                    continue
+                raise RuntimeError(f"failed to remove MCP for {agent}: {detail}")
+            mcp_results.append(
+                {"agent": agent, "status": "removed", "command": command}
+            )
+
+    configuration_removed = False
+    if config_path.exists() and not dry_run and not incomplete:
+        config_path.unlink()
+        configuration_removed = True
+    elif config_path.exists() and incomplete:
+        notes.append(
+            "Installer configuration was retained because MCP cleanup could not be "
+            "verified safely; inspect the reported status and rerun uninstall."
+        )
+    data_preserved: tuple[str, ...] = ()
+    data_deleted: tuple[str, ...] = ()
+    if scope == "project":
+        existing_data = _project_data_paths(root)
+        if delete_data and incomplete:
+            data_preserved = tuple(str(path) for path in existing_data)
+            notes.append(
+                "Durable data was not deleted because integration cleanup is incomplete."
+            )
+        elif delete_data and dry_run:
+            data_preserved = tuple(str(path) for path in existing_data)
+            notes.append(
+                "Dry run: durable database, sidecars, migration backups and artifacts "
+                "would be deleted."
+            )
+        elif delete_data:
+            data_deleted = _delete_project_data(root)
+            notes.append("Durable project data was explicitly deleted.")
+        else:
+            data_preserved = tuple(str(path) for path in existing_data)
+            notes.append("Durable memory data is preserved by default.")
+    return UninstallSummary(
+        scope=scope,
+        project_root=str(root),
+        agents=selected_agents,
+        hooks=tuple(hook_results),
+        mcp=tuple(mcp_results),
+        configuration_file=str(config_path),
+        configuration_removed=configuration_removed,
+        data_preserved=data_preserved,
+        data_deleted=data_deleted,
+        dry_run=dry_run,
+        notes=tuple(notes),
+    )
+
+
 def _select_indices(
     prompt: str,
     *,
@@ -435,6 +758,21 @@ def _ask_yes_no(
         if value in {"y", "yes"}:
             return True
         output_fn("Please answer y or n.")
+
+
+def confirm_data_deletion(
+    *,
+    input_fn: Callable[[str], str] = input,
+    output_fn: Callable[[str], None] = print,
+) -> bool:
+    output_fn(
+        "Durable data includes memory.db, SQLite sidecars, migration backups and artifacts."
+    )
+    return _ask_yes_no(
+        "Delete durable project data too? [y/N]: ",
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
 
 
 def select_interactively(

@@ -27,7 +27,13 @@ from .hooks import (
     process_hook,
     resolve_hook_project,
 )
-from .installer import detect_agents, run_setup, select_interactively
+from .installer import (
+    confirm_data_deletion,
+    detect_agents,
+    run_setup,
+    run_uninstall,
+    select_interactively,
+)
 from .mcp import serve_stdio
 from .paths import (
     resolve_project_database,
@@ -149,6 +155,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="accept detected products non-interactively",
     )
     setup.add_argument("--dry-run", action="store_true")
+
+    uninstall = commands.add_parser(
+        "uninstall",
+        help="remove Joiny-owned hooks and MCP registrations while preserving memory data",
+    )
+    uninstall.add_argument(
+        "--agent",
+        action="append",
+        choices=["claude-code", "codex", "opencode", "openhands"],
+        default=[],
+    )
+    uninstall.add_argument("--scope", choices=["project", "global"], default="project")
+    uninstall.add_argument("--without-hooks", action="store_true")
+    uninstall.add_argument("--without-mcp", action="store_true")
+    data_action = uninstall.add_mutually_exclusive_group()
+    data_action.add_argument(
+        "--delete-data",
+        action="store_true",
+        help="delete database, sidecars, migration backups and artifacts after cleanup",
+    )
+    data_action.add_argument(
+        "--keep-data",
+        action="store_true",
+        help="preserve durable project data without an interactive prompt",
+    )
+    uninstall.add_argument("--dry-run", action="store_true")
 
     session = commands.add_parser("session-start")
     session.add_argument("--agent", required=True)
@@ -443,6 +475,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.command == "uninstall":
+        project_root = resolve_runtime_project(args.project_root)
+        delete_data = bool(args.delete_data)
+        if (
+            not args.delete_data
+            and not args.keep_data
+            and args.scope == "project"
+            and sys.stdin.isatty()
+        ):
+            delete_data = confirm_data_deletion()
+        _print(
+            run_uninstall(
+                project_root,
+                agents=tuple(args.agent),
+                scope=args.scope,
+                remove_hook_adapters=False if args.without_hooks else None,
+                remove_mcp=False if args.without_mcp else None,
+                delete_data=delete_data,
+                dry_run=args.dry_run,
+            )
+        )
+        return 0
     if args.command == "setup":
         project_root = resolve_runtime_project(args.project_root)
         detections = detect_agents(project_root)

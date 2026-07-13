@@ -14,7 +14,11 @@ from unittest.mock import patch
 from joiny_mnemonic.prompt import BudgetExceededError
 from joiny_mnemonic.retrieval import RetrievalContext
 from joiny_mnemonic.service import MemoryService
-from joiny_mnemonic.storage import MemoryStore
+from joiny_mnemonic.storage import (
+    CURRENT_SCHEMA_VERSION,
+    MemoryStore,
+    SchemaCompatibilityError,
+)
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parent / "runtime"
@@ -92,7 +96,76 @@ class ServiceCase(unittest.TestCase):
                 version = store._conn.execute(
                     "SELECT value FROM metadata WHERE key='schema_version'"
                 ).fetchone()["value"]
-                self.assertEqual(version, "6")
+                self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
+                migration = store._conn.execute(
+                    "SELECT * FROM schema_migrations WHERE version=?",
+                    (CURRENT_SCHEMA_VERSION,),
+                ).fetchone()
+                self.assertEqual(migration["from_version"], 0)
+                backup = Path(migration["backup_path"])
+                self.assertTrue(backup.exists())
+                backup_connection = sqlite3.connect(backup)
+                try:
+                    self.assertEqual(
+                        backup_connection.execute("PRAGMA integrity_check").fetchone()[0],
+                        "ok",
+                    )
+                    self.assertEqual(
+                        backup_connection.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+                        1,
+                    )
+                finally:
+                    backup_connection.close()
+                with self.assertRaises(sqlite3.IntegrityError):
+                    store._conn.execute(
+                        "UPDATE schema_migrations SET code_version='changed' "
+                        "WHERE version=?",
+                        (CURRENT_SCHEMA_VERSION,),
+                    )
+        finally:
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(database) + suffix).unlink(missing_ok=True)
+            for backup in database.parent.glob(database.name + ".pre-migration-*.bak"):
+                backup.unlink(missing_ok=True)
+
+    def test_newer_schema_is_rejected_before_any_mutation(self) -> None:
+        database = RUNTIME_ROOT / f"future-schema-{uuid.uuid4().hex}.db"
+        connection = sqlite3.connect(database)
+        connection.execute("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        connection.execute(
+            "INSERT INTO metadata(key,value) VALUES('schema_version','999')"
+        )
+        connection.execute("CREATE TABLE future_only(value TEXT)")
+        connection.execute("INSERT INTO future_only(value) VALUES('preserve-me')")
+        connection.commit()
+        connection.close()
+        try:
+            with self.assertRaisesRegex(
+                SchemaCompatibilityError, "newer than supported"
+            ):
+                MemoryStore(database)
+            check = sqlite3.connect(database)
+            try:
+                tables = {
+                    row[0]
+                    for row in check.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                self.assertIn("future_only", tables)
+                self.assertNotIn("branches", tables)
+                self.assertEqual(
+                    check.execute("SELECT value FROM future_only").fetchone()[0],
+                    "preserve-me",
+                )
+                self.assertEqual(
+                    check.execute(
+                        "SELECT value FROM metadata WHERE key='schema_version'"
+                    ).fetchone()[0],
+                    "999",
+                )
+            finally:
+                check.close()
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database) + suffix).unlink(missing_ok=True)
@@ -290,7 +363,11 @@ class CrashDurabilityTest(unittest.TestCase):
             env["PYTHONDONTWRITEBYTECODE"] = "1"
             result = subprocess.run([sys.executable, "-c", script, str(database)], env=env)
             self.assertEqual(result.returncode, 19)
-            from joiny_mnemonic.storage import MemoryStore
+            from joiny_mnemonic.storage import (
+    CURRENT_SCHEMA_VERSION,
+    MemoryStore,
+    SchemaCompatibilityError,
+)
 
             store = MemoryStore(database)
             try:
