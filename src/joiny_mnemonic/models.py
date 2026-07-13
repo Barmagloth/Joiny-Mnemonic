@@ -148,6 +148,10 @@ class Snapshot:
     state: dict[str, Any]
     project: dict[str, Any]
     created_at: str
+    state_format: str = "json-patch-v2"
+    state_sha256: str | None = None
+    replay_code_version: str | None = None
+    blob_available: bool = True
 
 
 @dataclass(frozen=True, slots=True)

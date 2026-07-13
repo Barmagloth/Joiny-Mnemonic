@@ -184,6 +184,7 @@ class IntegrationTest(unittest.TestCase):
         names = {item["name"] for item in tools["result"]["tools"]}
         self.assertIn("memory_append", names)
         self.assertIn("memory_graph_neighbors", names)
+        self.assertIn("memory_snapshot_prune", names)
         called = server.handle(
             {
                 "jsonrpc": "2.0",

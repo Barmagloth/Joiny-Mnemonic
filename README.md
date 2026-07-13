@@ -267,7 +267,7 @@ and bind the complete native session to the task branch.
 
 `UserPromptSubmit` and `PostToolUse` also add their raw, pre-reduction size to an idempotent
 per-session cumulative counter. The governor uses the maximum of this counter and any
-provider-reported context usage. At the snapshot threshold it creates a durable snapshot and
+provider-reported context usage. When both the snapshot context threshold and replay-tail byte
 injects a neutral `[CONTEXT CHECKPOINT]`; it does not recommend a new session. The first handoff
 recommendation appears only at the configured handoff threshold, and the hard-limit message is
 separate. These checks do not wait for `PreCompact`/`PostCompact`.
@@ -404,7 +404,7 @@ python -m unittest discover -s tests -v
 ```
 
 The current suite includes crash durability, immutable storage, branch visibility, recursive
-snapshot deltas, restored-state resume, FTS without Python full scans, atomic tool groups,
+full compressed snapshots, legacy delta replay, audited blob pruning, restored-state resume, FTS
 evidence-bound consolidation, semantic no-keyword retrieval, branch-scoped graph projection,
 automatic tamper rejection, hook idempotency/installers, Python AST impact, MCP and HTTP.
 

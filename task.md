@@ -158,6 +158,9 @@ replacement.
 
 Materialize `candidate_current_status` only as a rebuildable projection of transitions.
 
+`actor` is an operational producer vocabulary (`extractor`, `request_reducer`,
+`explicit_marker`, plus named integrity actors), not a closed public enum.
+
 ### Candidate-memory lineage
 
 Do not update a candidate to attach a memory ID. Add an append-only link:
@@ -168,9 +171,10 @@ candidate_memory_links(
 )
 ```
 
-Relations include `derived`, `confirmed_as` and `superseded_by`. Memory metadata must mirror
-`extraction_run_id`, `candidate_id` and `extractor_config_hash`. The complete audit path must be
-queryable without joining by normalized text:
+Relations implemented in v1 include `derived`, `confirmed_as` and `supports`. `superseded_by` is
+reserved; current supersession is represented by transition-journal replacement IDs. Memory
+metadata must mirror `extraction_run_id`, `candidate_id` and `extractor_config_hash`. The complete
+audit path must be queryable without joining by normalized text:
 
 ```text
 canonical event -> extraction run -> attempt -> candidate -> transition

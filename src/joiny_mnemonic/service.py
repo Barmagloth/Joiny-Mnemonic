@@ -158,7 +158,7 @@ class MemoryService:
         result = self.store.initialize_project(
             repository_identity=self._repository_identity(),
             canonical_path=str(self.project_root),
-            code_version="0.6.0",
+            code_version="0.7.0",
             policy=policy,
         )
         if result.get("initialized"):
@@ -625,6 +625,17 @@ class MemoryService:
             tracked_files=tracked_files,
         )
 
+    def prune_snapshots(
+        self,
+        snapshot_ids: Sequence[str],
+        *,
+        branch_id: str = "main",
+    ) -> dict[str, Any]:
+        result = self.store.prune_snapshot_blobs(snapshot_ids, branch_id=branch_id)
+        if result["event_id"] is not None:
+            self.checkpoint_witness()
+        return result
+
     def resume(
         self,
         *,
@@ -774,7 +785,8 @@ class MemoryService:
                 "append_only": True,
                 "journal_mode": self.store.journal_mode,
                 "snapshots": True,
-                "snapshot_delta": "recursive-json-patch-v2",
+                "snapshot_format": "full-zlib-v1",
+                "legacy_snapshot_reader": "json-patch-v2",
                 "lexical_retrieval": "sqlite-fts5-bm25" if self.store.fts_enabled else "python-fallback",
                 "automatic_consolidation": "explicit-evidence-only",
                 "durable_memory_markers": [

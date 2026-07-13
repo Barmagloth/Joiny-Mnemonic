@@ -118,6 +118,12 @@ class BudgetGovernor:
             return False
         policy = self.service.budget_policy(branch_id=branch_id, agent=agent)
         receipt_key = f"context-checkpoint:{session_id}:{policy.id}:{counter.threshold_tokens}"
+        if self.service.store.governor_action_source(receipt_key) == source_event.id:
+            return True
+        tail_bytes = self.service.store.snapshot_replay_tail_size(branch_id=branch_id)
+        tail_threshold_bytes = max(1, counter.threshold_tokens * 4)
+        if tail_bytes < tail_threshold_bytes:
+            return False
         created = self.service.store.record_governor_action(
             receipt_key=receipt_key,
             branch_id=branch_id,
@@ -138,7 +144,7 @@ class BudgetGovernor:
                 "increment_tokens": counter.increment_tokens,
             },
         )
-        return created or self.service.store.governor_action_source(receipt_key) == source_event.id
+        return created
 
     def evaluate_and_apply(
         self,
@@ -161,7 +167,12 @@ class BudgetGovernor:
         reasons: list[str] = []
         reason_by_action = dict(zip(decision.actions, decision.reasons, strict=True))
         snapshot_created = False
+        snapshot_tail_bytes = self.service.store.snapshot_replay_tail_size(branch_id=branch_id)
+        snapshot_tail_threshold = max(1, thresholds["snapshot"] * 4)
+        snapshot_due = snapshot_tail_bytes >= snapshot_tail_threshold
         for action in decision.actions:
+            if action == "snapshot" and not snapshot_due:
+                continue
             last_seq = self.service.store.last_governor_action_seq(
                 branch_id, action, policy_id=policy.id
             )
@@ -183,7 +194,13 @@ class BudgetGovernor:
 
                 context_tokens=decision.context_tokens,
                 threshold_tokens=threshold,
-                payload={"policy_id": policy.id, "agent": agent, "source": decision.source},
+                payload={
+                    "policy_id": policy.id,
+                    "agent": agent,
+                    "source": decision.source,
+                    "snapshot_tail_bytes": snapshot_tail_bytes,
+                    "snapshot_tail_threshold_bytes": snapshot_tail_threshold,
+                },
             )
             if not created:
                 continue
@@ -191,7 +208,10 @@ class BudgetGovernor:
                 self.service.create_snapshot(branch_id=branch_id)
                 snapshot_created = True
             elif action == "compact":
-                if not snapshot_created:
+                if (
+                    not snapshot_created
+                    and (snapshot_due or self.service.store.latest_snapshot(branch_id=branch_id) is None)
+                ):
                     self.service.create_snapshot(branch_id=branch_id)
                     snapshot_created = True
                 self.service.compact(branch_id=branch_id)

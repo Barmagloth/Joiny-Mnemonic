@@ -8,6 +8,10 @@ hashes.
 Semantic/FTS indexes, graph state, current candidate status, backlog/resume projections and other
 derived views may be rebuilt. The interpretation ledger is not a rebuildable cache.
 
+Snapshot state blobs are derived and may be pruned only through a canonical `snapshots_pruned`
+event. Snapshot rows, lineage, `state_sha256`, replay code version and pruning records remain
+permanent. Prompt-exposed snapshots and snapshots referenced by active tasks are protected.
+
 Keep candidate and attempt lineage for at least as long as any linked memory or recorded prompt
 exposure. Never prune accepted, confirmed, superseded or exposed lineage independently. Unlinked,
 never-exposed rejected candidates may be archived only under an explicit retention policy.

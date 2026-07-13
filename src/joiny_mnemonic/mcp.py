@@ -178,7 +178,7 @@ TOOLS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "memory_snapshot",
-        "description": "Create an atomic incremental snapshot tied to Git HEAD and file hashes.",
+        "description": "Create an atomic full compressed snapshot tied to Git HEAD and file hashes.",
         "inputSchema": _schema(
             {
                 "branch_id": {"type": "string", "default": "main"},
@@ -187,6 +187,18 @@ TOOLS: tuple[dict[str, Any], ...] = (
             }
         ),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
+    },
+    {
+        "name": "memory_snapshot_prune",
+        "description": "Audit and prune unprotected full snapshot blobs while retaining hashes forever.",
+        "inputSchema": _schema(
+            {
+                "snapshot_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                "branch_id": {"type": "string", "default": "main"},
+            },
+            ["snapshot_ids"],
+        ),
+        "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     },
     {
         "name": "memory_resume",
@@ -436,6 +448,8 @@ class MCPServer:
             return self.service.project_source(**arguments)
         if name == "memory_snapshot":
             return self.service.create_snapshot(**arguments)
+        if name == "memory_snapshot_prune":
+            return self.service.prune_snapshots(**arguments)
         if name == "memory_resume":
             return self.service.resume(**arguments)
         if name == "memory_security_status":
@@ -558,7 +572,7 @@ class MCPServer:
                 {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.6.0"},
+                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.7.0"},
                     "instructions": self._instructions(message.get("params", {})),
                 },
             )

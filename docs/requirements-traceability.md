@@ -28,7 +28,7 @@
 | Retrieval exposure telemetry | append-only usage operations `retrieval_search` and `prompt_injection` with receipts/redaction | `test_telemetry` metadata, dedupe, isolation, aggregation and equivalence tests |
 | Progressive source expansion | branch-visible complete interaction groups, compact/exact `ContextWindow`, batch `exact_sources`, one `memory_context` MCP tool | `test_context_expansion` plus graph edge source/context assertion |
 | Нет universal importance | score создаётся только из `RetrievalContext` | архитектурный инвариант |
-| Atomic incremental snapshots | recursive `json-patch-v2` delta внутри SQLite transaction | nested-memory delta + parent materialization tests |
+| Full compressed snapshots + legacy replay | `full-zlib-v1`, canonical `state_sha256`, replay version; read-only `json-patch-v2` compatibility | full-format/hash, legacy migration, corruption finding and pruning tests |
 | Snapshot + replay tail | `SnapshotManager.restore` | stale/replay test |
 | Parent/branch lineage | `branches`, fork cursor visibility | `test_branch_lineage_hides_parent_updates_after_fork` |
 | Resume packet from restored state | `MemoryService.resume` passes materialized snapshot + tail to prompt | `test_resume_passes_materialized_snapshot_state_to_prompt` |

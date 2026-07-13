@@ -108,7 +108,7 @@ global file. A project may therefore run Claude Code and Codex with different co
 handoff thresholds on the same branch. The selected model profile and explicit overrides are
 written during `install-hooks`; reinstallation without new limit arguments preserves them.
 
-Crossing the snapshot threshold injects `[CONTEXT CHECKPOINT]` and records a durable snapshot. It
+Crossing both the context threshold and the replay-tail byte threshold injects
 does not tell the user to start another session. `[CONTEXT HANDOFF RECOMMENDED]` starts only at the
 agent's handoff threshold, and `[CONTEXT HANDOFF REQUIRED]` is reserved for the hard limit. This
 path is independent of `PreCompact`/`PostCompact`; those remain recovery hooks, not the first

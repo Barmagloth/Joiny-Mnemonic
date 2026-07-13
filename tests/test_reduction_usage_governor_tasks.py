@@ -136,6 +136,30 @@ class ReductionUsageGovernorTaskTest(unittest.TestCase):
         rate_limited = self.service.governor.evaluate_and_apply(source_event=followup)
         self.assertEqual(rate_limited.actions, ())
 
+    def test_governor_snapshot_cadence_uses_replay_tail_bytes(self) -> None:
+        policy = self.service.store.set_budget_policy(
+            context_window_tokens=4000,
+            snapshot_ratio=0.20,
+            compact_ratio=0.35,
+            handoff_ratio=0.60,
+            hard_limit_ratio=0.80,
+            min_action_interval_events=1,
+        )
+        self.service.store.append_event(
+            kind="message", role="assistant", content="historical context " * 1600
+        )
+        self.service.create_snapshot(tracked_files=[])
+        source = self.service.store.append_event(kind="message", content="tiny replay tail")
+        threshold = self.service.governor.thresholds(policy)["snapshot"] * 4
+        self.assertLess(
+            self.service.store.snapshot_replay_tail_size(branch_id="main"), threshold
+        )
+        decision = self.service.governor.evaluate_and_apply(source_event=source)
+        self.assertNotIn("snapshot", decision.actions)
+        count = self.service.store._conn.execute(
+            "SELECT COUNT(*) FROM snapshots"
+        ).fetchone()[0]
+        self.assertEqual(count, 1)
     def test_global_installers_resolve_user_paths_and_runtime_project(self) -> None:
         parsed = build_parser().parse_args(["install-hooks", "codex", "--global"])
         self.assertTrue(parsed.global_scope)

@@ -92,7 +92,7 @@ class ServiceCase(unittest.TestCase):
                 version = store._conn.execute(
                     "SELECT value FROM metadata WHERE key='schema_version'"
                 ).fetchone()["value"]
-                self.assertEqual(version, "5")
+                self.assertEqual(version, "6")
         finally:
             for suffix in ("", "-wal", "-shm"):
                 Path(str(database) + suffix).unlink(missing_ok=True)

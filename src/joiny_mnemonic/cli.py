@@ -273,6 +273,10 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--parent")
     snapshot.add_argument("--track", action="append")
 
+    snapshot_prune = commands.add_parser("snapshot-prune")
+    snapshot_prune.add_argument("--id", action="append", required=True)
+    snapshot_prune.add_argument("--branch", default="main")
+
     resume = commands.add_parser("resume")
     resume.add_argument("--branch", default="main")
     resume.add_argument("--budget", type=int, default=1500)
@@ -619,6 +623,8 @@ def run(args: argparse.Namespace) -> int:
             _print(service.retrieval.timeline(branch_id=args.branch, limit=args.limit, kinds=args.kind))
         elif args.command == "snapshot":
             _print(service.create_snapshot(branch_id=args.branch, parent_snapshot_id=args.parent, tracked_files=args.track))
+        elif args.command == "snapshot-prune":
+            _print(service.prune_snapshots(args.id, branch_id=args.branch))
         elif args.command == "resume":
             packet = service.resume(branch_id=args.branch, token_budget=args.budget, query=args.query)
             print(packet.text) if args.text_only else _print(packet)

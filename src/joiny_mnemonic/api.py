@@ -215,6 +215,8 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     )
                 elif path == "/v1/context":
                     result = service.context_around(**body)
+                elif path == "/v1/snapshots/prune":
+                    result = service.prune_snapshots(**body)
                 elif path == "/v1/snapshots":
                     result = service.create_snapshot(**body)
                 elif path == "/v1/resume":

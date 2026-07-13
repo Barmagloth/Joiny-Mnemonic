@@ -49,6 +49,19 @@ class StoreIntegrityError(RuntimeError):
     """Raised when canonical storage fails automatic integrity verification."""
 
 
+class SnapshotIntegrityError(RuntimeError):
+    """Raised internally when materialized snapshot state fails hash verification."""
+
+    def __init__(self, snapshot_id: str, expected: str, actual: str) -> None:
+        self.snapshot_id = snapshot_id
+        self.expected = expected
+        self.actual = actual
+        super().__init__(f"snapshot {snapshot_id} state hash mismatch")
+
+
+SNAPSHOT_REPLAY_CODE_VERSION = "snapshot-materializer-v1"
+
+
 def integrity_checked(method: Any) -> Any:
     @functools.wraps(method)
     def wrapped(self: "MemoryStore", *args: Any, **kwargs: Any) -> Any:
@@ -268,7 +281,19 @@ CREATE TABLE IF NOT EXISTS snapshots (
     parent_snapshot_id TEXT REFERENCES snapshots(id),
     cursor_seq INTEGER NOT NULL,
     state_json TEXT NOT NULL,
+    state_format TEXT NOT NULL DEFAULT 'json-patch-v2',
+    state_blob BLOB,
+    state_sha256 TEXT,
+    replay_code_version TEXT,
     project_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_prunings (
+    id TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL UNIQUE REFERENCES snapshots(id),
+    state_sha256 TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES events(id),
     created_at TEXT NOT NULL
 );
 
@@ -465,6 +490,7 @@ CREATE INDEX IF NOT EXISTS idx_events_branch_seq ON events(branch_id, seq);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_memory_branch_type ON memory_records(branch_id, memory_type);
 CREATE INDEX IF NOT EXISTS idx_snapshots_branch_cursor ON snapshots(branch_id, cursor_seq);
+CREATE INDEX IF NOT EXISTS idx_snapshot_prunings_event ON snapshot_prunings(source_event_id);
 CREATE INDEX IF NOT EXISTS idx_tool_views_event_level ON tool_output_views(event_id, level);
 CREATE INDEX IF NOT EXISTS idx_usage_branch_created ON usage_samples(branch_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_session_created ON usage_samples(session_id, created_at);
@@ -569,6 +595,10 @@ CREATE TRIGGER IF NOT EXISTS snapshots_no_update BEFORE UPDATE ON snapshots
 BEGIN SELECT RAISE(ABORT, 'snapshots are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS snapshots_no_delete BEFORE DELETE ON snapshots
 BEGIN SELECT RAISE(ABORT, 'snapshots are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS snapshot_prunings_no_update BEFORE UPDATE ON snapshot_prunings
+BEGIN SELECT RAISE(ABORT, 'snapshot pruning records are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS snapshot_prunings_no_delete BEFORE DELETE ON snapshot_prunings
+BEGIN SELECT RAISE(ABORT, 'snapshot pruning records cannot be deleted'); END;
 CREATE TRIGGER IF NOT EXISTS branches_no_update BEFORE UPDATE ON branches
 BEGIN SELECT RAISE(ABORT, 'branch lineage is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS branches_no_delete BEFORE DELETE ON branches
@@ -703,6 +733,7 @@ class MemoryStore:
                 "events", "origin_channel", "TEXT NOT NULL DEFAULT 'legacy_untrusted'"
             )
             self._ensure_column("events", "origin_adapter", "TEXT")
+            self._initialize_snapshot_schema()
             try:
                 self._conn.executescript(FTS_SCHEMA)
                 self.fts_enabled = True
@@ -710,7 +741,7 @@ class MemoryStore:
             except sqlite3.OperationalError:
                 self.fts_enabled = False
             self._conn.execute(
-                "INSERT INTO metadata(key, value) VALUES('schema_version', '5') "
+                "INSERT INTO metadata(key, value) VALUES('schema_version', '6') "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
             )
             self._conn.execute(
@@ -726,6 +757,78 @@ class MemoryStore:
         if column not in columns:
             self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
+    def _initialize_snapshot_schema(self) -> None:
+        self._ensure_column(
+            "snapshots", "state_format", "TEXT NOT NULL DEFAULT 'json-patch-v2'"
+        )
+        self._ensure_column("snapshots", "state_blob", "BLOB")
+        self._ensure_column("snapshots", "state_sha256", "TEXT")
+        self._ensure_column("snapshots", "replay_code_version", "TEXT")
+        self._conn.execute("DROP TRIGGER IF EXISTS snapshots_no_update")
+        try:
+            rows = self._conn.execute(
+                "SELECT id FROM snapshots WHERE state_sha256 IS NULL "
+                "ORDER BY cursor_seq, created_at"
+            ).fetchall()
+            for row in rows:
+                snapshot_row, state = self._materialize_snapshot_locked(
+                    str(row["id"]), verify_hash=False
+                )
+                payload = json.loads(snapshot_row["state_json"])
+                legacy_format = (
+                    str(payload.get("format", "json-patch-v2"))
+                    if isinstance(payload, dict)
+                    else "json-patch-v2"
+                )
+                self._conn.execute(
+                    "UPDATE snapshots SET state_format=?,state_sha256=?,"
+                    "replay_code_version=? WHERE id=?",
+                    (
+                        legacy_format,
+                        _hash(_json(state)),
+                        "legacy-materializer-v2",
+                        snapshot_row["id"],
+                    ),
+                )
+        finally:
+            self._install_snapshot_triggers()
+
+    def _install_snapshot_triggers(self) -> None:
+        self._conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS snapshots_no_update;
+            DROP TRIGGER IF EXISTS snapshots_require_integrity_metadata;
+            CREATE TRIGGER snapshots_require_integrity_metadata
+            BEFORE INSERT ON snapshots
+            WHEN NEW.state_sha256 IS NULL
+              OR length(NEW.state_sha256) != 64
+              OR NEW.replay_code_version IS NULL
+              OR (NEW.state_format='full-zlib-v1' AND NEW.state_blob IS NULL)
+            BEGIN SELECT RAISE(ABORT, 'snapshots require hash, replay version and state blob'); END;
+            CREATE TRIGGER snapshots_no_update BEFORE UPDATE ON snapshots
+            WHEN NOT (
+                OLD.state_format='full-zlib-v1'
+                AND OLD.state_blob IS NOT NULL
+                AND NEW.state_blob IS NULL
+                AND NEW.id IS OLD.id
+                AND NEW.branch_id IS OLD.branch_id
+                AND NEW.parent_snapshot_id IS OLD.parent_snapshot_id
+                AND NEW.cursor_seq IS OLD.cursor_seq
+                AND NEW.state_json IS OLD.state_json
+                AND NEW.state_format IS OLD.state_format
+                AND NEW.state_sha256 IS OLD.state_sha256
+                AND NEW.replay_code_version IS OLD.replay_code_version
+                AND NEW.project_json IS OLD.project_json
+                AND NEW.created_at IS OLD.created_at
+                AND EXISTS (
+                    SELECT 1 FROM snapshot_prunings p
+                    WHERE p.snapshot_id=OLD.id
+                      AND p.state_sha256=OLD.state_sha256
+                )
+            )
+            BEGIN SELECT RAISE(ABORT, 'snapshots are immutable outside audited blob pruning'); END;
+            """
+        )
     def _ensure_fts_index(self) -> None:
         self._conn.execute(
             "INSERT INTO events_fts(event_id, content) "
@@ -1714,26 +1817,6 @@ class MemoryStore:
         return events
 
     @staticmethod
-    def _snapshot_delta(parent: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-        operations: list[dict[str, Any]] = []
-
-        def walk(path: list[str], before: Any, after: Any) -> None:
-            if isinstance(before, dict) and isinstance(after, dict):
-                for key in sorted(set(before) - set(after)):
-                    operations.append({"op": "remove", "path": [*path, str(key)]})
-                for key in sorted(set(after) - set(before)):
-                    operations.append(
-                        {"op": "set", "path": [*path, str(key)], "value": after[key]}
-                    )
-                for key in sorted(set(before) & set(after)):
-                    walk([*path, str(key)], before[key], after[key])
-            elif before != after:
-                operations.append({"op": "set", "path": path, "value": after})
-
-        walk([], parent, current)
-        return {"format": "json-patch-v2", "operations": operations}
-
-    @staticmethod
     def _apply_snapshot_delta(parent: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
         if delta.get("format") == "incremental-v1":
             state = dict(parent)
@@ -1766,7 +1849,11 @@ class MemoryStore:
         return state
 
     def _materialize_snapshot_locked(
-        self, snapshot_id: str, *, seen: set[str] | None = None
+        self,
+        snapshot_id: str,
+        *,
+        seen: set[str] | None = None,
+        verify_hash: bool = True,
     ) -> tuple[sqlite3.Row, dict[str, Any]]:
         seen = seen or set()
         if snapshot_id in seen:
@@ -1775,12 +1862,61 @@ class MemoryStore:
         row = self._conn.execute("SELECT * FROM snapshots WHERE id=?", (snapshot_id,)).fetchone()
         if row is None:
             raise KeyError(f"unknown snapshot: {snapshot_id}")
-        parent_state: dict[str, Any] = {}
-        if row["parent_snapshot_id"]:
-            _, parent_state = self._materialize_snapshot_locked(
-                row["parent_snapshot_id"], seen=seen
-            )
-        return row, self._apply_snapshot_delta(parent_state, json.loads(row["state_json"]))
+        state_format = str(row["state_format"] or "json-patch-v2")
+        if state_format == "full-zlib-v1":
+            if row["state_blob"] is None:
+                raise RuntimeError(f"snapshot blob was pruned: {snapshot_id}")
+            try:
+                decoded = zlib.decompress(bytes(row["state_blob"])).decode("utf-8")
+                state = json.loads(decoded)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise SnapshotIntegrityError(
+                    snapshot_id,
+                    str(row["state_sha256"] or "missing"),
+                    "unreadable-full-zlib-v1",
+                ) from exc
+            if not isinstance(state, dict):
+                raise SnapshotIntegrityError(
+                    snapshot_id,
+                    str(row["state_sha256"] or "missing"),
+                    _hash(decoded),
+                )
+        else:
+            parent_state: dict[str, Any] = {}
+            if row["parent_snapshot_id"]:
+                _, parent_state = self._materialize_snapshot_locked(
+                    row["parent_snapshot_id"], seen=seen, verify_hash=verify_hash
+                )
+            try:
+                delta = json.loads(row["state_json"])
+            except json.JSONDecodeError as exc:
+                raise SnapshotIntegrityError(
+                    snapshot_id,
+                    str(row["state_sha256"] or "missing"),
+                    "unreadable-legacy-json",
+                ) from exc
+            state = self._apply_snapshot_delta(parent_state, delta)
+        actual = _hash(_json(state))
+        expected = row["state_sha256"]
+        if verify_hash and expected != actual:
+            raise SnapshotIntegrityError(snapshot_id, str(expected or "missing"), actual)
+        return row, state
+
+    def _raise_snapshot_integrity_finding(self, error: SnapshotIntegrityError) -> None:
+        details = {
+            "snapshot_id": error.snapshot_id,
+            "expected_state_sha256": error.expected,
+            "actual_state_sha256": error.actual,
+        }
+        self.record_security_finding(
+            "snapshot_state_hash_mismatch",
+            incident_key=(
+                f"snapshot_state_hash_mismatch:{error.snapshot_id}:"
+                f"{error.expected}:{error.actual}"
+            ),
+            details=details,
+        )
+        raise StoreIntegrityError(str(error)) from error
 
     def create_snapshot(
         self,
@@ -1792,61 +1928,98 @@ class MemoryStore:
     ) -> Snapshot:
         snapshot_id = f"snp_{uuid.uuid4().hex}"
         created_at = _now()
-        with self._transaction() as conn:
-            lineage = self._lineage_locked(branch_id)
-            if parent_snapshot_id is None:
-                row = self._latest_visible_snapshot_row_locked(branch_id)
-                parent_snapshot_id = row["id"] if row else None
-            parent_state: dict[str, Any] = {}
-            if parent_snapshot_id:
-                parent_row, parent_state = self._materialize_snapshot_locked(parent_snapshot_id)
-                lineage_limits = dict(lineage)
-                if parent_row["branch_id"] not in lineage_limits:
-                    raise ValueError("parent snapshot is outside the branch lineage")
-                cutoff = lineage_limits[parent_row["branch_id"]]
-                if cutoff is not None and int(parent_row["cursor_seq"]) > cutoff:
-                    raise ValueError("parent snapshot was created beyond the branch fork")
-            visible_events = self.query_events(branch_id=branch_id)
-            cursor_seq = visible_events[-1].seq if visible_events else 0
-            delta = self._snapshot_delta(parent_state, state)
-            conn.execute(
-                "INSERT INTO snapshots(id, branch_id, parent_snapshot_id, cursor_seq, "
-                "state_json, project_json, created_at) VALUES(?,?,?,?,?,?,?)",
-                (
-                    snapshot_id, branch_id, parent_snapshot_id, cursor_seq,
-                    _json(delta), _json(project), created_at,
-                ),
-            )
+        state_bytes = _json(state).encode("utf-8")
+        materialized_state = json.loads(state_bytes)
+        if not isinstance(materialized_state, dict):
+            raise ValueError("snapshot state must serialize to a JSON object")
+        state_sha256 = _hash(state_bytes)
+        state_blob = zlib.compress(state_bytes)
+        try:
+            with self._transaction() as conn:
+                lineage = self._lineage_locked(branch_id)
+                if parent_snapshot_id is None:
+                    row = self._latest_visible_snapshot_row_locked(branch_id)
+                    parent_snapshot_id = row["id"] if row else None
+                if parent_snapshot_id:
+                    parent_row, _ = self._materialize_snapshot_locked(parent_snapshot_id)
+                    lineage_limits = dict(lineage)
+                    if parent_row["branch_id"] not in lineage_limits:
+                        raise ValueError("parent snapshot is outside the branch lineage")
+                    cutoff = lineage_limits[parent_row["branch_id"]]
+                    if cutoff is not None and int(parent_row["cursor_seq"]) > cutoff:
+                        raise ValueError("parent snapshot was created beyond the branch fork")
+                visible_events = self.query_events(branch_id=branch_id)
+                cursor_seq = visible_events[-1].seq if visible_events else 0
+                conn.execute(
+                    "INSERT INTO snapshots(id,branch_id,parent_snapshot_id,cursor_seq,"
+                    "state_json,state_format,state_blob,state_sha256,replay_code_version,"
+                    "project_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        snapshot_id,
+                        branch_id,
+                        parent_snapshot_id,
+                        cursor_seq,
+                        _json({"format": "full-zlib-v1"}),
+                        "full-zlib-v1",
+                        state_blob,
+                        state_sha256,
+                        SNAPSHOT_REPLAY_CODE_VERSION,
+                        _json(project),
+                        created_at,
+                    ),
+                )
+        except SnapshotIntegrityError as exc:
+            self._raise_snapshot_integrity_finding(exc)
         return Snapshot(
             id=snapshot_id,
             branch_id=branch_id,
             parent_snapshot_id=parent_snapshot_id,
             cursor_seq=cursor_seq,
-            state=state,
+            state=materialized_state,
             project=project,
             created_at=created_at,
+            state_format="full-zlib-v1",
+            state_sha256=state_sha256,
+            replay_code_version=SNAPSHOT_REPLAY_CODE_VERSION,
+            blob_available=True,
         )
 
     @integrity_checked
     def get_snapshot(self, snapshot_id: str) -> Snapshot:
-        with self._lock:
-            row, state = self._materialize_snapshot_locked(snapshot_id)
+        try:
+            with self._lock:
+                row, state = self._materialize_snapshot_locked(snapshot_id)
+        except SnapshotIntegrityError as exc:
+            self._raise_snapshot_integrity_finding(exc)
         return Snapshot(
-            id=row["id"], branch_id=row["branch_id"],
-            parent_snapshot_id=row["parent_snapshot_id"], cursor_seq=int(row["cursor_seq"]),
-            state=state, project=json.loads(row["project_json"]), created_at=row["created_at"],
+            id=row["id"],
+            branch_id=row["branch_id"],
+            parent_snapshot_id=row["parent_snapshot_id"],
+            cursor_seq=int(row["cursor_seq"]),
+            state=state,
+            project=json.loads(row["project_json"]),
+            created_at=row["created_at"],
+            state_format=str(row["state_format"]),
+            state_sha256=row["state_sha256"],
+            replay_code_version=row["replay_code_version"],
+            blob_available=(
+                row["state_blob"] is not None
+                or str(row["state_format"]) != "full-zlib-v1"
+            ),
         )
-
     def _latest_visible_snapshot_row_locked(self, branch_id: str) -> sqlite3.Row | None:
         candidates: list[sqlite3.Row] = []
         for visible_branch, cutoff in self._lineage_locked(branch_id):
             if cutoff is None:
                 rows = self._conn.execute(
-                    "SELECT * FROM snapshots WHERE branch_id=?", (visible_branch,)
+                    "SELECT * FROM snapshots WHERE branch_id=? "
+                    "AND (state_format!='full-zlib-v1' OR state_blob IS NOT NULL)",
+                    (visible_branch,)
                 ).fetchall()
             else:
                 rows = self._conn.execute(
-                    "SELECT * FROM snapshots WHERE branch_id=? AND cursor_seq<=?",
+                    "SELECT * FROM snapshots WHERE branch_id=? AND cursor_seq<=? "
+                    "AND (state_format!='full-zlib-v1' OR state_blob IS NOT NULL)",
                     (visible_branch, cutoff),
                 ).fetchall()
             candidates.extend(rows)
@@ -1874,6 +2047,125 @@ class MemoryStore:
             raise ValueError("snapshot was created beyond the target branch fork")
         return self.query_events(branch_id=target_branch_id, after_seq=snapshot.cursor_seq)
 
+    @integrity_checked
+    def snapshot_replay_tail_size(self, *, branch_id: str = "main") -> int:
+        with self._lock:
+            row = self._latest_visible_snapshot_row_locked(branch_id)
+            after_seq = int(row["cursor_seq"]) if row is not None else 0
+        events = self.query_events(branch_id=branch_id, after_seq=after_seq)
+        return sum(len(_json(event.to_dict()).encode("utf-8")) for event in events)
+
+    def prune_snapshot_blobs(
+        self,
+        snapshot_ids: Sequence[str],
+        *,
+        branch_id: str = "main",
+    ) -> dict[str, Any]:
+        requested = tuple(dict.fromkeys(str(item) for item in snapshot_ids))
+        if not requested:
+            raise ValueError("at least one snapshot ID is required")
+        with self._lock:
+            preflight = {
+                str(row["id"]): row
+                for row in self._conn.execute(
+                    "SELECT * FROM snapshots WHERE id IN (%s)"
+                    % ",".join("?" for _ in requested),
+                    requested,
+                ).fetchall()
+            }
+        for snapshot_id in requested:
+            row = preflight.get(snapshot_id)
+            if row is None:
+                raise KeyError(f"unknown snapshot: {snapshot_id}")
+            if row["state_format"] != "full-zlib-v1":
+                raise ValueError(f"legacy snapshot blobs are not prunable: {snapshot_id}")
+            if row["state_blob"] is not None:
+                self.get_snapshot(snapshot_id)
+        with self._transaction() as conn:
+            rows = []
+            for snapshot_id in requested:
+                row = conn.execute(
+                    "SELECT * FROM snapshots WHERE id=?", (snapshot_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown snapshot: {snapshot_id}")
+                if row["state_format"] != "full-zlib-v1":
+                    raise ValueError(
+                        f"legacy snapshot blobs are not prunable: {snapshot_id}"
+                    )
+                if row["state_blob"] is not None:
+                    rows.append(row)
+            if not rows:
+                return {"event_id": None, "pruned": []}
+
+            protected: dict[str, str] = {}
+            usage_rows = conn.execute(
+                "SELECT operation,metadata_json FROM usage_samples"
+            ).fetchall()
+            for usage in usage_rows:
+                metadata = json.loads(usage["metadata_json"])
+                if not isinstance(metadata, dict):
+                    continue
+                snapshot_id = metadata.get("snapshot_id")
+                if snapshot_id:
+                    protected[str(snapshot_id)] = f"usage:{usage['operation']}"
+            task_rows = conn.execute(
+                "SELECT t.snapshot_id,t.task_key FROM task_versions t "
+                "JOIN (SELECT task_key,MAX(version) AS version FROM task_versions "
+                "GROUP BY task_key) latest "
+                "ON latest.task_key=t.task_key AND latest.version=t.version "
+                "WHERE t.status IN ('active','blocked') AND t.snapshot_id IS NOT NULL"
+            ).fetchall()
+            for task in task_rows:
+                protected[str(task["snapshot_id"])] = f"active_task:{task['task_key']}"
+            blocked = {
+                str(row["id"]): protected[str(row["id"])]
+                for row in rows
+                if str(row["id"]) in protected
+            }
+            if blocked:
+                rendered = ", ".join(
+                    f"{snapshot_id} ({reason})"
+                    for snapshot_id, reason in sorted(blocked.items())
+                )
+                raise ValueError(f"protected snapshots cannot be pruned: {rendered}")
+
+            items = [
+                {
+                    "snapshot_id": str(row["id"]),
+                    "state_sha256": str(row["state_sha256"]),
+                }
+                for row in rows
+            ]
+            event = self._append_event_in_tx(
+                conn,
+                branch_id=branch_id,
+                session_id=None,
+                kind="state",
+                role=None,
+                content=f"pruned {len(items)} snapshot blob(s)",
+                origin_channel="internal",
+                origin_adapter="snapshot_pruner",
+                payload={"operation": "snapshots_pruned", "snapshots": items},
+                files=(),
+            )
+            for item in items:
+                conn.execute(
+                    "INSERT INTO snapshot_prunings(id,snapshot_id,state_sha256,"
+                    "source_event_id,created_at) VALUES(?,?,?,?,?)",
+                    (
+                        f"spr_{uuid.uuid4().hex}",
+                        item["snapshot_id"],
+                        item["state_sha256"],
+                        event.id,
+                        _now(),
+                    ),
+                )
+                conn.execute(
+                    "UPDATE snapshots SET state_blob=NULL WHERE id=?",
+                    (item["snapshot_id"],),
+                )
+        return {"event_id": event.id, "pruned": items}
     @staticmethod
     def _tool_view_from_row(row: sqlite3.Row) -> ToolOutputView:
         return ToolOutputView(
@@ -3625,7 +3917,7 @@ class MemoryStore:
                 "extraction_candidates", "extraction_rejections",
                 "candidate_transitions", "candidate_memory_links",
                 "memory_records", "policy_ledger", "security_findings",
-                "finding_transitions", "usage_samples",
+                "finding_transitions", "usage_samples", "snapshot_prunings",
             ),
             "raw_extractor_payloads": ("extraction_raw_responses",),
             "rebuildable_projections": (

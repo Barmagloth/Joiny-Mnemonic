@@ -47,18 +47,28 @@ locking; `synchronous=FULL` сохраняется в обоих режимах.
 
 ## Snapshots
 
-Snapshot содержит:
+Every new snapshot is a full `full-zlib-v1` derived view. The canonically serialized state uses
+sorted keys and fixed separators, is hashed with SHA-256, and is stored as a stdlib zlib-compressed
+BLOB. `replay_code_version` identifies the deterministic materializer version. Parent snapshot ID,
+branch ID and cursor still preserve lineage; Git HEAD and tracked-file hashes preserve staleness
+checks.
 
-- recursive JSON-patch delta относительно parent snapshot; изменение одной memory не сохраняет
-  заново весь словарь memories/index;
-- cursor последнего видимого canonical event;
-- parent ID и branch ID;
-- Git HEAD;
-- SHA-256 выбранных или Git-tracked файлов.
+Every materialization verifies `state_sha256`. A mismatch fails closed and creates one sticky
+`snapshot_state_hash_mismatch` integrity finding through the same event/finding pipeline as witness
+incidents. Existing `json-patch-v2` and `incremental-v1` chains remain readable: they are
+materialized in memory and never rewritten into the new format.
 
-Восстановление materialize-ит цепочку delta и применяет canonical tail после cursor. Перед
-resume текущий fingerprint сравнивается с сохранённым; изменения Git HEAD, root или файлов
-возвращаются как `stale_reasons`.
+Automatic cadence is based on the canonical replay tail size, with four bytes per configured
+snapshot-threshold token, and uses the governor's existing event interval and idempotent receipts.
+Explicit task/lifecycle/manual checkpoints may still force a snapshot because they define a
+semantic boundary rather than periodic cadence.
+
+Snapshot state blobs are class-3 derived views and may be pruned; snapshot rows, `state_sha256`,
+lineage and pruning audit records are permanent. Pruning first appends one canonical
+`snapshots_pruned` event listing every snapshot ID and hash, then removes only the compressed blob
+through a trigger-guarded path. Blobs referenced by any prompt exposure or by the current version
+of an active/blocked task are never prunable. Legacy delta blobs are retained because descendants
+
 
 ## Retrieval
 
@@ -224,7 +234,7 @@ and opens `<root>/.joiny-mnemonic/memory.db`, preserving project isolation. Exis
 the new cumulative total, so reads remain constant-time as a session grows. It counts
 raw `UserPromptSubmit` and `PostToolUse` payloads before tool-output reduction; receipt uniqueness
 makes retries idempotent. The governor uses `max(provider_context, hook_cumulative)` and falls back
-to raw canonical events, never compact views. Crossing the per-agent snapshot threshold emits one
+to raw canonical events, never compact views. Crossing the per-agent context threshold and
 audited `context_checkpoint` and returns the same checkpoint for a retry of the crossing delivery.
 A handoff recommendation is not emitted until the separate handoff threshold.
 
@@ -241,7 +251,8 @@ Joiny-Mnemonic separates three architectural data classes:
    reconstructed exactly by rerunning a model. Cleanup must never treat it as a cache.
 3. **Derived views** are disposable projections rebuildable from canonical events and the
    interpretation ledger. They include FTS/semantic indexes, graph projections, current
-   candidate status, backlog status and resume ranking.
+   candidate status, backlog status, resume ranking and compressed snapshot state blobs. Snapshot
+   hashes, lineage and pruning events remain permanent audit metadata even when a blob is pruned.
 
 A successful extraction transaction writes the completed attempt, candidate rows, initial
 transitions, candidate-memory links and auto memory together. The canonical event is already
