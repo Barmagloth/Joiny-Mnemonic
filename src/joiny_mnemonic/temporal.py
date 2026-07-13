@@ -378,3 +378,154 @@ def normalize_interval(
 def now_envelope(now: datetime) -> Envelope:
     now = _require_aware(now, "naive_now")
     return Envelope(now, now, True)
+
+
+# --- Query-window parsing (task5.md B1) --------------------------------------
+#
+# Rule-based resolution of temporal cues in retrieval queries to a half-open
+# [start, end) window. Recipe and the fuzzy-window constants follow Hindsight
+# (arXiv 2512.12818 §4.2.2 / vectorize-io/hindsight temporal_periods.py,
+# Apache-2.0): their measurement is that the heuristic path covers the large
+# majority of real queries; we ship no model fallback.
+
+
+@dataclass(frozen=True, slots=True)
+class QueryWindow:
+    start: datetime
+    end: datetime  # half-open
+    expression: str
+
+    @property
+    def interval(self) -> Interval:
+        return Interval(
+            Envelope(self.start, self.start, True), Envelope(self.end, self.end, True)
+        )
+
+    @property
+    def midpoint(self) -> datetime:
+        return self.start + (self.end - self.start) / 2
+
+
+_MONTH_NAMES = {
+    # EN full + trigram; RU nominative + genitive stems.
+    "january": 1, "jan": 1, "январ": 1,
+    "february": 2, "feb": 2, "феврал": 2,
+    "march": 3, "mar": 3, "март": 3,
+    "april": 4, "apr": 4, "апрел": 4,
+    "may": 5, "ма": 5,
+    "june": 6, "jun": 6, "июн": 6,
+    "july": 7, "jul": 7, "июл": 7,
+    "august": 8, "aug": 8, "август": 8,
+    "september": 9, "sep": 9, "сентябр": 9,
+    "october": 10, "oct": 10, "октябр": 10,
+    "november": 11, "nov": 11, "ноябр": 11,
+    "december": 12, "dec": 12, "декабр": 12,
+}
+
+# Fuzzy relative windows, [days_back_start, days_back_end) — Hindsight's
+# shipped vagueness constants.
+_FUZZY_WINDOWS: tuple[tuple[re.Pattern[str], int, int], ...] = (
+    (re.compile(r"\b(a couple of days ago|пару дней назад)\b", re.I), 3, 1),
+    (re.compile(r"\b(a few days ago|несколько дней назад)\b", re.I), 5, 2),
+    (re.compile(r"\b(a couple of weeks ago|пару недель назад)\b", re.I), 21, 7),
+    (re.compile(r"\b(a few weeks ago|несколько недель назад)\b", re.I), 35, 14),
+    (re.compile(r"\b(a few months ago|несколько месяцев назад)\b", re.I), 150, 60),
+)
+
+_SIMPLE_DAYS = {
+    "today": 0, "сегодня": 0,
+    "yesterday": -1, "вчера": -1,
+    "tomorrow": 1, "завтра": 1,
+}
+
+_LAST_PERIOD = re.compile(
+    r"\b(last week|на прошлой неделе|прошлую неделю"
+    r"|last month|в прошлом месяце|прошлый месяц"
+    r"|last year|в прошлом году|прошлый год)\b",
+    re.IGNORECASE,
+)
+
+_MONTH_TOKEN = re.compile(r"\b([A-Za-zА-Яа-яЁё]{3,9})\.?(?:\s+(\d{4}))?\b")
+_EXPLICIT_DAY = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+
+
+def _day_window(day: datetime, days: int = 1) -> tuple[datetime, datetime]:
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start, start + timedelta(days=days)
+
+
+def _month_lookup(token: str) -> int | None:
+    lowered = token.casefold()
+    if lowered in _MONTH_NAMES:
+        return _MONTH_NAMES[lowered]
+    # Prefix matching serves Cyrillic declensions only (июня, июне, марте);
+    # Latin prefixes are too greedy ("decisions" must not become December).
+    for stem, number in _MONTH_NAMES.items():
+        if re.search(r"[а-яё]", stem) and lowered.startswith(stem):
+            return number
+    return None
+
+
+def parse_query_window(text: str, *, now: datetime) -> QueryWindow | None:
+    """Resolve the first temporal cue in a retrieval query, or None.
+
+    Deterministic and intentionally conservative: no cue means the temporal
+    retrieval arm stays inactive rather than guessing.
+    """
+    if not text:
+        return None
+    now = _require_aware(now, "naive_now")
+    lowered = text.casefold()
+
+    match = _EXPLICIT_DAY.search(text)
+    if match:
+        day = datetime(
+            int(match.group(1)), int(match.group(2)), int(match.group(3)),
+            tzinfo=now.tzinfo,
+        )
+        start, end = _day_window(day)
+        return QueryWindow(start, end, match.group(0))
+
+    for pattern, back_start, back_end in _FUZZY_WINDOWS:
+        found = pattern.search(text)
+        if found:
+            return QueryWindow(
+                *_day_window(now - timedelta(days=back_start), back_start - back_end),
+                found.group(0),
+            )
+
+    for word, offset in _SIMPLE_DAYS.items():
+        if re.search(rf"\b{word}\b", lowered):
+            start, end = _day_window(now + timedelta(days=offset))
+            return QueryWindow(start, end, word)
+
+    period = _LAST_PERIOD.search(text)
+    if period:
+        token = period.group(0).casefold()
+        anchor = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if "week" in token or "недел" in token:
+            this_monday = anchor - timedelta(days=anchor.weekday())
+            return QueryWindow(this_monday - timedelta(days=7), this_monday, period.group(0))
+        if "month" in token or "месяц" in token:
+            first = anchor.replace(day=1)
+            return QueryWindow(_month_add(first, -1), first, period.group(0))
+        first_jan = anchor.replace(month=1, day=1)
+        return QueryWindow(first_jan.replace(year=first_jan.year - 1), first_jan, period.group(0))
+
+    for token_match in _MONTH_TOKEN.finditer(text):
+        month = _month_lookup(token_match.group(1))
+        if month is None:
+            continue
+        year_text = token_match.group(2)
+        if token_match.group(1).casefold() in {"may", "mar", "jan"} and not year_text:
+            # Bare English homographs are months only with an explicit year.
+            continue
+        if year_text:
+            year = int(year_text)
+        else:
+            # Most recent such month not in the future.
+            year = now.year if month <= now.month else now.year - 1
+        start = datetime(year, month, 1, tzinfo=now.tzinfo)
+        return QueryWindow(start, _month_add(start, 1), token_match.group(0))
+
+    return None

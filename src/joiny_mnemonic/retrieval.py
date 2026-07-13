@@ -143,6 +143,160 @@ class RetrievalEngine:
             metadata={"seq": event.seq, "role": event.role, "payload": event.payload},
         )
 
+    # --- temporal arm and fusion (task5.md B1-B3; recipe constants from
+    # Hindsight, arXiv 2512.12818 / vectorize-io, Apache-2.0) ---------------
+
+    _TEMPORAL_POOL = 60
+    _TEMPORAL_KEEP = 10
+    _TEMPORAL_BUCKETS = 8
+    _RRF_K = 60
+
+    def _temporal_arm(
+        self, context: RetrievalContext, window: temporal.QueryWindow
+    ) -> list[RetrievalHit]:
+        """Candidates whose validity/admission intersects the query window,
+        proximity-scored and coverage-selected across time buckets."""
+        scored: list[tuple[int, float, datetime, RetrievalHit]] = []
+
+        def consider(hit: RetrievalHit, interval: temporal.Interval,
+                     anchor: datetime | None) -> None:
+            overlap = temporal.overlaps(interval, window.interval)
+            if overlap is temporal.Truth.FALSE:
+                return
+            definite = 0 if overlap is temporal.Truth.TRUE else 1
+            if anchor is None:
+                proximity, midpoint = 0.5, window.midpoint
+            else:
+                half = max((window.end - window.start).total_seconds() / 2, 1.0)
+                distance = abs((anchor - window.midpoint).total_seconds())
+                proximity = max(0.0, 1.0 - min(distance / half, 1.0))
+                midpoint = anchor
+            metadata = dict(hit.metadata)
+            metadata["temporal_arm"] = {
+                "window": window.expression,
+                "match": "definite" if definite == 0 else "possible",
+                "proximity": round(proximity, 4),
+            }
+            scored.append(
+                (definite, proximity, midpoint,
+                 replace(hit, score=proximity, metadata=metadata))
+            )
+
+        for record in self.store.list_memories(
+            branch_id=context.branch_id,
+            memory_types=context.memory_types,
+            file=context.file,
+        ):
+            interval = temporal.interval_from_fields(
+                record.valid_from, record.valid_from_precision,
+                record.valid_to, record.valid_to_precision,
+            )
+            anchor: datetime | None
+            if interval.start.known or interval.end.known:
+                anchor = interval.start.lo or interval.end.lo
+            else:
+                # No valid-time assertion: fall back to admission time as a
+                # point interval (documented simplification, task5.md B1).
+                admitted = datetime.fromisoformat(record.created_at)
+                interval = temporal.Interval(
+                    temporal.Envelope(admitted, admitted, True),
+                    temporal.Envelope(admitted, admitted, True),
+                )
+                anchor = admitted
+            consider(self._memory_hit(record, context), interval, anchor)
+
+        if context.include_events:
+            for event in self.store.query_events(branch_id=context.branch_id):
+                if event.kind not in ("message", "tool_output"):
+                    continue
+                admitted = datetime.fromisoformat(event.created_at)
+                if not (window.start <= admitted < window.end):
+                    continue
+                point = temporal.Envelope(admitted, admitted, True)
+                consider(
+                    self._event_hit(event, context),
+                    temporal.Interval(point, point),
+                    admitted,
+                )
+
+        scored.sort(key=lambda item: (item[0], -item[1]))
+        pool = scored[: self._TEMPORAL_POOL]
+        span = max((window.end - window.start).total_seconds(), 1.0)
+        buckets: dict[int, list[tuple[int, float, datetime, RetrievalHit]]] = {}
+        for item in pool:
+            index = min(
+                int(((item[2] - window.start).total_seconds() / span)
+                    * self._TEMPORAL_BUCKETS),
+                self._TEMPORAL_BUCKETS - 1,
+            )
+            buckets.setdefault(max(index, 0), []).append(item)
+        selected: list[RetrievalHit] = []
+        while len(selected) < self._TEMPORAL_KEEP and any(buckets.values()):
+            for index in sorted(buckets):
+                if buckets[index] and len(selected) < self._TEMPORAL_KEEP:
+                    selected.append(buckets[index].pop(0)[3])
+        return selected
+
+    @staticmethod
+    def _rrf_fuse(
+        arms: dict[str, list[RetrievalHit]], k: int
+    ) -> list[RetrievalHit]:
+        fused: dict[tuple[str, str], RetrievalHit] = {}
+        scores: dict[tuple[str, str], float] = {}
+        ranks: dict[tuple[str, str], dict[str, int]] = {}
+        extra_metadata: dict[tuple[str, str], dict[str, Any]] = {}
+        for arm, hits in arms.items():
+            for rank, hit in enumerate(hits, 1):
+                key = (hit.source_kind, hit.id)
+                scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+                ranks.setdefault(key, {})[arm] = rank
+                if key not in fused:
+                    fused[key] = hit
+                else:
+                    # A later arm's copy may carry arm-specific annotations
+                    # (e.g. temporal_arm); keep them without overwriting.
+                    for meta_key, meta_value in hit.metadata.items():
+                        if meta_key not in fused[key].metadata:
+                            extra_metadata.setdefault(key, {})[meta_key] = meta_value
+        result = []
+        for key, hit in fused.items():
+            metadata = dict(hit.metadata)
+            metadata.update(extra_metadata.get(key, {}))
+            metadata["fusion_ranks"] = ranks[key]
+            result.append(replace(hit, score=scores[key], metadata=metadata))
+        return result
+
+    @staticmethod
+    def _apply_boosts(
+        hits: list[RetrievalHit], *, now: datetime
+    ) -> list[RetrievalHit]:
+        """Multiplicative-around-1 secondary signals: nudge, never flip."""
+        boosted = []
+        for hit in hits:
+            effective = hit.metadata.get("temporal", {}).get("valid_from") or hit.created_at
+            try:
+                days = max(
+                    0.0, (now - datetime.fromisoformat(effective)).total_seconds() / 86400
+                )
+                recency = max(0.1, 1.0 - days / 365.0)
+            except ValueError:
+                recency = 0.5
+            temporal_signal = hit.metadata.get("temporal_arm", {}).get("proximity", 0.5)
+            support = 0.6 if hit.metadata.get("authority_level") == "confirmed" else 0.5
+            factor = (
+                (1 + 0.2 * (recency - 0.5))
+                * (1 + 0.2 * (temporal_signal - 0.5))
+                * (1 + 0.1 * (support - 0.5))
+            )
+            metadata = dict(hit.metadata)
+            metadata["boost_signals"] = {
+                "recency": round(recency, 4),
+                "temporal": round(temporal_signal, 4),
+                "support": support,
+            }
+            boosted.append(replace(hit, score=hit.score * factor, metadata=metadata))
+        return boosted
+
     def search(self, context: RetrievalContext) -> list[RetrievalHit]:
         if context.limit < 1:
             return []
@@ -256,6 +410,27 @@ class RetrievalEngine:
                     error = f"semantic:{plugin.name}: {exc}"
                     if error not in self.plugins.errors:
                         self.plugins.errors.append(error)
+
+        # Multi-arm fusion (task5.md B2). A second arm exists when the query
+        # carries a temporal cue; the legacy single-arm path stays untouched
+        # so existing callers keep byte-identical ordering.
+        window = (
+            temporal.parse_query_window(context.query, now=datetime.now(UTC))
+            if context.query else None
+        )
+        if window is not None and context.query:
+            temporal_hits = self._temporal_arm(context, window)
+            if temporal_hits:
+                lexical_sorted = sorted(
+                    hits, key=lambda hit: (hit.score, hit.created_at), reverse=True
+                )
+                # v1 arms: "base" is the merged lexical(+semantic) order;
+                # splitting semantic into its own arm is a later refinement.
+                fused = self._rrf_fuse(
+                    {"base": lexical_sorted, "temporal": temporal_hits},
+                    self._RRF_K,
+                )
+                hits = self._apply_boosts(fused, now=datetime.now(UTC))
         deduplicated: dict[tuple[str, str], RetrievalHit] = {}
         for hit in hits:
             key = (hit.source_kind, hit.id)
