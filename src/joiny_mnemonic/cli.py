@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--with-mcp", action="store_true")
     setup.add_argument("--without-hooks", action="store_true")
     setup.add_argument("--skip-plugin-install", action="store_true")
+    setup.add_argument(
+        "--enable-extraction",
+        action="store_true",
+        help="explicitly bootstrap/request the experimental automatic-extraction policy",
+    )
     setup.add_argument("--source-root")
     setup.add_argument(
         "--yes", action="store_true",
@@ -451,10 +456,12 @@ def run(args: argparse.Namespace) -> int:
             )
             with_mcp = bool(args.with_mcp)
             scope = args.scope or "project"
+            enable_extraction = bool(args.enable_extraction)
         else:
             explicit = (
                 args.agent or args.plugin or args.all_plugins or args.without_hooks
-                or args.scope or args.with_mcp or args.skip_plugin_install or args.dry_run
+                or args.scope or args.with_mcp or args.skip_plugin_install
+                or args.enable_extraction or args.dry_run
             )
             if explicit:
                 agents = tuple(args.agent)
@@ -464,8 +471,11 @@ def run(args: argparse.Namespace) -> int:
                 )
                 with_mcp = bool(args.with_mcp)
                 scope = args.scope or "project"
+                enable_extraction = bool(args.enable_extraction)
             elif sys.stdin.isatty():
-                agents, plugins, with_mcp, scope = select_interactively(detections)
+                (
+                    agents, plugins, with_mcp, scope, enable_extraction
+                ) = select_interactively(detections)
             else:
                 raise ValueError(
                     "setup requires --yes or explicit --agent/--plugin options "
@@ -480,6 +490,7 @@ def run(args: argparse.Namespace) -> int:
                 install_hook_adapters=not args.without_hooks,
                 install_mcp=with_mcp,
                 install_plugins=not args.skip_plugin_install,
+                enable_extraction=enable_extraction,
                 source_root=args.source_root,
                 dry_run=args.dry_run,
             )

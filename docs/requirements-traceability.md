@@ -35,7 +35,7 @@
 | Git HEAD/file hashes/staleness | `fingerprint_project`, `compare_fingerprints` | stale snapshot test |
 | Независимое ядро + MCP/CLI/API | `MemoryService`, `mcp.py`, `cli.py`, `api.py` | MCP, stdio и HTTP tests |
 | Claude/Codex/OpenCode/OpenHands capture | `hooks.py` runtime + project installers | four-agent core test, hook idempotency/installer tests |
-| Vendor-neutral guided installation | `installer.py`, project/global config, stable-venv PowerShell/Bash bootstrap | `test_installer` plus clean bootstrap smoke |
+| Vendor-neutral guided installation | passive components, policy-ledger extraction switch, project/global intent config, pinned-source option, stable-venv PowerShell/Bash bootstrap | installer policy/config/portability tests plus clean bootstrap smoke |
 | Complete tool interactions | atomic `append_events_once`, transcript grouping, explicit failure derivation | success-pair, orphan-output and `test_native_failure_capture` tests |
 | Automatic sourced consolidation | `EvidenceConsolidator` explicit markers/candidates including failure/lesson | marker, trust-policy and `test_failure_lesson` tests |
 | Active compaction continuity | extractive summary/index + lifecycle snapshot/reinjection | compaction provenance and session-hook tests |

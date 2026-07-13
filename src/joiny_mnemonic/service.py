@@ -92,18 +92,25 @@ class MemoryService:
                     getattr(selected_extractor, "inference_parameters", {})
                 ),
             )
-        if extractor_enabled is None:
-            configured_environment = os.environ.get("JOINY_MNEMONIC_EXTRACTOR_ENABLED")
-            extractor_enabled = (
-                configured_environment.casefold() in {"1", "true", "yes", "on"}
-                if configured_environment is not None
-                else bool(configured_extractor.get("enabled", False))
+        active_policy = self.store.active_policy()
+        policy_extraction_enabled = bool(
+            active_policy
+            and active_policy["policy"].get("automatic_extraction_enabled", False)
+        )
+        if (
+            extractor_enabled is not None
+            and bool(extractor_enabled) != policy_extraction_enabled
+        ):
+            self.store.close()
+            raise ValueError(
+                "extractor_enabled cannot override active policy; bootstrap or transition "
+                "automatic_extraction_enabled in the policy ledger"
             )
         self.extraction = ExtractionService(
             self,
             selected_extractor,
             extractor_config,
-            enabled=extractor_enabled,
+            enabled=policy_extraction_enabled,
         )
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
@@ -121,6 +128,18 @@ class MemoryService:
         self.tasks = TaskManager(self)
         self.governor = BudgetGovernor(self)
         self.plugin_errors = self.plugins.errors
+
+    def _sync_extraction_policy(self) -> bool:
+        active = self.store.active_policy()
+        enabled = bool(
+            active and active["policy"].get("automatic_extraction_enabled", False)
+        )
+        self.extraction.enabled = bool(
+            enabled
+            and self.extraction.extractor is not None
+            and self.extraction.config is not None
+        )
+        return self.extraction.enabled
 
     def _repository_identity(self) -> str:
         try:
@@ -142,10 +161,12 @@ class MemoryService:
             return ""
         return f"{remote}|{initial[0] if initial else ''}"
 
-    def initialize_project(self) -> dict[str, Any]:
+    def initialize_project(
+        self, *, automatic_extraction_enabled: bool = False
+    ) -> dict[str, Any]:
         policy = {
             "version": 1,
-            "automatic_extraction_enabled": False,
+            "automatic_extraction_enabled": bool(automatic_extraction_enabled),
             "auto_threshold": (
                 self.extraction.config.auto_threshold
                 if self.extraction.config is not None else 0.85
@@ -158,9 +179,10 @@ class MemoryService:
         result = self.store.initialize_project(
             repository_identity=self._repository_identity(),
             canonical_path=str(self.project_root),
-            code_version="0.7.0",
+            code_version="0.8.0",
             policy=policy,
         )
+        self._sync_extraction_policy()
         if result.get("initialized"):
             self._witness_status = self.witness.check_and_update(
                 self.store, allow_first=True
@@ -226,7 +248,7 @@ class MemoryService:
     def request_policy_change(
         self, policy: dict[str, Any], *, branch_id: str = "main"
     ) -> Event:
-        return self.store.append_event(
+        event = self.store.append_event(
             kind="state",
             role=None,
             branch_id=branch_id,
@@ -239,6 +261,8 @@ class MemoryService:
                 ).get("id"),
             },
         )
+        self.checkpoint_witness()
+        return event
     def budget_policy(
         self, *, branch_id: str = "main", agent: str | None = None
     ) -> BudgetPolicy:

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 AGENTS = frozenset({"claude-code", "codex", "opencode", "openhands"})
 PLUGINS = frozenset({"semantic-local", "knowledge-graph", "nuextract-local"})
 
@@ -29,8 +29,10 @@ def project_config_path(project_root: str | Path) -> Path:
 
 def validate_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(value)
-    if int(result.get("version", 0)) != CONFIG_VERSION:
-        raise ValueError(f"unsupported installer configuration version: {result.get('version')}")
+    version = int(result.get("version", 0))
+    if version not in {1, CONFIG_VERSION}:
+        raise ValueError(f"unsupported installer configuration version: {version}")
+    result["version"] = CONFIG_VERSION
     scope = result.get("scope", "default")
     if scope not in {"project", "global", "default"}:
         raise ValueError("configuration scope must be project or global")
@@ -43,15 +45,19 @@ def validate_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
     extractor = result.get("extractor", {})
     if not isinstance(extractor, dict):
         raise ValueError("extractor configuration must be an object")
-    enabled = bool(extractor.get("enabled", False))
+    requested_enabled = bool(
+        extractor.get("requested_enabled", extractor.get("enabled", False))
+    )
     name = extractor.get("name")
-    if enabled and name != "nuextract-local":
-        raise ValueError("enabled extractor must name nuextract-local")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("extractor name must be a non-empty string")
+    if requested_enabled and name is None:
+        raise ValueError("requested extractor activation requires a plugin name")
     result["agents"] = sorted(set(str(item) for item in agents))
     result["plugins"] = sorted(set(str(item) for item in plugins))
     result["extractor"] = {
-        "enabled": enabled,
-        "name": str(name) if name is not None else None,
+        "requested_enabled": requested_enabled,
+        "name": name.strip() if isinstance(name, str) else None,
     }
     return result
 
@@ -101,5 +107,5 @@ def effective_configuration(
         "scope": "default",
         "agents": [],
         "plugins": [],
-        "extractor": {"enabled": False, "name": None},
+        "extractor": {"requested_enabled": False, "name": None},
     }

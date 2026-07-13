@@ -62,8 +62,10 @@ For reproducible/non-interactive provisioning:
     .\install.ps1 -Yes -Scope project -Agent claude-code,codex -Plugin knowledge-graph,nuextract-local -WithMcp
 
 The conservative default selects detected products for hooks, installs no heavy optional
-component, and leaves MCP registration off. Use joiny-mnemonic setup --dry-run --yes to inspect
-a plan. Detailed flags, global scope and Bash examples are in
+component, and leaves MCP registration off. Installing NuExtract is also passive; the separate
+`--enable-extraction` flag writes a fresh TOFU policy or requests a trusted change on an existing
+project. Use `--revision <tag-or-commit>` for a pinned source checkout and
+`joiny-mnemonic setup --dry-run --yes` to inspect a plan. Detailed flags, global scope and Bash examples are in
 [docs/installation.md](docs/installation.md).
 
 ## Install and inspect
@@ -417,13 +419,17 @@ Architecture: [docs/architecture.md](docs/architecture.md). Security:
 ## Optional evidence-bound automatic extraction
 
 Ordinary prose can be interpreted into exact-evidence memory by an optional extractor plugin.
-The feature is off by default and marker-based behavior remains unchanged. Install the separate
-NuExtract plugin, pin its model revision, validate the Russian calibration corpus and the
-complementary English regression corpus, then opt in with
-JOINY_MNEMONIC_EXTRACTOR_ENABLED=1.
+Installing a backend is passive. Runtime enablement is read only from the immutable active policy
+ledger; mutable workspace configuration and environment variables cannot turn it on.
+
+NuExtract remains experimental and automatic enablement gates are not yet satisfied. After pinning
+its model revision and validating both calibration corpora, a user may explicitly pass
+`--enable-extraction` during first project setup. That choice enters the initial TOFU policy. On an
+already initialized project the same flag only appends `policy_change_requested`; extraction stays
+off until a trusted policy transition approves it.
 
 Canonical append only emits a durable, coalescible wakeup; model inference runs in a bounded
-background worker and does not delay the append or hook response. Use joiny-mnemonic
-extraction-status to inspect lag and quarantine. extraction-process remains an explicit
-foreground drain/recovery command, while extraction-reprocess creates runs under a changed
-configuration hash without rewriting old audit history.
+background worker and does not delay the append or hook response. Use `extraction-status` to inspect
+lag and quarantine. `extraction-process` remains an explicit foreground drain/recovery command,
+while `extraction-reprocess` creates runs under a changed configuration hash without rewriting old
+audit history.

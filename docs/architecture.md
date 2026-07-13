@@ -270,6 +270,11 @@ policy boundary transitions reload source_event_id and derive evidence type from
 event instead of trusting a caller string. Migrated pre-provenance events are
 legacy_untrusted and retain their historical hash format.
 
+Automatic extraction has one runtime authority: `automatic_extraction_enabled` in the active
+immutable policy ledger. Installer configuration is mutable intent metadata and may choose an
+installed backend, but it cannot enable writing. Explicit first bootstrap may set the TOFU policy;
+later setup runs append only a policy-change request pending trusted approval.
+
 The interpretation path is:
 
     canonical event -> extraction run -> attempt -> candidate -> transition

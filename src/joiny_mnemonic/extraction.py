@@ -324,7 +324,7 @@ class ExtractionService:
         self.store.register_extractor_config(
             config.canonical_hash, config.descriptor()
         )
-        self.enabled = self.extractor is not None
+        self.service._sync_extraction_policy()
         return self.process_backlog(limit=limit)
 
     def notify(self, *, detached: bool = False) -> bool:
@@ -364,7 +364,6 @@ class ExtractionService:
             "extraction-worker",
         ]
         env = os.environ.copy()
-        env["JOINY_MNEMONIC_EXTRACTOR_ENABLED"] = "1"
         options: dict[str, Any] = {
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,

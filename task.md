@@ -287,6 +287,9 @@ Workspace policy files are untrusted because an agent commonly has write access 
 - Reading a changed workspace policy may create only `policy_change_requested`.
 - Active policy is represented in the durable ledger with its hash, version and activation event;
   it is not silently replaced by rereading the workspace file.
+- `automatic_extraction_enabled` in active policy is the only runtime extraction switch. Installer
+  configuration records backend/intent only; environment, workspace, CLI, HTTP and MCP inputs
+  cannot bypass bootstrap or a trusted policy transition.
 - Activation, rollback or replacement of policy follows the same trust-transition rules as memory
   confirmation.
 - On an empty ledger, the first successful `joiny-mnemonic init` atomically emits

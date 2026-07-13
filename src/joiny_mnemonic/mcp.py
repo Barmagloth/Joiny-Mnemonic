@@ -572,7 +572,7 @@ class MCPServer:
                 {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.7.0"},
+                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.8.0"},
                     "instructions": self._instructions(message.get("params", {})),
                 },
             )

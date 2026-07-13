@@ -76,14 +76,14 @@ class ExtractionTest(unittest.TestCase):
     def service(self, fake: FakeExtractor, *, enabled: bool = True, cfg=None):
         plugins = PluginRegistry(load_installed=False)
         plugins.register_extractor(fake)
-        return MemoryService(
+        service = MemoryService(
             self.database,
             project_root=self.root,
             plugins=plugins,
             extractor_config=cfg or config(),
-            extractor_enabled=enabled,
         )
-
+        service.initialize_project(automatic_extraction_enabled=enabled)
+        return service
     def test_config_hash_covers_versions_and_policy(self) -> None:
         original = config()
         self.assertNotEqual(original.canonical_hash, config(model_version="2").canonical_hash)
@@ -253,6 +253,9 @@ class ExtractionTest(unittest.TestCase):
             records = service.store.list_memories(memory_types=("fact",))
             self.assertEqual([item.content for item in records], ["Явный факт."])
             self.assertEqual(service.extraction.status().pending_events, 1)
+            service.extraction.reprocess(config(model_version="policy-still-off"))
+            self.assertFalse(service.extraction.enabled)
+            self.assertEqual(fake.events, [])
 
     def test_quote_locator_marks_fences_and_blockquotes(self) -> None:
         fence = chr(96) * 3

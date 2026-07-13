@@ -217,6 +217,7 @@ def run_setup(
     install_hook_adapters: bool = True,
     install_mcp: bool = False,
     install_plugins: bool = True,
+    enable_extraction: bool = False,
     source_root: str | Path | None = None,
     dry_run: bool = False,
     python_executable: str | None = None,
@@ -232,6 +233,10 @@ def run_setup(
         raise ValueError("unsupported agent selection")
     if not set(selected_plugins) <= PLUGINS:
         raise ValueError("unsupported plugin selection")
+    if enable_extraction and "nuextract-local" not in selected_plugins:
+        raise ValueError("automatic extraction requires the nuextract-local component")
+    if enable_extraction and scope != "project":
+        raise ValueError("automatic extraction activation requires project scope")
     root = Path(project_root).expanduser().resolve()
     user_home = Path(home).expanduser().resolve() if home is not None else Path.home().resolve()
     python = python_executable or sys.executable
@@ -245,7 +250,8 @@ def run_setup(
         spec = plugin_install_spec(plugin, source_root)
         command = [python, "-m", "pip", "install", spec]
         if dry_run or not install_plugins:
-            plugin_results.append({"plugin": plugin, "status": "planned", "command": command})
+            status = "planned" if dry_run else "externally-managed"
+            plugin_results.append({"plugin": plugin, "status": status, "command": command})
             continue
         completed = runner(command, check=False, capture_output=True, text=True)
         if completed.returncode:
@@ -331,7 +337,7 @@ def run_setup(
         "hooks_enabled": install_hook_adapters,
         "mcp_enabled": install_mcp,
         "extractor": {
-            "enabled": "nuextract-local" in selected_plugins,
+            "requested_enabled": bool(enable_extraction),
             "name": "nuextract-local" if "nuextract-local" in selected_plugins else None,
         },
     }
@@ -346,7 +352,37 @@ def run_setup(
 
             with MemoryService(database, project_root=root) as service:
                 if service.store.project_identity() is None:
-                    service.initialize_project()
+                    service.initialize_project(
+                        automatic_extraction_enabled=enable_extraction
+                    )
+                    if enable_extraction:
+                        notes.append(
+                            "Automatic extraction was enabled in the initial TOFU policy."
+                        )
+                elif enable_extraction:
+                    active = service.store.active_policy()
+                    assert active is not None
+                    if active["policy"].get("automatic_extraction_enabled", False):
+                        notes.append("Automatic extraction is already enabled by active policy.")
+                    else:
+                        requested_policy = dict(active["policy"])
+                        requested_policy["automatic_extraction_enabled"] = True
+                        pending = next(
+                            (
+                                event
+                                for event in service.store.query_events(kinds=("state",))
+                                if event.payload.get("operation")
+                                == "policy_change_requested"
+                                and event.payload.get("policy") == requested_policy
+                                and event.payload.get("active_policy_id") == active["id"]
+                            ),
+                            None,
+                        )
+                        event = pending or service.request_policy_change(requested_policy)
+                        notes.append(
+                            "Automatic extraction remains disabled until trusted policy approval; "
+                            f"request event: {event.id}."
+                        )
 
     return SetupResult(
         scope=scope,
@@ -363,29 +399,112 @@ def run_setup(
     )
 
 
+def _select_indices(
+    prompt: str,
+    *,
+    default: str,
+    maximum: int,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> set[int]:
+    while True:
+        raw = input_fn(prompt).strip() or default
+        if not raw:
+            return set()
+        try:
+            values = {int(value.strip()) for value in raw.split(",") if value.strip()}
+        except ValueError:
+            output_fn("Invalid selection; enter comma-separated numbers.")
+            continue
+        if any(value < 1 or value > maximum for value in values):
+            output_fn(f"Invalid selection; choose numbers from 1 to {maximum}.")
+            continue
+        return values
+
+
+def _ask_yes_no(
+    prompt: str,
+    *,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> bool:
+    while True:
+        value = input_fn(prompt).strip().casefold()
+        if value in {"", "n", "no"}:
+            return False
+        if value in {"y", "yes"}:
+            return True
+        output_fn("Please answer y or n.")
+
+
 def select_interactively(
     detections: Sequence[AgentDetection],
     *,
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
-) -> tuple[tuple[str, ...], tuple[str, ...], bool, str]:
+) -> tuple[tuple[str, ...], tuple[str, ...], bool, str, bool]:
     output_fn("Detected LLM products:")
     for index, item in enumerate(detections, 1):
         marker = "x" if item.detected else " "
-        detail = item.executable or ("configuration found" if item.config_detected else "not detected")
+        detail = item.executable or (
+            "configuration found" if item.config_detected else "not detected"
+        )
         output_fn(f"  {index}. [{marker}] {item.label} - {detail}")
-    defaults = ",".join(str(index) for index, item in enumerate(detections, 1) if item.detected)
-    raw = input_fn(f"Products to configure [{defaults or 'none'}]: ").strip() or defaults
-    indices = {int(value.strip()) for value in raw.split(",") if value.strip()}
-    agents = tuple(item.id for index, item in enumerate(detections, 1) if index in indices)
+    defaults = ",".join(
+        str(index) for index, item in enumerate(detections, 1) if item.detected
+    )
+    indices = _select_indices(
+        f"Products to configure [{defaults or 'none'}]: ",
+        default=defaults,
+        maximum=len(detections),
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
+    agents = tuple(
+        item.id for index, item in enumerate(detections, 1) if index in indices
+    )
 
-    output_fn("Optional components:")
+    output_fn("Optional components (installation only; activation is separate):")
     plugin_ids = tuple(PLUGIN_METADATA)
     for index, identifier in enumerate(plugin_ids, 1):
-        output_fn(f"  {index}. [ ] {PLUGIN_METADATA[identifier][0]}")
-    raw_plugins = input_fn("Components to install [none]: ").strip()
-    plugin_indices = {int(value.strip()) for value in raw_plugins.split(",") if value.strip()}
-    plugins = tuple(identifier for index, identifier in enumerate(plugin_ids, 1) if index in plugin_indices)
-    with_mcp = input_fn("Register MCP servers too? [y/N]: ").strip().casefold() in {"y", "yes"}
-    scope = input_fn("Installation scope project/global [project]: ").strip().casefold() or "project"
-    return agents, plugins, with_mcp, scope
+        suffix = " [experimental]" if identifier == "nuextract-local" else ""
+        output_fn(f"  {index}. [ ] {PLUGIN_METADATA[identifier][0]}{suffix}")
+    plugin_indices = _select_indices(
+        "Components to install [none]: ",
+        default="",
+        maximum=len(plugin_ids),
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
+    plugins = tuple(
+        identifier
+        for index, identifier in enumerate(plugin_ids, 1)
+        if index in plugin_indices
+    )
+    enable_extraction = False
+    if "nuextract-local" in plugins:
+        output_fn(
+            "NuExtract automatic memory writing is experimental; automatic enablement "
+            "eval gates are not yet satisfied."
+        )
+        enable_extraction = _ask_yes_no(
+            "Explicitly enable/request automatic extraction policy? [y/N]: ",
+            input_fn=input_fn,
+            output_fn=output_fn,
+        )
+    with_mcp = _ask_yes_no(
+        "Register MCP servers too? [y/N]: ",
+        input_fn=input_fn,
+        output_fn=output_fn,
+    )
+    while True:
+        scope = input_fn(
+            "Installation scope project/global [project]: "
+        ).strip().casefold() or "project"
+        if scope in {"project", "global"}:
+            break
+        output_fn("Invalid scope; enter project or global.")
+    if enable_extraction and scope != "project":
+        output_fn("Automatic extraction activation requires project scope; request disabled.")
+        enable_extraction = False
+    return agents, plugins, with_mcp, scope, enable_extraction

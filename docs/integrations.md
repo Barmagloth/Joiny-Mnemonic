@@ -225,27 +225,26 @@ delivery does not double-count it.
 
 ## Optional automatic extraction
 
-Automatic extraction is an optional plugin category named joiny_mnemonic.extractor. Core has no
-ML dependency and the kill switch is off by default. The bundled optional NuExtract package is
-under plugins/nuextract-local and imports Transformers/Torch only inside the plugin.
+Automatic extraction is an optional plugin category named `joiny_mnemonic.extractor`. Core has no
+ML dependency. Installing the bundled NuExtract package or naming any third-party extractor in
+setup configuration does not activate memory writing.
 
-Set JOINY_MNEMONIC_EXTRACTOR_ENABLED=1 only after installing a backend and validating its pinned
+The sole runtime switch is `automatic_extraction_enabled` in `active_policy()`. The first project
+bootstrap may set it through explicit TOFU setup intent. Later installer, CLI, HTTP, MCP and tool
+calls are not trusted approval and may only append `policy_change_requested`; a trusted policy
+transition is required before a new process observes enablement. Mutable project/global
+`config.json` stores backend identity and `requested_enabled` for diagnostics only.
+
 Canonical append emits only a durable coalescible wakeup. Persistent MCP/HTTP services use a
-bounded background consumer; one-shot hooks launch a detached worker that claims the same
-expiring database lease. extraction-process is the explicit foreground recovery/drain command.
+bounded background consumer; one-shot hooks launch a detached worker that claims the same expiring
+database lease. `extraction-process` is the explicit foreground recovery/drain command.
 
-All MCP and HTTP append calls are stamped public_api regardless of a claimed role or provenance.
-Only events delivered through an installed host hook are stamped host_hook, so a public
-role=user append cannot confirm a candidate or modify protected blocks.
+All MCP and HTTP append calls are stamped `public_api` regardless of a claimed role or provenance.
+Only events delivered through an installed host hook are stamped `host_hook`, so a public
+`role=user` append cannot confirm a candidate or modify protected blocks. Candidate confirmation,
+rejection or supersession calls append a canonical control event and a requested transition. A
+trusted explicit user marker can confirm an exact normalized type/content match.
 
-configuration. Useful operations are extraction-status, extraction-process, extraction-retry,
-extraction-reprocess and extraction-candidates. HTTP exposes corresponding /v1/extraction
-routes. MCP exposes extraction status/process and provenance-bound candidate requests.
-
-CLI, HTTP, MCP and tool calls are not trusted human approval. Candidate confirmation, rejection
-or supersession calls therefore append a canonical control event and a requested transition.
-A trusted explicit user marker can confirm an exact normalized type/content match.
-
-Capabilities report availability, enablement, backend/hash, pending and failed events, oldest
-backlog age, retries, quarantine age, witness state and security findings. Queue pressure changes
-latency, never canonical capture.
+Capabilities report installation intent separately from policy-backed runtime availability,
+enablement, backend/hash, pending and failed events, oldest backlog age, retries, quarantine age,
+witness state and security findings. Queue pressure changes latency, never canonical capture.

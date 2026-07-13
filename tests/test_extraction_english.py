@@ -76,14 +76,14 @@ class EnglishExtractionTest(unittest.TestCase):
     def service(self, extractor):
         plugins = PluginRegistry(load_installed=False)
         plugins.register_extractor(extractor)
-        return MemoryService(
+        service = MemoryService(
             ":memory:",
             project_root=self.root,
             plugins=plugins,
             extractor_config=self.config,
-            extractor_enabled=True,
         )
-
+        service.initialize_project(automatic_extraction_enabled=True)
+        return service
     def test_ordinary_english_prose_creates_typed_auto_memories(self):
         outputs = [
             [candidate("task", "Restore context in under two seconds.", "restore context in under two seconds")],

@@ -4,6 +4,7 @@ param(
     [string]$InstallRoot = (Join-Path $HOME ".joiny-mnemonic\runtime"),
     [string]$SourceRoot,
     [string]$Repository = "https://github.com/Barmagloth/Joiny-Mnemonic.git",
+    [string]$Revision,
     [string]$Python = "python",
     [ValidateSet("project", "global")]
     [string]$Scope = "project",
@@ -12,6 +13,8 @@ param(
     [switch]$AllPlugins,
     [switch]$WithMcp,
     [switch]$WithoutHooks,
+    [switch]$EnableExtraction,
+    [switch]$SkipPluginInstall,
     [switch]$Yes,
     [switch]$DryRun
 )
@@ -27,8 +30,10 @@ if (-not $SourceRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot "pypr
 if (-not $SourceRoot) {
     $SourceRoot = Join-Path $InstallRoot "source"
     if (Test-Path -LiteralPath (Join-Path $SourceRoot ".git")) {
-        & git -C $SourceRoot pull --ff-only
-        if ($LASTEXITCODE -ne 0) { throw "Failed to update Joiny-Mnemonic source" }
+        if (-not $Revision) {
+            & git -C $SourceRoot pull --ff-only
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update Joiny-Mnemonic source" }
+        }
     } elseif (Test-Path -LiteralPath $SourceRoot) {
         throw "Source path exists but is not a Git checkout: $SourceRoot"
     } else {
@@ -36,6 +41,15 @@ if (-not $SourceRoot) {
         & git clone --depth 1 $Repository $SourceRoot
         if ($LASTEXITCODE -ne 0) { throw "Failed to clone Joiny-Mnemonic" }
     }
+}
+if ($Revision) {
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot ".git"))) {
+        throw "-Revision requires a Git source checkout: $SourceRoot"
+    }
+    & git -C $SourceRoot fetch --depth 1 origin $Revision
+    if ($LASTEXITCODE -ne 0) { throw "Failed to fetch revision: $Revision" }
+    & git -C $SourceRoot checkout --detach FETCH_HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Failed to checkout revision: $Revision" }
 }
 $SourceRoot = [IO.Path]::GetFullPath($SourceRoot)
 if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot "pyproject.toml"))) {
@@ -64,6 +78,8 @@ foreach ($Value in $Plugin) { $SetupArgs += @("--plugin", $Value) }
 if ($AllPlugins) { $SetupArgs += "--all-plugins" }
 if ($WithMcp) { $SetupArgs += "--with-mcp" }
 if ($WithoutHooks) { $SetupArgs += "--without-hooks" }
+if ($EnableExtraction) { $SetupArgs += "--enable-extraction" }
+if ($SkipPluginInstall) { $SetupArgs += "--skip-plugin-install" }
 if ($Yes) { $SetupArgs += "--yes" }
 if ($DryRun) { $SetupArgs += "--dry-run" }
 
