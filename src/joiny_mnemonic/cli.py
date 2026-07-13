@@ -594,13 +594,18 @@ def run(args: argparse.Namespace) -> int:
             database = resolve_runtime_database(args.db, project_root)
         service = MemoryService(database, project_root=project_root)
         try:
-            _print(process_hook(
+            result = process_hook(
                 service,
                 args.agent,
                 value,
                 branch_id=args.branch,
                 token_budget=args.budget,
-            ))
+            )
+            # Hosts validate hook stdout against per-event schemas (Codex
+            # rejected even "{}" shapes for events that expect no payload).
+            # No output is the universal no-op; print only real payloads.
+            if result:
+                _print(result)
         finally:
             service.close()
         return 0

@@ -41,6 +41,41 @@ class IntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
+    def test_codex_postcompact_delivery_produces_no_stdout(self) -> None:
+        """Sixth live-run regression: Codex validates hook stdout against
+        per-event schemas and rejects additionalContext (and even bare JSON)
+        for PostCompact. The delivery must do its capture/compaction work
+        silently; reinjection belongs to SessionStart/UserPromptSubmit."""
+        root = RUNTIME_ROOT / f"codex-postcompact-{uuid.uuid4().hex}"
+        root.mkdir(parents=True)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        base = [
+            sys.executable, "-m", "joiny_mnemonic",
+            "--db", str(root / "memory.db"), "--project-root", str(root),
+        ]
+        for payload, expect_output in (
+            ({"hook_event_name": "UserPromptSubmit", "session_id": "cx",
+              "prompt": "Decision: postcompact stays silent"}, True),
+            ({"hook_event_name": "PostCompact", "session_id": "cx"}, False),
+        ):
+            completed = subprocess.run(
+                [*base, "hook", "--agent", "codex", "--branch", "main",
+                 "--budget", "1500"],
+                input=json.dumps(payload), capture_output=True, text=True,
+                env=env, timeout=60,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            if expect_output:
+                self.assertIn("hookSpecificOutput", completed.stdout)
+            else:
+                self.assertEqual(completed.stdout.strip(), "")
+
     def test_cli_survives_narrow_console_encoding(self) -> None:
         """First-live-run regression: memory content with characters outside
         the console codepage (e.g. "↔") crashed every CLI read command with

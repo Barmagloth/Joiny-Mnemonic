@@ -429,7 +429,12 @@ def process_hook(
             if warning_packet:
                 return _context_output(agent, event_name, warning_packet)
 
-    inject_context = event_name in {"SessionStart", "UserPromptSubmit", "PostCompact"}
+    # PostCompact is capture/compaction work only: Codex validates each
+    # event's stdout against its own schema and rejects additionalContext
+    # there (sixth live-run regression). Reinjection after compaction happens
+    # at the next SessionStart/UserPromptSubmit delivery, which both hosts
+    # demonstrably consume.
+    inject_context = event_name in {"SessionStart", "UserPromptSubmit"}
     if agent == "opencode" and event_name == "PreCompact":
         inject_context = True
     if warning or any(action in decision.actions for action in ("handoff", "handoff_required")):
