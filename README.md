@@ -67,8 +67,10 @@ component, and leaves MCP registration off. Installing NuExtract is also passive
 project. Use `--revision <tag-or-commit>` for a pinned source checkout and
 `joiny-mnemonic setup --dry-run --yes` to inspect a plan. Safe removal uses
 `joiny-mnemonic --project-root . uninstall --scope project`; it removes owned host integrations
-but preserves `.joiny-mnemonic/memory.db` and artifacts. Detailed setup, uninstall, global-scope
-and Bash instructions are in [docs/installation.md](docs/installation.md).
+and preserves `.joiny-mnemonic/memory.db` and artifacts by default. Interactive removal asks before
+data deletion; automation must opt in with `--delete-data`. Retained databases are reopened on the
+next setup and upgraded through backup-first versioned migrations. Detailed setup, uninstall,
+global-scope and Bash instructions are in [docs/installation.md](docs/installation.md).
 
 ## Install and inspect
 
