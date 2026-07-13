@@ -115,7 +115,13 @@ class LocalSemanticRetriever:
 
     @staticmethod
     def _memory_document(record: MemoryRecord) -> dict[str, Any]:
-        text = "\n".join((record.summary, record.content, " ".join(record.files)))
+        # task5.md B4 (Hindsight's measured cheap win, Apache-2.0): a
+        # human-readable date prefix improves temporal awareness of the
+        # embedding; asserted valid time wins over admission time.
+        date = str(getattr(record, "valid_from", None) or record.created_at)[:10]
+        text = "\n".join(
+            (f"[Date: {date}]", record.summary, record.content, " ".join(record.files))
+        )
         return {
             "source_kind": "memory",
             "id": record.id,
@@ -127,7 +133,9 @@ class LocalSemanticRetriever:
             "source_event_ids": record.source_event_ids,
             "created_at": record.created_at,
             "text": text,
-            "fingerprint": _fingerprint(record.id, record.content, record.summary, *record.files),
+            "fingerprint": _fingerprint(
+                record.id, date, record.content, record.summary, *record.files
+            ),
         }
 
     @staticmethod

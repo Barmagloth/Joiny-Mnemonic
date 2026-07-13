@@ -188,6 +188,86 @@ class SQLiteKnowledgeGraph:
         for record in records:
             self.project(record)
 
+    _CAUSAL = {"causes", "caused_by", "enables", "prevents"}
+    _ARM_FANOUT_CAP = 200  # per-entity, Hindsight's shipped default
+
+    def search_arm(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        filters: dict[str, Any] | None = None,
+    ) -> list[RetrievalHit]:
+        """Graph retrieval arm (task5.md B5; scoring recipe from Hindsight,
+        Apache-2.0): convergent evidence accumulates —
+        tanh(0.5*shared_entities) + best link confidence + causal bonus.
+        Hits are keyed by memory_id so RRF merges them with the base arm."""
+        import math
+        import re as _re
+
+        tokens = set(_re.findall(r"`([^`\n]+)`", query))
+        tokens.update(_re.findall(r"[\w.-]{3,}", query, _re.UNICODE))
+        keys = {key for key in (_key(token) for token in tokens) if key}
+        if not keys or limit < 1:
+            return []
+        allowed_ids = set((filters or {}).get("allowed_memory_ids") or ())
+        restrict = filters is not None and "allowed_memory_ids" in filters
+        aggregate: dict[str, dict[str, Any]] = {}
+        with self._lock:
+            for key in keys:
+                rows = self._conn.execute(
+                    "SELECT * FROM edges WHERE source_key=? OR target_key=? "
+                    "ORDER BY confidence DESC LIMIT ?",
+                    (key, key, self._ARM_FANOUT_CAP),
+                ).fetchall()
+                for row in rows:
+                    memory_id = row["memory_id"]
+                    if restrict and memory_id not in allowed_ids:
+                        continue
+                    entry = aggregate.setdefault(
+                        memory_id,
+                        {"keys": set(), "confidence": 0.0, "causal": 0.0, "row": row},
+                    )
+                    entry["keys"].add(key)
+                    entry["confidence"] = max(
+                        entry["confidence"], float(row["confidence"])
+                    )
+                    if row["relation"] in self._CAUSAL:
+                        entry["causal"] = max(
+                            entry["causal"], float(row["confidence"]) + 1.0
+                        )
+        hits: list[RetrievalHit] = []
+        for memory_id, entry in aggregate.items():
+            row = entry["row"]
+            score = (
+                math.tanh(0.5 * len(entry["keys"]))
+                + entry["confidence"]
+                + entry["causal"]
+            )
+            hits.append(
+                RetrievalHit(
+                    id=memory_id,
+                    source_kind="memory",
+                    memory_type=row["memory_type"],
+                    representation="graph-arm",
+                    content=row["summary"],
+                    score=score,
+                    source_event_ids=tuple(json.loads(row["source_event_ids_json"])),
+                    files=tuple(json.loads(row["files_json"])),
+                    created_at=row["created_at"],
+                    metadata={
+                        "plugin": self.name,
+                        "graph_arm": {
+                            "matched_entities": sorted(entry["keys"]),
+                            "best_confidence": entry["confidence"],
+                            "causal_bonus": entry["causal"],
+                        },
+                    },
+                )
+            )
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        return hits[:limit]
+
     def neighbors(
         self,
         entity: str,

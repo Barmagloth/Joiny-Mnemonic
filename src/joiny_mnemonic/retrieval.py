@@ -420,36 +420,65 @@ class RetrievalEngine:
                     if error not in self.plugins.errors:
                         self.plugins.errors.append(error)
 
-        # Multi-arm fusion (task5.md B2). A second arm exists when the query
-        # carries a temporal cue; the legacy single-arm path stays untouched
-        # so existing callers keep byte-identical ordering.
+        # Multi-arm fusion (task5.md B2/B5). Extra arms exist when the query
+        # carries a temporal cue or the knowledge-graph plugin matches
+        # entities; the legacy single-arm path stays untouched so existing
+        # callers keep byte-identical ordering.
         window = (
             temporal.parse_query_window(context.query, now=datetime.now(UTC))
             if context.query else None
         )
-        if window is not None and context.query:
+        arms: dict[str, list[RetrievalHit]] = {}
+        if context.query and window is not None:
             temporal_hits = self._temporal_arm(context, window)
             if temporal_hits:
-                # Dedup within the base arm first (review finding M1): an
-                # FTS copy and a semantic copy of the same hit must not
-                # double-collect reciprocal rank mass.
-                base_best: dict[tuple[str, str], RetrievalHit] = {}
-                for hit in hits:
-                    key = (hit.source_kind, hit.id)
-                    if key not in base_best or hit.score > base_best[key].score:
-                        base_best[key] = hit
-                lexical_sorted = sorted(
-                    base_best.values(),
-                    key=lambda hit: (hit.score, hit.created_at),
-                    reverse=True,
+                arms["temporal"] = temporal_hits
+        if context.query and self.plugins.knowledge_graph:
+            graph_hits: list[RetrievalHit] = []
+            visible_ids = tuple(
+                record.id
+                for record in self.store.list_memories(
+                    branch_id=context.branch_id,
+                    memory_types=context.memory_types,
+                    since=context.since,
+                    until=context.until,
+                    file=context.file,
                 )
-                # v1 arms: "base" is the merged lexical(+semantic) order;
-                # splitting semantic into its own arm is a later refinement.
-                fused = self._rrf_fuse(
-                    {"base": lexical_sorted, "temporal": temporal_hits},
-                    self._RRF_K,
-                )
-                hits = self._apply_boosts(fused, now=datetime.now(UTC))
+            )
+            for plugin in self.plugins.knowledge_graph.values():
+                arm = getattr(plugin, "search_arm", None)
+                if not callable(arm):
+                    continue
+                try:
+                    graph_hits.extend(
+                        arm(
+                            context.query,
+                            limit=context.limit,
+                            filters={"allowed_memory_ids": visible_ids},
+                        )
+                    )
+                except Exception as exc:
+                    error = f"knowledge_graph:{plugin.name}: {exc}"
+                    if error not in self.plugins.errors:
+                        self.plugins.errors.append(error)
+            if graph_hits:
+                arms["graph"] = graph_hits
+        if arms:
+            # Dedup within the base arm first (review finding M1): an FTS
+            # copy and a semantic copy of the same hit must not
+            # double-collect reciprocal rank mass.
+            base_best: dict[tuple[str, str], RetrievalHit] = {}
+            for hit in hits:
+                key = (hit.source_kind, hit.id)
+                if key not in base_best or hit.score > base_best[key].score:
+                    base_best[key] = hit
+            arms["base"] = sorted(
+                base_best.values(),
+                key=lambda hit: (hit.score, hit.created_at),
+                reverse=True,
+            )
+            fused = self._rrf_fuse(arms, self._RRF_K)
+            hits = self._apply_boosts(fused, now=datetime.now(UTC))
         deduplicated: dict[tuple[str, str], RetrievalHit] = {}
         for hit in hits:
             key = (hit.source_kind, hit.id)

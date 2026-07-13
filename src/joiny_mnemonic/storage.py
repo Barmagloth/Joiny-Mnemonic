@@ -42,6 +42,55 @@ def _hash(value: bytes | str) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+# task5.md B4 (Headroom text_signals, Apache-2.0): humanized dates and file
+# basenames live in a companion FTS column only, so BM25 matches "June 2026"
+# or "июня" without polluting displayed content.
+_EN_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+_RU_MONTHS_GENITIVE = (
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+
+def _date_signals(iso: str | None) -> str:
+    if not iso:
+        return ""
+    try:
+        value = datetime.fromisoformat(iso)
+    except ValueError:
+        return ""
+    return (
+        f"{_EN_MONTHS[value.month - 1]} {value.day} {value.year} "
+        f"{value.day} {_RU_MONTHS_GENITIVE[value.month - 1]} {value.year}"
+    )
+
+
+def _file_signals(files: Sequence[str]) -> str:
+    names = []
+    for item in files:
+        base = str(item).replace("\\", "/").rsplit("/", 1)[-1]
+        if base and base not in names:
+            names.append(base)
+    return " ".join(names)
+
+
+def _event_signals(created_at: str, files: Sequence[str]) -> str:
+    return " ".join(part for part in (_date_signals(created_at), _file_signals(files)) if part)
+
+
+def _memory_signals(
+    valid_from: str | None, valid_to: str | None, files: Sequence[str]
+) -> str:
+    return " ".join(
+        part
+        for part in (_date_signals(valid_from), _date_signals(valid_to), _file_signals(files))
+        if part
+    )
+
+
 def _fts_match_query(value: str) -> str:
     terms = [term for term in re.findall(r"[\w./:-]+", value, re.UNICODE) if term]
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
@@ -658,8 +707,8 @@ BEGIN SELECT RAISE(ABORT, 'consolidation receipts cannot be deleted'); END;
 """
 
 FTS_SCHEMA = """
-CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(event_id UNINDEXED, content);
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, content, summary);
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(event_id UNINDEXED, content, signals);
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, content, summary, signals);
 """
 
 
@@ -912,6 +961,7 @@ class MemoryStore:
             self._initialize_snapshot_schema()
             try:
                 self._conn.executescript(FTS_SCHEMA)
+                self._ensure_fts_signals_schema()
                 self.fts_enabled = True
                 self._ensure_fts_index()
             except sqlite3.OperationalError:
@@ -1002,17 +1052,54 @@ class MemoryStore:
             BEGIN SELECT RAISE(ABORT, 'snapshots are immutable outside audited blob pruning'); END;
             """
         )
+    def _ensure_fts_signals_schema(self) -> None:
+        """Rebuild the derived FTS tables when the signals column is missing.
+
+        FTS tables are rebuildable projections; dropping them is legal and
+        the reindex below restores content plus the new signals column."""
+        try:
+            columns = {
+                row["name"]
+                for row in self._conn.execute(
+                    "SELECT name FROM pragma_table_info('events_fts')"
+                )
+            }
+        except sqlite3.DatabaseError:
+            return
+        if columns and "signals" not in columns:
+            self._conn.execute("DROP TABLE IF EXISTS events_fts")
+            self._conn.execute("DROP TABLE IF EXISTS memories_fts")
+            self._conn.executescript(FTS_SCHEMA)
+
     def _ensure_fts_index(self) -> None:
-        self._conn.execute(
-            "INSERT INTO events_fts(event_id, content) "
-            "SELECT e.id, e.content FROM events e "
+        missing_events = self._conn.execute(
+            "SELECT e.* FROM events e "
             "WHERE NOT EXISTS (SELECT 1 FROM events_fts f WHERE f.event_id=e.id)"
-        )
-        self._conn.execute(
-            "INSERT INTO memories_fts(memory_id, content, summary) "
-            "SELECT m.id, m.content, m.summary FROM memory_records m "
+        ).fetchall()
+        for row in missing_events:
+            files = tuple(json.loads(row["files_json"]))
+            self._conn.execute(
+                "INSERT INTO events_fts(event_id, content, signals) VALUES(?,?,?)",
+                (row["id"], row["content"], _event_signals(row["created_at"], files)),
+            )
+        missing_memories = self._conn.execute(
+            "SELECT m.* FROM memory_records m "
             "WHERE NOT EXISTS (SELECT 1 FROM memories_fts f WHERE f.memory_id=m.id)"
-        )
+        ).fetchall()
+        for row in missing_memories:
+            keys = row.keys()
+            self._conn.execute(
+                "INSERT INTO memories_fts(memory_id, content, summary, signals) "
+                "VALUES(?,?,?,?)",
+                (
+                    row["id"], row["content"], row["summary"],
+                    _memory_signals(
+                        row["valid_from"] if "valid_from" in keys else None,
+                        row["valid_to"] if "valid_to" in keys else None,
+                        tuple(json.loads(row["files_json"])),
+                    ),
+                ),
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -1151,8 +1238,8 @@ class MemoryStore:
         )
         if self.fts_enabled:
             conn.execute(
-                "INSERT INTO events_fts(event_id, content) VALUES(?,?)",
-                (event_id, safe_content),
+                "INSERT INTO events_fts(event_id, content, signals) VALUES(?,?,?)",
+                (event_id, safe_content, _event_signals(created_at, tuple(safe_files_value))),
             )
         return Event(
             seq=int(cursor.lastrowid),
@@ -2010,8 +2097,14 @@ class MemoryStore:
             )
             if self.fts_enabled:
                 conn.execute(
-                    "INSERT INTO memories_fts(memory_id, content, summary) VALUES(?,?,?)",
-                    (record.id, record.content, record.summary),
+                    "INSERT INTO memories_fts(memory_id, content, summary, signals) "
+                    "VALUES(?,?,?,?)",
+                    (
+                        record.id, record.content, record.summary,
+                        _memory_signals(
+                            record.valid_from, record.valid_to, record.files
+                        ),
+                    ),
                 )
         return record
 
@@ -3854,9 +3947,16 @@ class MemoryStore:
                     )
                     if self.fts_enabled:
                         conn.execute(
-                            "INSERT INTO memories_fts(memory_id, content, summary) "
-                            "VALUES(?,?,?)",
-                            (memory_id, candidate.normalized_content, summary),
+                            "INSERT INTO memories_fts(memory_id, content, summary, signals) "
+                            "VALUES(?,?,?,?)",
+                            (
+                                memory_id, candidate.normalized_content, summary,
+                                _memory_signals(
+                                    getattr(candidate, "valid_from", None),
+                                    getattr(candidate, "valid_to", None),
+                                    tuple(event.files),
+                                ),
+                            ),
                         )
                     relation = "derived"
                 conn.execute(

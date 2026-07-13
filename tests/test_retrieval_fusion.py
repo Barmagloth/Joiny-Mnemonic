@@ -54,9 +54,23 @@ class QueryWindowParserTest(unittest.TestCase):
         self.assertEqual(window.start.month, 5)
 
 
+class _EmptyPlugins:
+    """Deterministic no-plugin registry: arm activation must be explicit in
+    tests, not a function of what happens to be pip-installed."""
+
+    def __init__(self) -> None:
+        self.semantic: dict = {}
+        self.knowledge_graph: dict = {}
+        self.extractors: dict = {}
+        self.kv_tiers: dict = {}
+        self.errors: list[str] = []
+
+
 class FusionTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.service = MemoryService(":memory:", project_root=RUNTIME_ROOT)
+        self.service = MemoryService(
+            ":memory:", project_root=RUNTIME_ROOT, plugins=_EmptyPlugins()
+        )
         self.store = self.service.store
 
     def tearDown(self) -> None:
@@ -150,6 +164,35 @@ class FusionTest(unittest.TestCase):
         target = next(hit for hit in hits if hit.id == record.id)
         self.assertNotIn("fusion_ranks", target.metadata)
         self.assertNotIn("boost_signals", target.metadata)
+
+    def test_graph_arm_fuses_when_plugin_matches_entities(self) -> None:
+        class FakeGraphPlugin:
+            name = "fake-graph"
+
+            def search_arm(self, query, *, limit=20, filters=None):
+                from joiny_mnemonic.models import RetrievalHit
+
+                allowed = (filters or {}).get("allowed_memory_ids") or ()
+                if not allowed or "yaml" not in query.casefold():
+                    return []
+                return [
+                    RetrievalHit(
+                        id=allowed[0], source_kind="memory", memory_type="fact",
+                        representation="graph-arm", content="graph summary",
+                        score=1.4, source_event_ids=(), files=(),
+                        created_at="2026-07-01T00:00:00+00:00",
+                        metadata={"graph_arm": {"matched_entities": ["yaml"]}},
+                    )
+                ]
+
+        record = self._fact("конфиги GPTShared храним в YAML")
+        self.service.plugins.knowledge_graph = {"fake": FakeGraphPlugin()}
+        hits = self.service.search(query="YAML", include_events=False, limit=5)
+        target = next(hit for hit in hits if hit.id == record.id)
+        self.assertIn("graph", target.metadata["fusion_ranks"])
+        self.assertIn("base", target.metadata["fusion_ranks"])
+        # Arm-specific annotation survives the merge.
+        self.assertIn("graph_arm", target.metadata)
 
 
 if __name__ == "__main__":
