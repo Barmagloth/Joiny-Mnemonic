@@ -177,3 +177,26 @@ The English corpus is exercised by deterministic unit and integration tests as w
 precision/recall/F1 evaluator used for the Russian corpus. It is a cross-language regression
 suite, not a replacement for the primarily Russian calibration baseline required before automatic
 enablement.
+
+## LongMemEval harness
+
+`joiny-mnemonic-longmemeval` runs LongMemEval-S against this system's ingestion and retrieval.
+The core stays LLM-free: one external runner command handles both answer generation and
+judging over stdin/stdout JSON (`{"mode": "answer"|"judge", ...}` -> `{"output": ...}`). Judge
+prompts are reproduced verbatim from arXiv 2512.12818 Appendix A.4, which follows the original
+LongMemEval judging setup; the metric is per-type binary accuracy.
+
+    joiny-mnemonic-longmemeval longmemeval_s.json \
+      --runner-command '["python","my_llm_runner.py"]' \
+      --budget 4096 --output-dir benchmarks/results
+
+Each question gets a fresh in-memory store; sessions ingest as dated message events (the date
+is prefixed into the text because admission time is the harness run time); context is packed
+greedily from `search` hits under the token budget. Reports land in
+`benchmarks/results/longmemeval-latest.json` (per-type and overall accuracy, config, dataset
+hash) plus a per-question JSONL.
+
+Honesty note: the harness ships tested against a deterministic stub runner; a real accuracy
+figure requires the published LongMemEval-S dataset and a real LLM runner. Until such a run is
+recorded in `benchmarks/results/`, retrieval-quality comparisons with benchmark-published
+systems remain qualitative and must say so.

@@ -17,6 +17,7 @@ benchmark = ["tiktoken>=0.7"]
 [project.scripts]
 joiny-mnemonic = "joiny_mnemonic.cli:main"
 joiny-mnemonic-benchmark = "joiny_mnemonic.benchmark_cli:main"
+joiny-mnemonic-longmemeval = "joiny_mnemonic.longmemeval:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
