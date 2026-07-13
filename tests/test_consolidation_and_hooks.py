@@ -204,7 +204,28 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         claude = json.loads(claude_settings.read_text(encoding="utf-8"))
         self.assertEqual(claude["hooks"]["Stop"][0]["hooks"][0]["command"], "existing")
         self.assertNotIn("llm_memory", json.dumps(claude))
-        self.assertIn("PostCompact", claude["hooks"])
+        # Claude Code rejects the entire settings file over one unknown hook
+        # event key; PostCompact must never be written for claude-code and a
+        # reinstall must purge our own stale PostCompact entries while
+        # preserving foreign ones under the same key.
+        self.assertNotIn("PostCompact", claude["hooks"])
+        claude["hooks"]["PostCompact"] = [
+            {"hooks": [
+                {"type": "command", "command": "python -m joiny_mnemonic --db x hook --agent claude-code"},
+                {"type": "command", "command": "foreign-postcompact"},
+            ]}
+        ]
+        claude_settings.write_text(json.dumps(claude), encoding="utf-8")
+        install_hooks("claude-code", root)
+        purged = json.loads(claude_settings.read_text(encoding="utf-8"))
+        remaining = [
+            hook["command"]
+            for entry in purged["hooks"].get("PostCompact", [])
+            for hook in entry.get("hooks", [])
+        ]
+        self.assertEqual(remaining, ["foreign-postcompact"])
+        codex_after = json.loads((root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
+        self.assertIn("PostCompact", codex_after["hooks"])
         codex = json.loads((root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
         self.assertIn("UserPromptSubmit", codex["hooks"])
         # Regression (first live run): hosts execute hook commands through a

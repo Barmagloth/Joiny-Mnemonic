@@ -787,43 +787,45 @@ _OWN_HOOK_COMMAND = re.compile(
 )
 
 
-def _upsert_hook_command(
-    groups: list[Any], command: str, *, typed: bool
-) -> bool:
-    """Replace every previously generated command and avoid duplicate delivery.
+def _is_own_handler(handler: Any) -> bool:
+    return (
+        isinstance(handler, dict)
+        and isinstance(handler.get("command"), str)
+        and bool(_OWN_HOOK_COMMAND.search(handler["command"]))
+    )
 
-    Own entries are recognized by the ``-m joiny_mnemonic``/``-m llm_memory``
-    signature, never by exact string equality: an upgraded installer renders a
-    different command line, and exact matching appended the new hook next to
-    the stale broken one (first live-run regression), so every event fired one
-    working and one dead hook.
+
+def _strip_own_handlers(container: dict[str, Any]) -> None:
+    """Remove every own handler under every event key.
+
+    Installation is a reconciliation, not an additive merge: the invariant is
+    "after install, own entries equal exactly the desired set". Additive
+    merging accumulated one special case per field regression — exact-match
+    dedup appended a working hook next to a stale broken one, and a renamed
+    or host-invalid event (PostCompact, which makes Claude Code skip the
+    whole settings file) needed a tombstone list. Stripping first makes both
+    impossible by construction. Foreign handlers, groups and keys that never
+    contained an own handler are left byte-identical.
     """
-    found = False
-    for group in groups:
-        if not isinstance(group, dict):
+    for event_key in list(container):
+        groups = container[event_key]
+        if not isinstance(groups, list):
             continue
-        handlers = group.get("hooks")
-        if not isinstance(handlers, list):
-            continue
-        kept: list[Any] = []
-        for handler in handlers:
-            existing = handler.get("command") if isinstance(handler, dict) else None
-            if isinstance(existing, str) and _OWN_HOOK_COMMAND.search(existing):
-                if found:
-                    continue  # drop duplicate own handler
-                handler["command"] = command
-                handler["timeout"] = 30
-                if typed:
-                    handler["type"] = "command"
-                found = True
-            kept.append(handler)
-        group["hooks"] = kept
-    groups[:] = [
-        group
-        for group in groups
-        if not (isinstance(group, dict) and group.get("hooks") == [])
-    ]
-    return found
+        changed = False
+        for group in groups:
+            if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+                kept = [item for item in group["hooks"] if not _is_own_handler(item)]
+                if len(kept) != len(group["hooks"]):
+                    group["hooks"] = kept
+                    changed = True
+        if changed:
+            groups[:] = [
+                group
+                for group in groups
+                if not (isinstance(group, dict) and group.get("hooks") == [])
+            ]
+            if not groups:
+                container.pop(event_key)
 
 
 def _merge_command_hooks(
@@ -837,12 +839,11 @@ def _merge_command_hooks(
     hooks = config.setdefault("hooks", {}) if nested else config
     if not isinstance(hooks, dict):
         raise ValueError(f"hooks in {path} must be an object")
+    _strip_own_handlers(hooks)
     for event, matcher in events.items():
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise ValueError(f"hook event {event} in {path} must be an array")
-        if _upsert_hook_command(groups, command, typed=True):
-            continue
         handler: dict[str, Any] = {"type": "command", "command": command, "timeout": 30}
         group: dict[str, Any] = {"hooks": [handler]}
         if matcher is not None:
@@ -853,6 +854,7 @@ def _merge_command_hooks(
 
 def _merge_openhands(path: Path, command: str) -> Path | None:
     config = _read_json(path)
+    _strip_own_handlers(config)
     for event, matcher in {
         "session_start": "*",
         "user_prompt_submit": None,
@@ -861,8 +863,8 @@ def _merge_openhands(path: Path, command: str) -> Path | None:
         "session_end": "*",
     }.items():
         groups = config.setdefault(event, [])
-        if _upsert_hook_command(groups, command, typed=False):
-            continue
+        if not isinstance(groups, list):
+            raise ValueError(f"hook event {event} in {path} must be an array")
         handler = {"command": command, "timeout": 30}
         group: dict[str, Any] = {"hooks": [handler]}
         if matcher is not None:
@@ -1119,11 +1121,21 @@ def install_hooks(
     }
     backup_path: Path | None = None
     if agent == "claude-code":
+        # Claude Code has no PostCompact hook event, and its settings
+        # validator skips the whole file over one unknown key (fifth
+        # live-run regression). Post-compaction reinjection is already
+        # covered by the SessionStart "compact" matcher; reconciliation
+        # purges any stale own PostCompact entry automatically.
+        claude_events = {
+            event: matcher
+            for event, matcher in lifecycle_events.items()
+            if event != "PostCompact"
+        }
         backup_path = _merge_command_hooks(
             path,
             command,
             {
-                **lifecycle_events,
+                **claude_events,
                 "PreToolUse": "*",
                 "PostToolUseFailure": "*",
             },

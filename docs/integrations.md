@@ -52,7 +52,7 @@ failure restores the original bytes.
 | Host | Generated file | Capture | Resume injection | Compaction continuity |
 |---|---|---|---|---|
 | Codex | `.codex/hooks.json` | User prompt, successful tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit` | `PreCompact` snapshot/summary, `PostCompact` reinjection |
-| Claude Code | `.claude/settings.json` | User prompt, pre-action check, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit`, `PreToolUse` warnings | `PreCompact` snapshot/summary, `PostCompact` reinjection |
+| Claude Code | `.claude/settings.json` | User prompt, pre-action check, successful/failed tool interaction, assistant stop | `SessionStart`, `UserPromptSubmit`, `PreToolUse` warnings | `PreCompact` snapshot/summary; reinjection via `SessionStart` matcher `compact` (Claude Code has no `PostCompact` event and skips the whole settings file over one unknown key) |
 | OpenCode | `.opencode/plugins/joiny-mnemonic.js` | `chat.message`, `tool.execute.after` | `experimental.chat.system.transform` | `experimental.session.compacting` |
 | OpenHands | `.openhands/hooks.json` | User prompt, successful tool interaction, assistant stop/session events | `SessionStart`, `UserPromptSubmit` | No joiny-mnemonic compaction hook is installed |
 
