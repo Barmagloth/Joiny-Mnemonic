@@ -10,6 +10,7 @@ from typing import Any, Sequence
 
 from .adapters import ADAPTERS, adapter_capabilities, get_adapter
 from .code_index import PythonCodeIndex
+from .configuration import effective_configuration
 from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsolidator
 from .context import ContextWindow, ExactSourceResult, build_context_window
 from .context_limits import ContextLimitConfig
@@ -63,11 +64,18 @@ class MemoryService:
         self.witness = WitnessRegistry(witness_registry_path)
         self._witness_status: dict[str, Any] = {"status": "uninitialized"}
         self.context_limits = ContextLimitConfig(self.project_root)
+        self.installation_config = effective_configuration(self.project_root)
+        installation_config = self.installation_config
         self.plugins = plugins or PluginRegistry(
             context=PluginContext(project_root=self.project_root, database_path=self.store.path)
         )
         selected_extractor = None
-        extractor_name = extractor_name or os.environ.get("JOINY_MNEMONIC_EXTRACTOR_NAME")
+        configured_extractor = installation_config.get("extractor", {})
+        extractor_name = (
+            extractor_name
+            or os.environ.get("JOINY_MNEMONIC_EXTRACTOR_NAME")
+            or configured_extractor.get("name")
+        )
         if extractor_name is not None:
             selected_extractor = self.plugins.extractors.get(extractor_name)
             if selected_extractor is None and self.plugins.extractors:
@@ -85,9 +93,12 @@ class MemoryService:
                 ),
             )
         if extractor_enabled is None:
-            extractor_enabled = os.environ.get(
-                "JOINY_MNEMONIC_EXTRACTOR_ENABLED", ""
-            ).casefold() in {"1", "true", "yes", "on"}
+            configured_environment = os.environ.get("JOINY_MNEMONIC_EXTRACTOR_ENABLED")
+            extractor_enabled = (
+                configured_environment.casefold() in {"1", "true", "yes", "on"}
+                if configured_environment is not None
+                else bool(configured_extractor.get("enabled", False))
+            )
         self.extraction = ExtractionService(
             self,
             selected_extractor,
@@ -147,7 +158,7 @@ class MemoryService:
         result = self.store.initialize_project(
             repository_identity=self._repository_identity(),
             canonical_path=str(self.project_root),
-            code_version="0.5.0",
+            code_version="0.6.0",
             policy=policy,
         )
         if result.get("initialized"):
@@ -785,6 +796,7 @@ class MemoryService:
                 "mcp": True,
                 "cli": True,
             },
+            "setup_configuration": self.installation_config,
             "plugin_errors": list(self.plugin_errors),
             "warnings": [],
         }

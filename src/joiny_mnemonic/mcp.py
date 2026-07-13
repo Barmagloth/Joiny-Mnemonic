@@ -558,7 +558,7 @@ class MCPServer:
                 {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.4.0"},
+                    "serverInfo": {"name": "joiny-mnemonic", "version": "0.6.0"},
                     "instructions": self._instructions(message.get("params", {})),
                 },
             )

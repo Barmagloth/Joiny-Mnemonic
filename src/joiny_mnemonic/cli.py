@@ -27,6 +27,7 @@ from .hooks import (
     process_hook,
     resolve_hook_project,
 )
+from .installer import detect_agents, run_setup, select_interactively
 from .mcp import serve_stdio
 from .paths import (
     resolve_project_database,
@@ -116,6 +117,33 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("init", help="initialize the durable store")
+
+    setup = commands.add_parser(
+        "setup", help="detect products and configure hooks, MCP, and optional components"
+    )
+    setup.add_argument(
+        "--agent",
+        action="append",
+        choices=["claude-code", "codex", "opencode", "openhands"],
+        default=[],
+    )
+    setup.add_argument(
+        "--plugin",
+        action="append",
+        choices=["semantic-local", "knowledge-graph", "nuextract-local"],
+        default=[],
+    )
+    setup.add_argument("--all-plugins", action="store_true")
+    setup.add_argument("--scope", choices=["project", "global"])
+    setup.add_argument("--with-mcp", action="store_true")
+    setup.add_argument("--without-hooks", action="store_true")
+    setup.add_argument("--skip-plugin-install", action="store_true")
+    setup.add_argument("--source-root")
+    setup.add_argument(
+        "--yes", action="store_true",
+        help="accept detected products non-interactively",
+    )
+    setup.add_argument("--dry-run", action="store_true")
 
     session = commands.add_parser("session-start")
     session.add_argument("--agent", required=True)
@@ -406,6 +434,53 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> int:
+    if args.command == "setup":
+        project_root = resolve_runtime_project(args.project_root)
+        detections = detect_agents(project_root)
+        if args.yes:
+            agents = tuple(args.agent) or tuple(
+                item.id for item in detections if item.detected
+            )
+            plugins = (
+                ("semantic-local", "knowledge-graph", "nuextract-local")
+                if args.all_plugins else tuple(args.plugin)
+            )
+            with_mcp = bool(args.with_mcp)
+            scope = args.scope or "project"
+        else:
+            explicit = (
+                args.agent or args.plugin or args.all_plugins or args.without_hooks
+                or args.scope or args.with_mcp or args.skip_plugin_install or args.dry_run
+            )
+            if explicit:
+                agents = tuple(args.agent)
+                plugins = (
+                    ("semantic-local", "knowledge-graph", "nuextract-local")
+                    if args.all_plugins else tuple(args.plugin)
+                )
+                with_mcp = bool(args.with_mcp)
+                scope = args.scope or "project"
+            elif sys.stdin.isatty():
+                agents, plugins, with_mcp, scope = select_interactively(detections)
+            else:
+                raise ValueError(
+                    "setup requires --yes or explicit --agent/--plugin options "
+                    "when stdin is not interactive"
+                )
+        _print(
+            run_setup(
+                project_root,
+                agents=agents,
+                plugins=plugins,
+                scope=scope,
+                install_hook_adapters=not args.without_hooks,
+                install_mcp=with_mcp,
+                install_plugins=not args.skip_plugin_install,
+                source_root=args.source_root,
+                dry_run=args.dry_run,
+            )
+        )
+        return 0
     if args.command == "install-hooks":
         _print(
             install_hooks(

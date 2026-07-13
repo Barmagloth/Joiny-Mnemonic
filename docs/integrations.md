@@ -10,6 +10,18 @@ For `PostToolUse`, the call and output are written in one SQLite transaction. Cl
 registers `PreToolUse`: it records one idempotent state delivery and injects a bounded,
 warning-only precheck packet. The packet never heuristically denies the tool call.
 
+## Unified setup
+
+joiny-mnemonic setup is the orchestration layer above the individual adapters. It detects host
+products, installs selected optional Python packages, calls the existing idempotent hook
+installers, optionally registers MCP, writes .joiny-mnemonic/config.json, and initializes the
+project database once. The PowerShell and Bash bootstrap scripts only provision a stable venv and
+delegate to this command.
+
+The core selection vocabulary is independent of host brands: repeated --agent and --plugin
+arguments describe capabilities, while each adapter owns its host-specific files or CLI call.
+--dry-run performs no host/config/database writes. See [installation.md](installation.md).
+
 ## Prerequisite
 
 Install `joiny-mnemonic` into a Python interpreter visible to the agent:

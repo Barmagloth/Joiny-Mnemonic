@@ -32,7 +32,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
 | Evaluation | Evidence-presence diagnostic and a separate external task-runner protocol for real outcome scoring |
 | Interfaces | Python, CLI, local HTTP and MCP stdio share one `MemoryService` |
-| Optional plugins | Persistent local semantic index and provenance-backed SQLite entity graph; both are rebuildable derived views |
+| Optional plugins | Semantic index, knowledge graph and opt-in local NuExtract backend; all remain outside the dependency-free core |
 
 Explicit limits:
 
@@ -44,6 +44,27 @@ Explicit limits:
 - The physical-memory governor selects among supplied candidates; it is not a KV compressor.
 - Production readiness still requires host-level integration tests for the exact agent versions
   and a project-specific external task runner.
+
+## Recommended guided installer
+
+The cross-platform installer creates a stable runtime and then runs one vendor-neutral setup
+wizard. It detects Claude Code, Codex, OpenCode and OpenHands, lets you select the products to
+configure, and offers Semantic, Knowledge Graph, NuExtract and MCP as independent choices.
+
+    git clone https://github.com/Barmagloth/Joiny-Mnemonic.git
+    cd Joiny-Mnemonic
+    .\install.ps1
+
+On Bash, use ./install.sh instead of .\install.ps1.
+
+For reproducible/non-interactive provisioning:
+
+    .\install.ps1 -Yes -Scope project -Agent claude-code,codex -Plugin knowledge-graph,nuextract-local -WithMcp
+
+The conservative default selects detected products for hooks, installs no heavy optional
+component, and leaves MCP registration off. Use joiny-mnemonic setup --dry-run --yes to inspect
+a plan. Detailed flags, global scope and Bash examples are in
+[docs/installation.md](docs/installation.md).
 
 ## Install and inspect
 
