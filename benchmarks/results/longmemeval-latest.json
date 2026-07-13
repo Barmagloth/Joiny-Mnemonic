@@ -1,0 +1,27 @@
+{
+  "benchmark": "LongMemEval-S",
+  "harness": "joiny-mnemonic-longmemeval",
+  "judge_prompts": "arXiv 2512.12818 Appendix A.4 (verbatim)",
+  "config": {
+    "context_budget_tokens": 4096,
+    "retrieval_limit": 24,
+    "runner_command": [
+      "python",
+      "benchmarks/runner_claude_code.py"
+    ]
+  },
+  "per_type": {
+    "single-session-user": {
+      "total": 2,
+      "correct": 2,
+      "accuracy": 1.0
+    }
+  },
+  "overall": {
+    "total": 2,
+    "correct": 2,
+    "accuracy": 1.0
+  },
+  "unparseable_judgments": 0,
+  "dataset_sha256_16": "d6f21ea9d60a0d56"
+}

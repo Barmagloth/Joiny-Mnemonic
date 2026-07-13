@@ -323,6 +323,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--budget", type=int, default=4096)
     parser.add_argument("--retrieval-limit", type=int, default=24)
     parser.add_argument("--limit-questions", type=int, default=0)
+    parser.add_argument(
+        "--offset", type=int, default=0,
+        help="skip the first N questions and append to existing results "
+        "(resume support for long runs)",
+    )
     parser.add_argument("--output-dir", default="benchmarks/results")
     args = parser.parse_args(argv)
 
@@ -330,31 +335,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(command, list) or not all(isinstance(x, str) for x in command):
         raise SystemExit("--runner-command must be a JSON array of strings")
     items = load_dataset(args.dataset)
+    if args.offset:
+        items = items[args.offset:]
     if args.limit_questions:
         items = items[: args.limit_questions]
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = output_dir / "longmemeval-latest.jsonl"
+    # Each record is flushed as soon as it is judged, so a crash mid-run
+    # loses nothing; --offset appends to the same file to resume.
     harness = LMEHarness(
         SubprocessLLMRunner(command),
         context_budget_tokens=args.budget,
         retrieval_limit=args.retrieval_limit,
     )
-    for index, item in enumerate(items, 1):
-        record = harness.run_question(item)
-        print(
-            f"[{index}/{len(items)}] {item.question_id} "
-            f"{'OK' if record['correct'] else 'MISS'}"
-        )
+    mode = "a" if args.offset else "w"
+    with jsonl_path.open(mode, encoding="utf-8") as stream:
+        for index, item in enumerate(items, 1):
+            record = harness.run_question(item)
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+            stream.flush()
+            print(
+                f"[{args.offset + index}/{args.offset + len(items)}] "
+                f"{item.question_id} {'OK' if record['correct'] else 'MISS'}",
+                flush=True,
+            )
 
+    # The report always covers every row in the JSONL, including rows from
+    # earlier resumed segments.
+    all_rows = [
+        json.loads(line)
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    harness.results = all_rows
     report = harness.report()
     dataset_hash = hashlib.sha256(Path(args.dataset).read_bytes()).hexdigest()[:16]
     report["dataset_sha256_16"] = dataset_hash
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "longmemeval-latest.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    with (output_dir / "longmemeval-latest.jsonl").open("w", encoding="utf-8") as stream:
-        for record in harness.results:
-            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
     print(json.dumps(report["overall"], ensure_ascii=False))
     return 0
 
