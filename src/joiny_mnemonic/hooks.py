@@ -523,7 +523,25 @@ def _command(
     )
     if global_scope:
         args.append("--global")
-    return subprocess.list2cmdline(args) if os.name == "nt" else shlex.join(args)
+    return _render_hook_command(args)
+
+
+def _render_hook_command(args: list[str]) -> str:
+    """Render a hook command line that survives every host shell.
+
+    Claude Code executes hook commands through a POSIX shell even on native
+    Windows, where unquoted backslashes are escape characters: cmd-style
+    quoting turned C:\\Users\\... into C:Users... and every hook failed with
+    exit 127 (first live-run regression). Forward-slash paths are valid for
+    Windows APIs, cmd.exe and bash alike; double quotes are the only quoting
+    understood by all three.
+    """
+    if os.name != "nt":
+        return shlex.join(args)
+    rendered = []
+    for arg in (str(item).replace("\\", "/") for item in args):
+        rendered.append(f'"{arg}"' if (" " in arg or "\t" in arg) else arg)
+    return " ".join(rendered)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

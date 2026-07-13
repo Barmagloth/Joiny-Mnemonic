@@ -207,6 +207,17 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertIn("PostCompact", claude["hooks"])
         codex = json.loads((root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
         self.assertIn("UserPromptSubmit", codex["hooks"])
+        # Regression (first live run): hosts execute hook commands through a
+        # POSIX shell even on Windows, where unquoted backslashes are eaten as
+        # escapes and every hook died with exit 127. Installed commands must
+        # contain no backslashes on any platform.
+        installed = claude["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        self.assertNotIn("\\", installed)
+        self.assertIn("-m joiny_mnemonic", installed)
+        for section in codex["hooks"].values():
+            for entry in section:
+                for hook in entry.get("hooks", []):
+                    self.assertNotIn("\\", hook.get("command", ""))
         openhands = json.loads((root / ".openhands" / "hooks.json").read_text(encoding="utf-8"))
         self.assertIn("post_tool_use", openhands)
         plugin = (root / ".opencode" / "plugins" / "joiny-mnemonic.js").read_text(encoding="utf-8")
