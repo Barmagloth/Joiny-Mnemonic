@@ -230,6 +230,9 @@ def build_parser() -> argparse.ArgumentParser:
     derive.add_argument("--risk", type=float, default=0.0)
     derive.add_argument("--cost", type=float, default=1.0)
     derive.add_argument("--supersedes")
+    derive.add_argument("--valid-from")
+    derive.add_argument("--valid-to")
+    derive.add_argument("--temporal-expression")
 
     search = commands.add_parser("search")
     search.add_argument("query", nargs="?", default="")
@@ -243,6 +246,11 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--no-events", action="store_true")
     search.add_argument("--no-semantic", action="store_true")
     search.add_argument("--staleness", action="store_true")
+    search.add_argument("--valid-at")
+    search.add_argument("--known-at")
+    search.add_argument("--current", action="store_true")
+    search.add_argument("--include-unknown-validity", action="store_true")
+    search.add_argument("--history", action="store_true")
 
     stale = commands.add_parser("stale")
     stale.add_argument("--branch", default="main")
@@ -626,9 +634,9 @@ def run(args: argparse.Namespace) -> int:
         elif args.command == "block-set":
             _print(service.store.set_active_block(args.name, args.content, branch_id=args.branch, session_id=args.session, source_event_ids=args.source))
         elif args.command == "derive":
-            _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes))
+            _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes, valid_from=args.valid_from, valid_to=args.valid_to, temporal_expression=args.temporal_expression))
         elif args.command == "search":
-            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness))
+            _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness, valid_at=args.valid_at, known_at=args.known_at, current=args.current, include_unknown_validity=args.include_unknown_validity, history=args.history))
         elif args.command == "stale":
             _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
         elif args.command == "precheck":

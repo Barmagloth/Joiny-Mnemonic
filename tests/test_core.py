@@ -97,11 +97,14 @@ class ServiceCase(unittest.TestCase):
                     "SELECT value FROM metadata WHERE key='schema_version'"
                 ).fetchone()["value"]
                 self.assertEqual(version, str(CURRENT_SCHEMA_VERSION))
-                migration = store._conn.execute(
-                    "SELECT * FROM schema_migrations WHERE version=?",
-                    (CURRENT_SCHEMA_VERSION,),
-                ).fetchone()
-                self.assertEqual(migration["from_version"], 0)
+                migrations = store._conn.execute(
+                    "SELECT * FROM schema_migrations ORDER BY version"
+                ).fetchall()
+                self.assertEqual(migrations[0]["from_version"], 0)
+                self.assertEqual(migrations[-1]["version"], CURRENT_SCHEMA_VERSION)
+                for previous, entry in zip(migrations, migrations[1:]):
+                    self.assertEqual(entry["from_version"], previous["version"])
+                migration = migrations[-1]
                 backup = Path(migration["backup_path"])
                 self.assertTrue(backup.exists())
                 backup_connection = sqlite3.connect(backup)

@@ -18,7 +18,7 @@ from joiny_mnemonic.evaluation import (
     evaluate_policies,
 )
 from joiny_mnemonic.service import MemoryService
-from joiny_mnemonic.storage import StoreIntegrityError
+from joiny_mnemonic.storage import SNAPSHOT_REPLAY_CODE_VERSION, StoreIntegrityError
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parent / "runtime"
@@ -62,7 +62,7 @@ class SnapshotAndPromptTest(unittest.TestCase):
         self.assertIn("constraints", materialized.state["blocks"])
         self.assertEqual(materialized.parent_snapshot_id, first.id)
         self.assertEqual(materialized.state_format, "full-zlib-v1")
-        self.assertEqual(materialized.replay_code_version, "snapshot-materializer-v1")
+        self.assertEqual(materialized.replay_code_version, SNAPSHOT_REPLAY_CODE_VERSION)
         row = self.service.store._conn.execute(
             "SELECT * FROM snapshots WHERE id=?", (second.id,)
         ).fetchone()

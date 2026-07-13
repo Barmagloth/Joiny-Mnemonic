@@ -312,3 +312,33 @@ Evidence offsets are computed by deterministic code from an exact quote. Missing
 ambiguous quotes cannot create auto memory. The same pass classifies prose, inline code, fenced
 code and blockquotes. Only high-confidence prose may start as auto; all other accepted spans
 start quarantined. Auto extraction cannot create protected blocks.
+
+## Bitemporal memory core (task4.md, Phase A)
+
+Two independent time axes. Transaction time is the admission order: `created_at` is its
+wall-clock representation and `seq` is the canonical total order. Valid time is when an
+assertion applies in the represented world: nullable `valid_from`/`valid_to` with independent
+per-bound precision (`instant | day | month | year | unknown`) under a half-open
+`[valid_from, valid_to)` convention. An absent bound is unknown/open, never infinity.
+`observed_at` is derived (the first source event's admission time), never stored.
+
+`temporal.py` is the single source of temporal truth: precision envelopes evaluated in Kleene
+three-valued logic through SQL:2011-named predicates. No other module compares temporal values;
+a source-scan test enforces the boundary. `temporal_projection_code_version` identifies these
+semantics in every temporal hit and follows snapshot replay versioning, because projections
+affect prompt content and exposure audit.
+
+`known_at` resolves branch-locally to the greatest visible `seq` admitted at or before the
+instant; non-monotonic wall clocks resolve deterministically through `seq`. All derived temporal
+state — effective intervals, validity status, lineage closure — is computed from the versions
+visible at that cutoff, never from full history: a retroactive correction admitted later cannot
+close or contradict an interval as seen at an earlier cutoff. A successor's `valid_from` closes
+its predecessor's open end in the projection only; stored rows stay byte-identical.
+
+`validity_status` is explicit: `current` (provable), `current_open` (labeled presumption:
+known start, unknown end), `expired`, `not_yet_valid`, `unknown`. `current=true` returns the
+first two; unknown validity joins results only through `include_unknown_validity` and can never
+be consumed as proven current truth. Temporal metadata inherits the underlying memory's
+authority and cannot raise it. Resume remains transaction-time by default; every legacy call
+without temporal options keeps byte-compatible results (schema v8 is additive nullable columns,
+snapshot materializer bumped to v2).

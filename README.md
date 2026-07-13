@@ -17,6 +17,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Provenance | Every derived claim references existing events visible in the target branch lineage |
 | Protected state | Versioned `instructions`, `goal`, `constraints`, `decisions`, `open_tasks` |
 | Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |
+| Bitemporal memory | Nullable `valid_from`/`valid_to` with per-bound precision, Kleene three-valued temporal core, branch-local `known_at` replay, `valid_at`/`current`/`history` query controls, explicit `validity_status` incl. `current_open` |
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
 | Memory staleness | On-demand Git commit counts for files referenced by live memories; warning-only and ranking-neutral |
@@ -231,6 +232,12 @@ verification steps are in [docs/integrations.md](docs/integrations.md).
 ```powershell
 joiny-mnemonic search "snapshot provenance" --type decision --limit 10
 joiny-mnemonic timeline --limit 30
+
+joiny-mnemonic derive fact "retention policy is 90 days" --source evt_0123456789abcdef `
+  --valid-from 2026-06 --temporal-expression "since June"
+joiny-mnemonic search "retention" --current
+joiny-mnemonic search "retention" --valid-at 2026-03-15 --known-at 2026-07-01T00:00:00+00:00
+joiny-mnemonic search "retention" --history --include-unknown-validity
 joiny-mnemonic graph-neighbors "SQLite" --limit 20
 joiny-mnemonic context mem_0123456789abcdef --before 3 --after 3
 

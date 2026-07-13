@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Sequence
 
+from . import temporal
 from .models import Event, MemoryRecord, RetrievalHit
 from .plugins import PluginRegistry
 from .storage import MemoryStore
@@ -56,6 +57,17 @@ class RetrievalContext:
     freshness_weight: float = 0.10
     risk_weight: float = 0.15
     cost_weight: float = 0.10
+    # Bitemporal controls (task4.md); all default to the legacy
+    # transaction-time behaviour and add nothing to hit metadata when unset.
+    valid_at: str | None = None
+    known_at: str | None = None
+    current: bool = False
+    include_unknown_validity: bool = False
+    history: bool = False
+
+    @property
+    def temporal_active(self) -> bool:
+        return bool(self.valid_at or self.known_at or self.current or self.history)
 
 
 class RetrievalEngine:
@@ -144,6 +156,12 @@ class RetrievalEngine:
                 until=context.until,
                 file=context.file,
                 limit=max(context.limit * 4, 20),
+                # Under temporal controls the superseded filter must not run
+                # against *current* lineage: the version that was live at the
+                # known-at cutoff may be superseded now, and its successor's
+                # text may no longer match the query. The temporal pass
+                # re-applies as-of supersession itself.
+                include_superseded=context.temporal_active,
             )
             for position, (record, rank) in enumerate(memory_candidates):
                 hit = self._memory_hit(record, context)
@@ -243,9 +261,169 @@ class RetrievalEngine:
             key = (hit.source_kind, hit.id)
             if key not in deduplicated or hit.score > deduplicated[key].score:
                 deduplicated[key] = hit
+        selected = list(deduplicated.values())
+        if context.temporal_active:
+            selected = self._apply_temporal_controls(selected, context)
         return sorted(
-            deduplicated.values(), key=lambda hit: (hit.score, hit.created_at), reverse=True
+            selected, key=lambda hit: (hit.score, hit.created_at), reverse=True
         )[: context.limit]
+
+    @staticmethod
+    def _ancestor_as_of(
+        memory_id: str,
+        by_id: dict[str, MemoryRecord],
+        links: dict[str, str | None],
+    ) -> MemoryRecord | None:
+        """Walk the supersedes lineage down to the version visible at the
+        known-at cutoff. The queried version may postdate the cutoff while an
+        ancestor was the live version at that time (task4.md invariant 2).
+        ``links`` is the one-query lineage map — no per-hop store reads."""
+        seen: set[str] = set()
+        current_id: str | None = memory_id
+        while current_id is not None and current_id not in seen:
+            seen.add(current_id)
+            record = by_id.get(current_id)
+            if record is not None:
+                return record
+            current_id = links.get(current_id)
+        return None
+
+    def _apply_temporal_controls(
+        self, hits: list[RetrievalHit], context: RetrievalContext
+    ) -> list[RetrievalHit]:
+        cutoff = None
+        if context.known_at:
+            cutoff = self.store.known_at_cutoff_seq(
+                context.known_at, branch_id=context.branch_id
+            )
+        versions = self.store.memories_as_of(
+            branch_id=context.branch_id, cutoff_seq=cutoff
+        )
+        by_id = {record.id: record for record in versions}
+        successor_of = {
+            record.supersedes_id: record for record in versions if record.supersedes_id
+        }
+        lineage_links = self.store.memory_lineage_links(branch_id=context.branch_id)
+        observed_at_map = self.store.events_created_at(
+            [record.source_event_ids[0] for record in versions if record.source_event_ids]
+        )
+        reference: temporal.Envelope | None = None
+        if context.valid_at:
+            reference = temporal.normalize_bound(context.valid_at).envelope
+        # validity_status is always the trust level of *now* (task4.md
+        # invariant 4); a valid_at match is reported separately so an
+        # expired fact matched at a past instant is never labeled current.
+        evaluation_point = temporal.now_envelope(datetime.now(UTC))
+
+        def annotate(hit: RetrievalHit, extra: dict[str, Any]) -> RetrievalHit:
+            metadata = dict(hit.metadata)
+            metadata.update(extra)
+            metadata["temporal_projection_code_version"] = (
+                temporal.TEMPORAL_PROJECTION_CODE_VERSION
+            )
+            if cutoff is not None:
+                metadata["known_at_cutoff_seq"] = cutoff
+            return replace(hit, metadata=metadata)
+
+        result: list[RetrievalHit] = []
+        emitted: set[str] = set()
+
+        def process(record: MemoryRecord, hit: RetrievalHit) -> None:
+            if record.id in emitted:
+                return
+            successor = successor_of.get(record.id)
+            if successor is not None and not context.history:
+                return
+            interval = temporal.interval_from_fields(
+                record.valid_from, record.valid_from_precision,
+                record.valid_to, record.valid_to_precision,
+            )
+            successor_start = (
+                temporal.envelope_from_fields(
+                    successor.valid_from, successor.valid_from_precision
+                )
+                if successor is not None
+                else None
+            )
+            effective = temporal.Interval(
+                interval.start, temporal.effective_end(interval, successor_start)
+            )
+            status = temporal.validity_status(effective, evaluation_point)
+            match = None
+            if context.valid_at:
+                match = temporal.contains(effective, reference)
+                if match is temporal.Truth.FALSE:
+                    return
+                if match is not temporal.Truth.TRUE and not context.include_unknown_validity:
+                    return
+            elif context.current:
+                if status in ("expired", "not_yet_valid"):
+                    return
+                if status == "unknown" and not context.include_unknown_validity:
+                    return
+            extra: dict[str, Any] = {
+                "validity_status": status,
+                "temporal": {
+                    "valid_from": record.valid_from,
+                    "valid_from_precision": record.valid_from_precision,
+                    "valid_to": record.valid_to,
+                    "valid_to_precision": record.valid_to_precision,
+                    "temporal_expression": record.temporal_expression,
+                    "observed_at": (
+                        observed_at_map.get(record.source_event_ids[0])
+                        if record.source_event_ids
+                        else None
+                    ),
+                },
+            }
+            if match is not None:
+                extra["temporal_match"] = (
+                    "definite" if match is temporal.Truth.TRUE else "possible"
+                )
+            if successor is not None:
+                extra["superseded_by"] = successor.id
+                if successor_start is not None and successor_start.known:
+                    extra["effective_valid_to"] = successor.valid_from
+            emitted.add(record.id)
+            result.append(annotate(hit, extra))
+
+        for hit in hits:
+            if hit.source_kind != "memory":
+                if cutoff is not None:
+                    # Fail closed: a hit that cannot prove admission before the
+                    # cutoff (e.g. from a plugin that omits seq) is excluded.
+                    try:
+                        seq_value = int(hit.metadata["seq"])
+                    except (KeyError, TypeError, ValueError):
+                        try:
+                            seq_value = self.store.get_event(hit.id).seq
+                        except KeyError:
+                            continue
+                    if seq_value > cutoff:
+                        continue
+                if (context.valid_at or context.current) and not (
+                    context.include_unknown_validity
+                ):
+                    # Events carry transaction time only; they cannot prove
+                    # validity and are excluded from validity-filtered results.
+                    continue
+                result.append(annotate(hit, {"validity_status": "unknown"}))
+                continue
+            record = by_id.get(hit.id)
+            if record is None:
+                record = self._ancestor_as_of(hit.id, by_id, lineage_links)
+                if record is None:
+                    continue
+                hit = self._memory_hit(record, context)
+            process(record, hit)
+            if context.history:
+                # Surface the full lineage visible at the cutoff, not only the
+                # version the query happened to match.
+                ancestor = by_id.get(record.supersedes_id or "")
+                while ancestor is not None and ancestor.id not in emitted:
+                    process(ancestor, self._memory_hit(ancestor, context))
+                    ancestor = by_id.get(ancestor.supersedes_id or "")
+        return result
 
     def search_records(
         self,

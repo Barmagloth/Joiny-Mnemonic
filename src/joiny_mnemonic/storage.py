@@ -22,6 +22,7 @@ from .models import (
     Snapshot, TaskRecord,
     ToolOutputView, UsageSample,
 )
+from . import temporal
 from .provenance import origin_evidence_type
 
 from .security import SecretRedactor, redaction_counts
@@ -64,9 +65,12 @@ class SnapshotIntegrityError(RuntimeError):
         super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 FIRST_VERSIONED_MIGRATION = 7
-SNAPSHOT_REPLAY_CODE_VERSION = "snapshot-materializer-v1"
+# v2: memory records serialize bitemporal valid-time fields (task4.md); the
+# canonical state layout changed, so rebuilt hashes are only comparable within
+# this version.
+SNAPSHOT_REPLAY_CODE_VERSION = "snapshot-materializer-v2"
 
 
 def integrity_checked(method: Any) -> Any:
@@ -192,7 +196,12 @@ CREATE TABLE IF NOT EXISTS memory_records (
     supersedes_id TEXT REFERENCES memory_records(id),
     cursor_seq INTEGER NOT NULL,
     created_at TEXT NOT NULL,
-    metadata_json TEXT NOT NULL DEFAULT '{}'
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    valid_from TEXT,
+    valid_to TEXT,
+    valid_from_precision TEXT,
+    valid_to_precision TEXT,
+    temporal_expression TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tool_output_views (
@@ -417,6 +426,11 @@ CREATE TABLE IF NOT EXISTS extraction_candidates (
     evidence_zone TEXT NOT NULL,
     confidence REAL NOT NULL,
     created_at TEXT NOT NULL,
+    valid_from TEXT,
+    valid_to TEXT,
+    valid_from_precision TEXT,
+    valid_to_precision TEXT,
+    temporal_expression TEXT,
     UNIQUE(run_id, memory_type, normalized_content, evidence_start, evidence_end)
 );
 
@@ -819,6 +833,21 @@ class MemoryStore:
         # v7 establishes the immutable migration ledger and future-version gate.
         # BASE_SCHEMA creates the ledger so this step intentionally has no other DDL.
         return None
+
+    def _migrate_to_v8(self) -> None:
+        # v8: bitemporal valid-time fields (task4.md). Additive nullable columns
+        # only; legacy rows keep NULL = unknown validity. Candidate temporal
+        # identity (invariant 8) ships with the Phase B extractor schema, which
+        # is the first writer of temporal candidates.
+        # No valid-time index: temporal projection is evaluated in Python over
+        # the as-of version set (task4.md invariant 3), so SQL never filters
+        # by these columns and an index would be dead weight.
+        for table in ("memory_records", "extraction_candidates"):
+            self._ensure_column(table, "valid_from", "TEXT")
+            self._ensure_column(table, "valid_to", "TEXT")
+            self._ensure_column(table, "valid_from_precision", "TEXT")
+            self._ensure_column(table, "valid_to_precision", "TEXT")
+            self._ensure_column(table, "temporal_expression", "TEXT")
 
     def _apply_schema_migrations(
         self, from_version: int, backup_path: Path | None
@@ -1600,6 +1629,7 @@ class MemoryStore:
         until: str | None = None,
         file: str | None = None,
         limit: int = 50,
+        include_superseded: bool = False,
     ) -> list[tuple[MemoryRecord, float]]:
         match = _fts_match_query(query)
         if not self.fts_enabled or not match or limit < 1:
@@ -1628,20 +1658,21 @@ class MemoryStore:
                 params,
             ).fetchall()
             superseded: set[str] = set()
-            for visible_branch, cutoff in self._lineage_locked(branch_id):
-                supersede_clauses = ["branch_id=?", "supersedes_id IS NOT NULL"]
-                supersede_params: list[Any] = [visible_branch]
-                if cutoff is not None:
-                    supersede_clauses.append("cursor_seq<=?")
-                    supersede_params.append(cutoff)
-                superseded.update(
-                    row["supersedes_id"]
-                    for row in self._conn.execute(
-                        "SELECT supersedes_id FROM memory_records WHERE "
-                        + " AND ".join(supersede_clauses),
-                        supersede_params,
-                    ).fetchall()
-                )
+            if not include_superseded:
+                for visible_branch, cutoff in self._lineage_locked(branch_id):
+                    supersede_clauses = ["branch_id=?", "supersedes_id IS NOT NULL"]
+                    supersede_params: list[Any] = [visible_branch]
+                    if cutoff is not None:
+                        supersede_clauses.append("cursor_seq<=?")
+                        supersede_params.append(cutoff)
+                    superseded.update(
+                        row["supersedes_id"]
+                        for row in self._conn.execute(
+                            "SELECT supersedes_id FROM memory_records WHERE "
+                            + " AND ".join(supersede_clauses),
+                            supersede_params,
+                        ).fetchall()
+                    )
         result: list[tuple[MemoryRecord, float]] = []
         for row in rows:
             if row["id"] in superseded:
@@ -1781,6 +1812,11 @@ class MemoryStore:
 
     @staticmethod
     def _memory_from_row(row: sqlite3.Row) -> MemoryRecord:
+        keys = row.keys()
+
+        def _optional(name: str) -> str | None:
+            return row[name] if name in keys else None
+
         return MemoryRecord(
             id=row["id"], branch_id=row["branch_id"], memory_type=row["memory_type"],
             content=row["content"], summary=row["summary"],
@@ -1790,9 +1826,51 @@ class MemoryStore:
             supersedes_id=row["supersedes_id"], created_at=row["created_at"],
             metadata=(
                 json.loads(row["metadata_json"])
-                if "metadata_json" in row.keys() and row["metadata_json"] else {}
+                if "metadata_json" in keys and row["metadata_json"] else {}
             ),
+            valid_from=_optional("valid_from"),
+            valid_to=_optional("valid_to"),
+            valid_from_precision=_optional("valid_from_precision"),
+            valid_to_precision=_optional("valid_to_precision"),
+            temporal_expression=_optional("temporal_expression"),
         )
+
+    def _normalize_temporal_input(
+        self,
+        conn: sqlite3.Connection,
+        valid_from: str | None,
+        valid_to: str | None,
+        source_event_ids: Sequence[str],
+    ) -> dict[str, str | None]:
+        """Normalize manual valid-time input through the temporal core.
+
+        Relative expressions resolve against the first source event's
+        timestamp (task4.md invariant 6); explicit values carry their own
+        timezone. All temporal decisions stay inside ``temporal.py``.
+        """
+        if valid_from is None and valid_to is None:
+            return {
+                "valid_from": None, "valid_to": None,
+                "valid_from_precision": None, "valid_to_precision": None,
+            }
+        anchor = None
+        if source_event_ids:
+            row = conn.execute(
+                "SELECT created_at FROM events WHERE id=?", (source_event_ids[0],)
+            ).fetchone()
+            if row is not None:
+                anchor = datetime.fromisoformat(row["created_at"])
+        start, end = temporal.normalize_interval(
+            str(valid_from) if valid_from is not None else None,
+            str(valid_to) if valid_to is not None else None,
+            anchor=anchor,
+        )
+        return {
+            "valid_from": start.value,
+            "valid_to": end.value,
+            "valid_from_precision": start.precision if start.value is not None else None,
+            "valid_to_precision": end.precision if end.value is not None else None,
+        }
 
     def derive_memory(
         self,
@@ -1807,6 +1885,9 @@ class MemoryStore:
         retrieval_cost: float = 1.0,
         supersedes_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        valid_from: str | None = None,
+        valid_to: str | None = None,
+        temporal_expression: str | None = None,
     ) -> MemoryRecord:
         memory_type = str(memory_type)
         allowed_types = {item.value for item in MemoryType}
@@ -1820,10 +1901,16 @@ class MemoryStore:
         safe_summary, _ = self.redactor.redact_text(summary or content[:240])
         safe_files, _ = self.redactor.redact_value(list(files))
         safe_metadata, _ = self.redactor.redact_value(metadata or {})
+        safe_expression = None
+        if temporal_expression is not None:
+            safe_expression, _ = self.redactor.redact_text(str(temporal_expression))
         source_event_ids = tuple(dict.fromkeys(source_event_ids))
 
         with self._transaction() as conn:
             self._assert_source_events(conn, source_event_ids, branch_id=branch_id)
+            temporal_fields = self._normalize_temporal_input(
+                conn, valid_from, valid_to, source_event_ids
+            )
             record_id = f"mem_{uuid.uuid4().hex}"
             version = 1
             if supersedes_id:
@@ -1859,6 +1946,11 @@ class MemoryStore:
                     "retrieval_cost": retrieval_cost,
                     "supersedes_id": supersedes_id,
                     "metadata": safe_metadata,
+                    "valid_from": temporal_fields["valid_from"],
+                    "valid_to": temporal_fields["valid_to"],
+                    "valid_from_precision": temporal_fields["valid_from_precision"],
+                    "valid_to_precision": temporal_fields["valid_to_precision"],
+                    "temporal_expression": safe_expression,
                 },
                 files=safe_files,
             )
@@ -1876,17 +1968,25 @@ class MemoryStore:
                 supersedes_id=supersedes_id,
                 created_at=_now(),
                 metadata=dict(safe_metadata),
+                valid_from=temporal_fields["valid_from"],
+                valid_to=temporal_fields["valid_to"],
+                valid_from_precision=temporal_fields["valid_from_precision"],
+                valid_to_precision=temporal_fields["valid_to_precision"],
+                temporal_expression=safe_expression,
             )
             conn.execute(
                 "INSERT INTO memory_records(id, branch_id, memory_type, content, summary, "
                 "files_json, risk, retrieval_cost, version, source_event_ids_json, "
-                "supersedes_id, cursor_seq, created_at, metadata_json) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "supersedes_id, cursor_seq, created_at, metadata_json, "
+                "valid_from, valid_to, valid_from_precision, valid_to_precision, "
+                "temporal_expression) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     record.id, record.branch_id, record.memory_type, record.content,
                     record.summary, _json(record.files), record.risk, record.retrieval_cost,
                     record.version, _json(record.source_event_ids), record.supersedes_id,
                     derivation.seq, record.created_at, _json(record.metadata),
+                    record.valid_from, record.valid_to, record.valid_from_precision,
+                    record.valid_to_precision, record.temporal_expression,
                 ),
             )
             if self.fts_enabled:
@@ -1946,6 +2046,107 @@ class MemoryStore:
         if file:
             records = [record for record in records if file in record.files]
         return records
+
+    @integrity_checked
+    def known_at_cutoff_seq(self, known_at: str, *, branch_id: str = "main") -> int:
+        """Resolve ``known_at`` to the greatest lineage-visible ``seq`` admitted
+        at or before that instant (task4.md invariant 2).
+
+        ``created_at`` is written exclusively by ``_now()`` as UTC ISO 8601, so
+        the comparison is exact string order; ties and non-monotonic clocks
+        resolve deterministically through the canonical ``seq`` order.
+        """
+        bound = temporal.normalize_bound(str(known_at))
+        if not bound.envelope.singleton:
+            raise temporal.TemporalValidationError(
+                "known_at_not_instant", "known_at requires an exact timestamp"
+            )
+        threshold = bound.envelope.lo.astimezone(UTC).isoformat(timespec="microseconds")
+        best = 0
+        with self._lock:
+            for visible_branch, cutoff in self._lineage_locked(branch_id):
+                clauses = ["branch_id=?", "created_at<=?"]
+                params: list[Any] = [visible_branch, threshold]
+                if cutoff is not None:
+                    clauses.append("seq<=?")
+                    params.append(cutoff)
+                row = self._conn.execute(
+                    "SELECT MAX(seq) AS cutoff_seq FROM events WHERE "
+                    + " AND ".join(clauses),
+                    params,
+                ).fetchone()
+                if row["cutoff_seq"] is not None:
+                    best = max(best, int(row["cutoff_seq"]))
+        return best
+
+    @integrity_checked
+    def memories_as_of(
+        self, *, branch_id: str = "main", cutoff_seq: int | None = None
+    ) -> list[MemoryRecord]:
+        """Lineage-visible memory versions admitted at or before the cutoff.
+
+        Includes superseded versions: this is the projection input required by
+        task4.md invariant 3 — derived temporal state must be computed from the
+        versions visible at the known-at cutoff, never from full history.
+        """
+        with self._lock:
+            rows: list[sqlite3.Row] = []
+            for visible_branch, cutoff in self._lineage_locked(branch_id):
+                effective = cutoff
+                if cutoff_seq is not None:
+                    effective = cutoff_seq if cutoff is None else min(cutoff, cutoff_seq)
+                clauses = ["branch_id=?"]
+                params: list[Any] = [visible_branch]
+                if effective is not None:
+                    clauses.append("cursor_seq<=?")
+                    params.append(effective)
+                rows.extend(
+                    self._conn.execute(
+                        "SELECT * FROM memory_records WHERE " + " AND ".join(clauses),
+                        params,
+                    ).fetchall()
+                )
+        ordered = sorted(rows, key=lambda row: (row["cursor_seq"], row["created_at"]))
+        return [self._memory_from_row(row) for row in ordered]
+
+    @integrity_checked
+    def memory_lineage_links(self, *, branch_id: str = "main") -> dict[str, str | None]:
+        """One-query map ``memory_id -> supersedes_id`` over the full visible
+        lineage (no known-at cutoff): the ancestor walk needs post-cutoff links
+        to descend from a current version to the one live at the cutoff."""
+        links: dict[str, str | None] = {}
+        with self._lock:
+            for visible_branch, cutoff in self._lineage_locked(branch_id):
+                clauses = ["branch_id=?"]
+                params: list[Any] = [visible_branch]
+                if cutoff is not None:
+                    clauses.append("cursor_seq<=?")
+                    params.append(cutoff)
+                for row in self._conn.execute(
+                    "SELECT id, supersedes_id FROM memory_records WHERE "
+                    + " AND ".join(clauses),
+                    params,
+                ).fetchall():
+                    links[str(row["id"])] = (
+                        str(row["supersedes_id"]) if row["supersedes_id"] else None
+                    )
+        return links
+
+    @integrity_checked
+    def events_created_at(self, event_ids: Sequence[str]) -> dict[str, str]:
+        """Batched admission times for observed_at derivation."""
+        unique = [item for item in dict.fromkeys(event_ids) if item]
+        result: dict[str, str] = {}
+        with self._lock:
+            for start in range(0, len(unique), 500):
+                chunk = unique[start:start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                for row in self._conn.execute(
+                    f"SELECT id, created_at FROM events WHERE id IN ({placeholders})",
+                    chunk,
+                ).fetchall():
+                    result[str(row["id"])] = str(row["created_at"])
+        return result
 
     @integrity_checked
     def provenance(self, memory_id: str) -> list[Event]:

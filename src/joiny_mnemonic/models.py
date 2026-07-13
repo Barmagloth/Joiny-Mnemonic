@@ -93,6 +93,11 @@ class MemoryRecord:
     supersedes_id: str | None
     created_at: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    valid_from: str | None = None
+    valid_to: str | None = None
+    valid_from_precision: str | None = None
+    valid_to_precision: str | None = None
+    temporal_expression: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

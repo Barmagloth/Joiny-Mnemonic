@@ -23,6 +23,7 @@ from .precheck import PrecheckReport, PrecheckService
 from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
+from . import temporal
 from .snapshots import SnapshotManager
 from .staleness import MemoryStaleness, StalenessService
 from .storage import CURRENT_SCHEMA_VERSION, MemoryStore
@@ -457,6 +458,19 @@ class MemoryService:
                         "until": context.until,
                         "exact": context.exact,
                         "include_events": context.include_events,
+                        **(
+                            {
+                                "valid_at": context.valid_at,
+                                "known_at": context.known_at,
+                                "current": context.current,
+                                "include_unknown_validity": (
+                                    context.include_unknown_validity
+                                ),
+                                "history": context.history,
+                            }
+                            if context.temporal_active
+                            else {}
+                        ),
                     },
                     limit=context.limit,
                     receipt_key=telemetry_receipt,
@@ -833,6 +847,16 @@ class MemoryService:
                 "http_api": True,
                 "mcp": True,
                 "cli": True,
+                "bitemporal_retrieval": {
+                    "valid_time_fields": True,
+                    "controls": (
+                        "valid_at", "known_at", "current",
+                        "include_unknown_validity", "history",
+                    ),
+                    "temporal_projection_code_version": (
+                        temporal.TEMPORAL_PROJECTION_CODE_VERSION
+                    ),
+                },
             },
             "setup_configuration": self.installation_config,
             "plugin_errors": list(self.plugin_errors),

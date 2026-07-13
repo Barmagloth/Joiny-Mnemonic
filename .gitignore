@@ -16,3 +16,6 @@ build/
 benchmarks/runtime/
 .claude/settings.json
 .claude/settings.local.json
+
+# Frozen pre-migration regression fixtures are deliberately committed.
+!tests/fixtures/*.db
