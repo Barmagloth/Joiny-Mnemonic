@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .benchmarking import run_benchmark, write_report
+from .report_signing import stamp_report
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> None:
         prompt_exposures=args.prompt_exposures,
         token_model=args.token_model,
     )
+    report = stamp_report(report, repo_root=root)
     json_path, markdown_path = write_report(report, root / args.output)
     print(json.dumps({
         "passed": report["passed"],

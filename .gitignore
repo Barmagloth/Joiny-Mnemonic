@@ -19,3 +19,6 @@ benchmarks/runtime/
 
 # Frozen pre-migration regression fixtures are deliberately committed.
 !tests/fixtures/*.db
+
+# Run logs are scratch, never trust artifacts
+benchmarks/results/*.log

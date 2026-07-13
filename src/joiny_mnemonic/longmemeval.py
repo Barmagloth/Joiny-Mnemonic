@@ -405,6 +405,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = harness.report()
     dataset_hash = hashlib.sha256(Path(args.dataset).read_bytes()).hexdigest()[:16]
     report["dataset_sha256_16"] = dataset_hash
+    from .report_signing import stamp_report
+
+    report = stamp_report(
+        report,
+        artifacts={"per_question_jsonl": jsonl_path, "dataset": Path(args.dataset)},
+    )
     (output_dir / "longmemeval-latest.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )

@@ -56,6 +56,40 @@ class OvercompressionFeedbackTest(unittest.TestCase):
         self.assertEqual(report["recommendation"], [])
 
 
+class ReportSigningTest(unittest.TestCase):
+    def test_stamp_and_verify_roundtrip_detects_tampering(self) -> None:
+        import tempfile
+
+        from joiny_mnemonic.report_signing import stamp_report, verify_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "rows.jsonl"
+            artifact.write_text('{"row": 1}\n', encoding="utf-8")
+            report = stamp_report(
+                {"overall": {"accuracy": 0.5}}, artifacts={"rows": artifact}
+            )
+            self.assertIn("report_sha256", report)
+            self.assertEqual(
+                len(report["provenance"]["artifact_sha256"]["rows"]), 64
+            )
+            ok, problems = verify_report(report, artifacts={"rows": artifact})
+            self.assertTrue(ok, problems)
+            # Silent edits to the summary or the backing rows are detected.
+            tampered = {**report, "overall": {"accuracy": 0.99}}
+            self.assertFalse(verify_report(tampered)[0])
+            artifact.write_text('{"row": 2}\n', encoding="utf-8")
+            ok, problems = verify_report(report, artifacts={"rows": artifact})
+            self.assertFalse(ok)
+            self.assertIn("artifact", problems[0])
+
+    def test_canonical_json_is_order_independent(self) -> None:
+        from joiny_mnemonic.report_signing import canonical_json
+
+        one = canonical_json({"b": 1, "a": {"д": "я"}})
+        two = canonical_json({"a": {"д": "я"}, "b": 1})
+        self.assertEqual(one, two)
+
+
 class SetupMcpDefaultTest(unittest.TestCase):
     def _resolved_with_mcp(self, argv: list[str]) -> bool:
         from joiny_mnemonic import cli as cli_module

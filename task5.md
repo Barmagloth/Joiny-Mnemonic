@@ -2,19 +2,29 @@
 
 ## Status
 
-Proposed next milestone. Two motivations, one live-run finding each:
+**Implemented (July 2026).** All parts landed: A1-A4 (reconciler, hygiene, marker guard,
+MCP-by-default + citation rule), B1-B5 (temporal arm, RRF fusion, boosts, FTS signal
+enrichment, graph arm), C (LongMemEval harness + local runner bridge), D1-D5 (verbatim
+folding, view maturation, JSON-array reducer, protected patterns, over-compression
+feedback), plus the post-implementation review backlog pass. Benchmark reports are
+provenance-stamped (`report_signing.py`). The first full LongMemEval-S run is the last
+open item; its signed report lands in `benchmarks/results/`.
+
+Original motivations, one live-run finding each:
 
 1. **State maintenance.** The trust model protects writes but nothing maintains truth: a
    completed task stayed in `open_tasks` (its completing Write event was in the same database,
    105 seconds after the task), both hosts then paraphrased the stale entry wrongly, and the
    protected block became the best-defended lie in the system. Manual `block-set` hygiene is an
    escape hatch, not a workflow.
-2. **Retrieval quality.** Hindsight (vectorize-io, MIT, arXiv 2512.12818) reaches 91.4% on
-   LongMemEval with a retrieval stack whose merge/rank/temporal layers are almost entirely
-   deterministic. Everything below marked [HS] is adopted from their paper or source with
-   constants they shipped; attribution stays in code comments. Their weaknesses confirm our
-   differentiators: no bitemporal model (they credit Zep and stop), no provenance to source
-   spans, no tamper evidence, no injection trust model, mandatory LLM+Postgres runtime.
+2. **Retrieval quality.** Hindsight (vectorize-io, MIT, arXiv 2512.12818) demonstrates that a
+   LongMemEval retrieval stack whose merge/rank/temporal layers are almost entirely
+   deterministic is viable — which is exactly our paradigm. Everything below marked [HS] is
+   adopted from their paper or source with constants they shipped; attribution stays in code
+   comments. Their design gaps confirm our differentiators: no bitemporal model, no provenance
+   to source spans, no tamper evidence, no injection trust model, mandatory LLM+Postgres
+   runtime. Our benchmark reports state our own numbers only and never cite other systems'
+   scores.
 
 Explicitly deferred, not in this task: `hindsight-bridge` plugin (their reflect layer over our
 canon), LLM-driven observation consolidation (belongs to the gated Phase B extractor domain),
@@ -192,8 +202,9 @@ adapter (4 methods: load, item id, sessions-for-ingestion, qa-pairs), ingestion 
 `append`+`consolidate`, answers through `search`+prompt assembly, an external LLM judge
 returning `{correct, reasoning}` (their per-category judge prompts are printed verbatim in
 arXiv 2512.12818 Appendix A.4). Target: a LongMemEval-S accuracy figure for Joiny-Mnemonic in
-`benchmarks/results/`, whatever it turns out to be. Until this exists, every retrieval-quality
-comparison in our README stays qualitative and must say so.
+`benchmarks/results/`, whatever it turns out to be. The report is provenance-stamped and
+states our own number only — the README never cites other systems' scores; readers can look
+up the literature themselves.
 
 ## Required tests
 
