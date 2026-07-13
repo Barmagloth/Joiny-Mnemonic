@@ -71,13 +71,26 @@ def _entry_lines(content: str) -> list[str]:
 
 
 def _path_matches(entry_path: str, event_file: str) -> bool:
-    entry_norm = entry_path.replace("\\", "/").casefold()
+    """Suffix match on a path-segment boundary (review finding H2:
+    'config.py' must not match 'test_config.py')."""
+    entry_norm = entry_path.replace("\\", "/").casefold().lstrip("./")
     event_norm = str(event_file).replace("\\", "/").casefold()
-    if not event_norm.endswith(entry_norm.rsplit("/", 1)[-1]):
+    if not entry_norm or not event_norm.endswith(entry_norm):
         return False
-    if "/" in entry_norm:
-        return event_norm.endswith(entry_norm)
-    return True
+    boundary = len(event_norm) - len(entry_norm) - 1
+    return boundary < 0 or event_norm[boundary] == "/"
+
+
+def _trusted_completion_event(event: Event) -> bool:
+    """Evidence must come from the host hook channel and describe a
+    completed (non-failed) tool interaction (review finding H1): an
+    untrusted memory_append or a captured failure must never close a
+    protected task."""
+    if event.origin_channel != "host_hook":
+        return False
+    if event.kind != "tool_output":
+        return False
+    return event.payload.get("hook_event_name") not in ("PostToolUseFailure",)
 
 
 def _event_tool_name(event: Event) -> str:
@@ -128,11 +141,16 @@ class StateReconciler:
             if _DELETE_VERBS.search(entry):
                 continue
             anchor_seq, anchor_id, task_memory_id = self._anchor_seq(entry, branch_id)
+            if anchor_id is None:
+                # Fail closed (review finding H3): without a provable
+                # admission point, pre-task history would count as
+                # completion evidence. Skip rather than scan from seq 0.
+                continue
             paths = _PATH.findall(entry) if _CREATE_VERBS.search(entry) else []
             commands = [item.strip() for item in _BACKTICK.findall(entry) if item.strip()]
             evidence: tuple[str, str, str] | None = None
             for event in events:
-                if event.seq <= anchor_seq or event.kind not in ("tool_call", "tool_output"):
+                if event.seq <= anchor_seq or not _trusted_completion_event(event):
                     continue
                 if paths and _event_tool_name(event) in _WRITE_TOOLS:
                     for path in paths:
@@ -220,8 +238,14 @@ class StateReconciler:
                 branch_id=branch_id,
                 source_event_ids=(detection_event.id, detection.evidence_event_id),
             )
-            if task_memory_id is not None and created:
+            if task_memory_id is not None:
                 record = self.store.get_memory(task_memory_id)
+                if record.metadata.get("status") == "completed":
+                    summary["closed"] += 1
+                    continue
+                # Gate on the record's own state, not on detection-event
+                # freshness (review finding M4): a detection made while the
+                # flag was off must still supersede on a later closure run.
                 self.store.derive_memory(
                     memory_type="task",
                     content=record.content,

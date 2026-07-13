@@ -98,7 +98,20 @@ class ToolOutputReducer:
             if protected_patterns is not None
             else _env_protected_patterns()
         )
-        self.protected = tuple(re.compile(item) for item in patterns)
+        self.protected: tuple[re.Pattern[str], ...] = ()
+        self.protected_config_error: str | None = None
+        compiled = []
+        for item in patterns:
+            try:
+                compiled.append(re.compile(item))
+            except re.error as exc:
+                # Fail closed means "no views, raw stands" — never "the
+                # whole memory system is down over one bad env regex"
+                # (review finding M7).
+                self.protected_config_error = f"{item!r}: {exc}"
+                break
+        else:
+            self.protected = tuple(compiled)
 
     @staticmethod
     def _command(event: Event) -> str:
@@ -306,18 +319,22 @@ class ToolOutputReducer:
     def _lossless_csv(rows: list[dict[str, Any]], core: list[str]) -> str | None:
         rendered = [",".join(core)]
         for row in rows:
+            if set(row) != set(core):
+                # Lossless means lossless (review finding M8): a missing
+                # core key would render as "" indistinguishably, and extra
+                # keys would vanish. Either way this array is not tabular.
+                return None
             cells = []
             for key in core:
-                value = row.get(key, "")
-                if isinstance(value, (dict, list)):
-                    value = json.dumps(value, ensure_ascii=False, sort_keys=True)
-                cell = str(value)
+                value = row[key]
+                # Non-strings are JSON-encoded so 1 vs "1", None vs "None"
+                # and True vs "true" stay distinguishable.
+                cell = value if isinstance(value, str) else json.dumps(
+                    value, ensure_ascii=False, sort_keys=True
+                )
                 if any(ch in cell for ch in ",\"\n"):
                     cell = '"' + cell.replace('"', '""') + '"'
                 cells.append(cell)
-            extras = {key: value for key, value in row.items() if key not in core}
-            if extras:
-                return None  # rows outside the core schema: not losslessly tabular
             rendered.append(",".join(cells))
         return "\n".join(rendered)
 
@@ -363,6 +380,20 @@ class ToolOutputReducer:
         # and the tail, then let schema change-points fill any remaining
         # slack. Protected rows ride above the cap unconditionally.
         count = len(deduplicated)
+        if count <= self._JSON_CAP:
+            # Nothing to drop (review finding M9): the cap is not binding,
+            # so the view is just the deduplicated array.
+            body_all = list(deduplicated)
+            return (
+                json.dumps(body_all, ensure_ascii=False),
+                "json-array-crush",
+                {
+                    "rows_total": total,
+                    "rows_kept": count,
+                    "rows_dropped": total - count if total > count else 0,
+                    "duplicates_collapsed": total - count,
+                },
+            )
         first = min(math.ceil(count * self._JSON_FIRST), count)
         last = min(math.ceil(count * self._JSON_LAST), count)
         first_quota = min(first, math.ceil(self._JSON_CAP * 0.6))
@@ -472,6 +503,14 @@ class ToolOutputReducer:
         critical = self.critical_signals(raw, family)
         views: list[ReducedView] = []
 
+        if self.protected_config_error is not None:
+            # Unusable protection config: emit no views at all.
+            return ReductionBundle(
+                event_id=event.id, family=family, raw_tokens=raw_tokens,
+                raw_bytes=raw_bytes, latency_ns=time.perf_counter_ns() - started,
+                views=(), critical_signal_count=len(critical),
+                compact_critical_recall=1.0,
+            )
         if raw_tokens >= self.minimum_tokens and family not in {"source", "diff", "status"}:
             view: tuple[str, str, dict[str, Any]] | None
             if family == "generic" and (

@@ -226,7 +226,7 @@ class EvidenceConsolidator:
             memory_ids.append(record.id)
             if candidate.block is None:
                 continue
-            if candidate.content.rstrip().endswith("?"):
+            if candidate.content.rstrip(" \t.)]»\"'").endswith(("?", "？")):
                 # Live-run finding: "DECISION: <вопрос>?" — a user querying
                 # with a marker wrote a question into a protected block. A
                 # question is never a decision/task assertion; route the

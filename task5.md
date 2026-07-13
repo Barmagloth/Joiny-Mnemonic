@@ -235,3 +235,25 @@ comparison in our README stays qualitative and must say so.
 5. A LongMemEval-S number exists in benchmarks/results with the harness committed.
 6. Full suite green; `requirements-traceability.md` maps every A/B item to implementation and
    test; Hindsight-derived constants carry source attribution comments.
+
+## Post-implementation review backlog
+
+Parts A/B/D shipped and were adversarially reviewed; HIGH findings (untrusted/failed evidence
+closing tasks, path-boundary collisions, anchorless scans, parser crashes on digit runs,
+Russian month false positives) plus M1/M4/M7/M8/M9/M10/L4/L6 are fixed with regression tests.
+Deferred, in priority order:
+
+1. Reconciler and temporal-arm cost on every hook delivery (M5/M6): persist a per-branch
+   high-water seq, push kind/tool filters into SQL, cache anchors; cap temporal-arm scans.
+2. `known_at`+fusion interplay (M3): rebuilt as-of ancestors re-enter with legacy-scale scores
+   and lose fusion metadata — carry the fused score across the rebuild.
+3. Temporal arm must honor `since`/`until` for the memory leg too (M2).
+4. Spec deviations (M11): pending completions as a resume-packet line; hygiene as sticky
+   findings with an ack path; configurable age threshold; `query_timestamp` caller anchor for
+   day-boundary correctness in non-UTC sessions; `setup --yes` MCP default (interactive path
+   done).
+5. D3 anomaly retention (variance/uniqueness) explicitly de-scoped in v1; the traceability row
+   covers dedup/quotas/change-points only.
+6. Low-severity polish (L1-L3, L5, L7): word-boundary command matching, closure rewrite
+   preserving untouched entry formatting, `_PATH` false positives in hygiene, cross-bucket
+   definite-before-possible ordering, skip future windows for event evidence.

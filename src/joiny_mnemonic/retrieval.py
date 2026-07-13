@@ -206,13 +206,19 @@ class RetrievalEngine:
             consider(self._memory_hit(record, context), interval, anchor)
 
         if context.include_events:
-            for event in self.store.query_events(branch_id=context.branch_id):
+            for event in self.store.query_events(
+                branch_id=context.branch_id,
+                since=window.start.isoformat(),
+                until=window.end.isoformat(),
+            ):
                 if event.kind not in ("message", "tool_output"):
                     continue
                 admitted = datetime.fromisoformat(event.created_at)
-                if not (window.start <= admitted < window.end):
-                    continue
                 point = temporal.Envelope(admitted, admitted, True)
+                # Containment via the temporal core, not raw comparison
+                # (single-source-of-truth invariant; review finding M10).
+                if temporal.contains(window.interval, point) is not temporal.Truth.TRUE:
+                    continue
                 consider(
                     self._event_hit(event, context),
                     temporal.Interval(point, point),
@@ -273,7 +279,10 @@ class RetrievalEngine:
         """Multiplicative-around-1 secondary signals: nudge, never flip."""
         boosted = []
         for hit in hits:
-            effective = hit.metadata.get("temporal", {}).get("valid_from") or hit.created_at
+            # Recency anchors on admission time; valid_from is not in hit
+            # metadata at this stage (temporal controls annotate later), so
+            # claiming a COALESCE here would be dead code (review L6).
+            effective = hit.created_at
             try:
                 days = max(
                     0.0, (now - datetime.fromisoformat(effective)).total_seconds() / 86400
@@ -421,8 +430,18 @@ class RetrievalEngine:
         if window is not None and context.query:
             temporal_hits = self._temporal_arm(context, window)
             if temporal_hits:
+                # Dedup within the base arm first (review finding M1): an
+                # FTS copy and a semantic copy of the same hit must not
+                # double-collect reciprocal rank mass.
+                base_best: dict[tuple[str, str], RetrievalHit] = {}
+                for hit in hits:
+                    key = (hit.source_kind, hit.id)
+                    if key not in base_best or hit.score > base_best[key].score:
+                        base_best[key] = hit
                 lexical_sorted = sorted(
-                    hits, key=lambda hit: (hit.score, hit.created_at), reverse=True
+                    base_best.values(),
+                    key=lambda hit: (hit.score, hit.created_at),
+                    reverse=True,
                 )
                 # v1 arms: "base" is the merged lexical(+semantic) order;
                 # splitting semantic into its own arm is a later refinement.

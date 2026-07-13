@@ -33,11 +33,33 @@ class ReconcilerCase(unittest.TestCase):
         self.service.consolidator.consolidate_event(self.service, events[0])
         return events[0]
 
-    def _write_evidence(self, path: str):
+    def _write_evidence(self, path: str, *, hook_event: str = "PostToolUse"):
+        """Evidence through the trusted host-hook channel, as captured live."""
+        events, _ = self.store.append_host_events_once(
+            f"evidence:{path}:{hook_event}",
+            [
+                {
+                    "kind": "tool_output",
+                    "role": "tool",
+                    "content": f'{{"type": "create", "filePath": "{path}"}}',
+                    "payload": {
+                        "tool_name": "Write",
+                        "hook_event_name": hook_event,
+                        "tool_response": {"type": "create"},
+                    },
+                    "files": [path],
+                }
+            ],
+            adapter="claude-code",
+        )
+        return events[0]
+
+    def _untrusted_evidence(self, path: str):
+        """The same shape via the public API: must never count."""
         return self.store.append_event(
             kind="tool_output",
             content=f'{{"type": "create", "filePath": "{path}"}}',
-            payload={"tool_name": "Write", "tool_response": {"type": "create"}},
+            payload={"tool_name": "Write", "hook_event_name": "PostToolUse"},
             files=(path,),
         )
 
@@ -107,16 +129,46 @@ class ReconcilerCase(unittest.TestCase):
         self.assertEqual(summary["detected"], 0)
         self.assertIn("junk.md", self.store.get_active_blocks()["open_tasks"].content)
 
-    def test_command_evidence(self) -> None:
+    def test_command_evidence_requires_completed_host_output(self) -> None:
         self.service.initialize_project(automatic_task_closure_enabled=True)
         self._open_task("прогнать `pytest -q` перед релизом")
-        self.store.append_event(
-            kind="tool_call",
-            content="Bash",
-            payload={"tool_name": "Bash", "tool_input": {"command": "pytest -q"}},
+        events, _ = self.store.append_host_events_once(
+            "evidence:pytest",
+            [
+                {
+                    "kind": "tool_output", "role": "tool",
+                    "content": "5 passed",
+                    "payload": {
+                        "tool_name": "Bash",
+                        "hook_event_name": "PostToolUse",
+                        "tool_input": {"command": "pytest -q"},
+                    },
+                }
+            ],
+            adapter="claude-code",
         )
         summary = self.service.reconciler.reconcile()
         self.assertEqual(summary["closed"], 1)
+
+    def test_untrusted_and_failed_evidence_never_close(self) -> None:
+        """Review findings H1: public-API appends and captured failures are
+        not completion evidence, however well-shaped."""
+        self.service.initialize_project(automatic_task_closure_enabled=True)
+        self._open_task("создать файл secure.md")
+        self._untrusted_evidence("secure.md")
+        self._write_evidence("secure.md", hook_event="PostToolUseFailure")
+        summary = self.service.reconciler.reconcile()
+        self.assertEqual(summary["detected"], 0)
+        self.assertIn("secure.md", self.store.get_active_blocks()["open_tasks"].content)
+
+    def test_basename_needs_a_segment_boundary(self) -> None:
+        """Review finding H2: 'config.py' must not be completed by a write
+        to 'test_config.py'."""
+        self.service.initialize_project(automatic_task_closure_enabled=True)
+        self._open_task("создать файл config.py")
+        self._write_evidence("tests/test_config.py")
+        summary = self.service.reconciler.reconcile()
+        self.assertEqual(summary["detected"], 0)
 
     def test_question_marker_routes_to_block_change_requested(self) -> None:
         self.service.initialize_project()

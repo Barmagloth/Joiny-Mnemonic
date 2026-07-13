@@ -406,21 +406,27 @@ class QueryWindow:
         return self.start + (self.end - self.start) / 2
 
 
+# Exact tokens only. Cyrillic declensions are enumerated, never prefix
+# matched: stems hijacked ordinary words (максимум -> May, маршрут -> May,
+# мартышка -> March; adversarial-review finding H5).
 _MONTH_NAMES = {
-    # EN full + trigram; RU nominative + genitive stems.
-    "january": 1, "jan": 1, "январ": 1,
-    "february": 2, "feb": 2, "феврал": 2,
-    "march": 3, "mar": 3, "март": 3,
-    "april": 4, "apr": 4, "апрел": 4,
-    "may": 5, "ма": 5,
-    "june": 6, "jun": 6, "июн": 6,
-    "july": 7, "jul": 7, "июл": 7,
-    "august": 8, "aug": 8, "август": 8,
-    "september": 9, "sep": 9, "сентябр": 9,
-    "october": 10, "oct": 10, "октябр": 10,
-    "november": 11, "nov": 11, "ноябр": 11,
-    "december": 12, "dec": 12, "декабр": 12,
+    "january": 1, "январь": 1, "января": 1, "январе": 1,
+    "february": 2, "февраль": 2, "февраля": 2, "феврале": 2,
+    "march": 3, "март": 3, "марта": 3, "марте": 3,
+    "april": 4, "апрель": 4, "апреля": 4, "апреле": 4,
+    "may": 5, "май": 5, "мая": 5, "мае": 5,
+    "june": 6, "июнь": 6, "июня": 6, "июне": 6,
+    "july": 7, "июль": 7, "июля": 7, "июле": 7,
+    "august": 8, "август": 8, "августа": 8, "августе": 8,
+    "september": 9, "сентябрь": 9, "сентября": 9, "сентябре": 9,
+    "october": 10, "октябрь": 10, "октября": 10, "октябре": 10,
+    "november": 11, "ноябрь": 11, "ноября": 11, "ноябре": 11,
+    "december": 12, "декабрь": 12, "декабря": 12, "декабре": 12,
 }
+
+# Bare English month words that are also common words never count without
+# an explicit year ("the march of progress", "may I ask").
+_MONTH_HOMOGRAPHS = {"may", "march", "august"}
 
 # Fuzzy relative windows, [days_back_start, days_back_end) — Hindsight's
 # shipped vagueness constants.
@@ -455,15 +461,7 @@ def _day_window(day: datetime, days: int = 1) -> tuple[datetime, datetime]:
 
 
 def _month_lookup(token: str) -> int | None:
-    lowered = token.casefold()
-    if lowered in _MONTH_NAMES:
-        return _MONTH_NAMES[lowered]
-    # Prefix matching serves Cyrillic declensions only (июня, июне, марте);
-    # Latin prefixes are too greedy ("decisions" must not become December).
-    for stem, number in _MONTH_NAMES.items():
-        if re.search(r"[а-яё]", stem) and lowered.startswith(stem):
-            return number
-    return None
+    return _MONTH_NAMES.get(token.casefold())
 
 
 def parse_query_window(text: str, *, now: datetime) -> QueryWindow | None:
@@ -479,12 +477,18 @@ def parse_query_window(text: str, *, now: datetime) -> QueryWindow | None:
 
     match = _EXPLICIT_DAY.search(text)
     if match:
-        day = datetime(
-            int(match.group(1)), int(match.group(2)), int(match.group(3)),
-            tzinfo=now.tzinfo,
-        )
-        start, end = _day_window(day)
-        return QueryWindow(start, end, match.group(0))
+        try:
+            day = datetime(
+                int(match.group(1)), int(match.group(2)), int(match.group(3)),
+                tzinfo=now.tzinfo,
+            )
+        except ValueError:
+            # Digit runs like "1234-56-78" are not dates (review finding H4);
+            # the parser is best-effort and must never fail a search.
+            day = None
+        if day is not None:
+            start, end = _day_window(day)
+            return QueryWindow(start, end, match.group(0))
 
     for pattern, back_start, back_end in _FUZZY_WINDOWS:
         found = pattern.search(text)
@@ -517,15 +521,17 @@ def parse_query_window(text: str, *, now: datetime) -> QueryWindow | None:
         if month is None:
             continue
         year_text = token_match.group(2)
-        if token_match.group(1).casefold() in {"may", "mar", "jan"} and not year_text:
-            # Bare English homographs are months only with an explicit year.
+        if token_match.group(1).casefold() in _MONTH_HOMOGRAPHS and not year_text:
             continue
         if year_text:
             year = int(year_text)
         else:
             # Most recent such month not in the future.
             year = now.year if month <= now.month else now.year - 1
-        start = datetime(year, month, 1, tzinfo=now.tzinfo)
+        try:
+            start = datetime(year, month, 1, tzinfo=now.tzinfo)
+        except ValueError:
+            continue
         return QueryWindow(start, _month_add(start, 1), token_match.group(0))
 
     return None
