@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from .models import Event
 from .prompt import conservative_token_estimate
+
+
+def _env_protected_patterns() -> tuple[str, ...]:
+    raw = os.environ.get("JOINY_MNEMONIC_PROTECTED_PATTERNS", "")
+    return tuple(item.strip() for item in raw.split(";") if item.strip())
 
 
 _ANSI = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -75,11 +82,23 @@ class ToolOutputReducer:
         head_lines: int = 24,
         tail_lines: int = 24,
         context_lines: int = 2,
+        protected_patterns: Sequence[str] | None = None,
     ) -> None:
         self.minimum_tokens = minimum_tokens
         self.head_lines = head_lines
         self.tail_lines = tail_lines
         self.context_lines = context_lines
+        # task5.md D4 (Headroom audit_safe, Apache-2.0): content matching any
+        # of these regexes must survive every reduction verbatim — not
+        # dropped, not summarized away. If that cannot be guaranteed, the
+        # reducer fails closed and emits no view: compression may never eat
+        # the compliance row.
+        patterns = (
+            tuple(protected_patterns)
+            if protected_patterns is not None
+            else _env_protected_patterns()
+        )
+        self.protected = tuple(re.compile(item) for item in patterns)
 
     @staticmethod
     def _command(event: Event) -> str:
@@ -244,6 +263,181 @@ class ToolOutputReducer:
             },
         )
 
+    # --- JSON-array view (task5.md D3; SmartCrusher recipe from Headroom,
+    # Apache-2.0: first 30% + last 15% + change-points + dedup, cap 15;
+    # lossless tabular preferred at a 15% savings gate because it needs no
+    # retrieval round-trip; the drop sentinel sits IN the array, at the
+    # site of the missing rows) -------------------------------------------
+
+    _JSON_MIN_ROWS = 5
+    _JSON_CAP = 15
+    _JSON_FIRST = 0.30
+    _JSON_LAST = 0.15
+    _JSON_LOSSLESS_GATE = 0.15
+    _JSON_CORE_FIELD_FRACTION = 0.8
+
+    @staticmethod
+    def _parse_json_rows(raw: str) -> list[dict[str, Any]] | None:
+        text = raw.strip()
+        if not text.startswith(("[", "{")):
+            return None
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(value, dict):
+            # Common single-wrapper shapes: {"items": [...]}, {"results": [...]}.
+            lists = [item for item in value.values() if isinstance(item, list)]
+            if len(lists) == 1:
+                value = lists[0]
+        if not isinstance(value, list):
+            return None
+        if not all(isinstance(item, dict) for item in value):
+            return None
+        return value
+
+    def _row_protected(self, row: dict[str, Any]) -> bool:
+        if not self.protected:
+            return False
+        canonical = json.dumps(row, ensure_ascii=False, sort_keys=True)
+        return any(pattern.search(canonical) for pattern in self.protected)
+
+    @staticmethod
+    def _lossless_csv(rows: list[dict[str, Any]], core: list[str]) -> str | None:
+        rendered = [",".join(core)]
+        for row in rows:
+            cells = []
+            for key in core:
+                value = row.get(key, "")
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+                cell = str(value)
+                if any(ch in cell for ch in ",\"\n"):
+                    cell = '"' + cell.replace('"', '""') + '"'
+                cells.append(cell)
+            extras = {key: value for key, value in row.items() if key not in core}
+            if extras:
+                return None  # rows outside the core schema: not losslessly tabular
+            rendered.append(",".join(cells))
+        return "\n".join(rendered)
+
+    def _json_array_view(
+        self, rows: list[dict[str, Any]], event_id: str, raw: str
+    ) -> tuple[str, str, dict[str, Any]] | None:
+        total = len(rows)
+        deduplicated: list[dict[str, Any]] = []
+        seen: dict[str, int] = {}
+        for row in rows:
+            key = json.dumps(row, ensure_ascii=False, sort_keys=True)
+            if key in seen:
+                seen[key] += 1
+                continue
+            seen[key] = 1
+            deduplicated.append(row)
+
+        key_counts: dict[str, int] = {}
+        for row in deduplicated:
+            for key in row:
+                key_counts[key] = key_counts.get(key, 0) + 1
+        core = [
+            key for key, count in key_counts.items()
+            if count / max(len(deduplicated), 1) >= self._JSON_CORE_FIELD_FRACTION
+        ]
+        if core and len(deduplicated) == total:
+            csv_text = self._lossless_csv(deduplicated, core)
+            if csv_text is not None:
+                savings = 1.0 - len(csv_text.encode()) / max(len(raw.encode()), 1)
+                if savings >= self._JSON_LOSSLESS_GATE:
+                    return (
+                        csv_text,
+                        "json-lossless-csv",
+                        {
+                            "rows_total": total,
+                            "rows_kept": total,
+                            "rows_dropped": 0,
+                            "csv_savings": round(savings, 4),
+                        },
+                    )
+
+        # The cap outranks the fractions: allocate it 60/40 between the head
+        # and the tail, then let schema change-points fill any remaining
+        # slack. Protected rows ride above the cap unconditionally.
+        count = len(deduplicated)
+        first = min(math.ceil(count * self._JSON_FIRST), count)
+        last = min(math.ceil(count * self._JSON_LAST), count)
+        first_quota = min(first, math.ceil(self._JSON_CAP * 0.6))
+        last_quota = min(last, self._JSON_CAP - first_quota)
+        kept_indexes: set[int] = set(range(first_quota))
+        kept_indexes.update(range(max(0, count - last_quota), count))
+        slack = self._JSON_CAP - len(kept_indexes)
+        if slack > 0:
+            previous_keys: frozenset[str] | None = None
+            for index, row in enumerate(deduplicated):
+                keys = frozenset(row)
+                if (
+                    previous_keys is not None
+                    and keys != previous_keys
+                    and index not in kept_indexes
+                ):
+                    kept_indexes.add(index)  # schema change-point
+                    slack -= 1
+                    if slack == 0:
+                        break
+                previous_keys = keys
+        for index, row in enumerate(deduplicated):
+            if self._row_protected(row):
+                kept_indexes.add(index)
+
+        kept = [deduplicated[index] for index in sorted(kept_indexes)]
+        if self.protected:
+            for row in deduplicated:
+                if self._row_protected(row) and row not in kept:
+                    return None  # fail closed: never ship a view missing one
+        dropped = total - len(kept)
+        body = list(kept)
+        if dropped > 0:
+            body.append(
+                {
+                    "_dropped": (
+                        f"{dropped} rows omitted; exact source: "
+                        f"memory_source {event_id}"
+                    )
+                }
+            )
+        return (
+            json.dumps(body, ensure_ascii=False),
+            "json-array-crush",
+            {
+                "rows_total": total,
+                "rows_kept": len(kept),
+                "rows_dropped": dropped,
+                "duplicates_collapsed": total - len(deduplicated),
+            },
+        )
+
+    def _enforce_protected_lines(
+        self, compact_body: str, lines: list[str]
+    ) -> str | None:
+        """Line-based D4: every protected source line must be in the view;
+        missing ones are appended in source order, or the view is refused."""
+        if not self.protected:
+            return compact_body
+        required = [
+            line for line in lines
+            if line and any(pattern.search(line) for pattern in self.protected)
+        ]
+        if not required:
+            return compact_body
+        present = set(compact_body.splitlines())
+        missing = [line for line in required if line not in present]
+        result = compact_body
+        if missing:
+            result = "\n".join([compact_body, "[protected lines]", *missing])
+        for line in required:
+            if line not in result:
+                return None  # defensive fail-closed
+        return result
+
     @staticmethod
     def _summary(compact: str, family: str, metadata: dict[str, Any]) -> str:
         lines = compact.splitlines()
@@ -279,14 +473,35 @@ class ToolOutputReducer:
         views: list[ReducedView] = []
 
         if raw_tokens >= self.minimum_tokens and family not in {"source", "diff", "status"}:
-            if family == "test":
-                compact_body, strategy, metadata = self._test_view(lines)
+            view: tuple[str, str, dict[str, Any]] | None
+            if family == "generic" and (
+                (rows := self._parse_json_rows(raw)) is not None
+                and len(rows) >= self._JSON_MIN_ROWS
+            ):
+                family = "json"
+                view = self._json_array_view(rows, event.id, raw)
+            elif family == "test":
+                view = self._test_view(lines)
             elif family == "search":
-                compact_body, strategy, metadata = self._search_view(lines)
+                view = self._search_view(lines)
             elif family == "build":
-                compact_body, strategy, metadata = self._build_view(lines)
+                view = self._build_view(lines)
             else:
-                compact_body, strategy, metadata = self._generic_view(lines)
+                view = self._generic_view(lines)
+            if view is not None and family != "json":
+                enforced = self._enforce_protected_lines(view[0], lines)
+                view = None if enforced is None else (enforced, view[1], view[2])
+            if view is None:
+                # Fail closed (task5.md D4): a protected row/line could not
+                # be guaranteed in the view; the raw output stands alone.
+                return ReductionBundle(
+                    event_id=event.id, family=family, raw_tokens=raw_tokens,
+                    raw_bytes=raw_bytes,
+                    latency_ns=time.perf_counter_ns() - started, views=(),
+                    critical_signal_count=len(critical),
+                    compact_critical_recall=1.0,
+                )
+            compact_body, strategy, metadata = view
             compact = self._frame(event.id, "compact", strategy, raw_tokens, compact_body)
             compact_tokens = conservative_token_estimate(compact)
             retained = self.critical_signals(compact_body, family)
