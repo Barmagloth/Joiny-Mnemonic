@@ -41,6 +41,38 @@ class IntegrationTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
+    def test_cli_survives_narrow_console_encoding(self) -> None:
+        """First-live-run regression: memory content with characters outside
+        the console codepage (e.g. "↔") crashed every CLI read command with
+        'charmap' codec errors on Windows; output must degrade, not die."""
+        root = RUNTIME_ROOT / f"narrow-console-{uuid.uuid4().hex}"
+        root.mkdir(parents=True)
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONIOENCODING": "cp1251",  # narrow codepage without "↔"
+            }
+        )
+        base = [
+            sys.executable, "-m", "joiny_mnemonic",
+            "--db", str(root / "memory.db"), "--project-root", str(root),
+        ]
+        appended = subprocess.run(
+            [*base, "append", "--kind", "message", "--role", "user",
+             "--content", "GPT↔Claude bridge ⇄ проверка"],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        self.assertEqual(appended.returncode, 0, appended.stderr)
+        shown = subprocess.run(
+            [*base, "timeline", "--limit", "5"],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        self.assertIn("Claude bridge", shown.stdout)
+        self.assertNotIn("charmap", shown.stderr)
+
     def test_cli_init_resolves_witness_registry(self) -> None:
         root = RUNTIME_ROOT / f"cli-init-{uuid.uuid4().hex}"
         root.mkdir()

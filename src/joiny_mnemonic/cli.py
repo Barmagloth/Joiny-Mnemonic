@@ -858,6 +858,18 @@ def run(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    # Windows consoles often use narrow codepages (cp1251/cp866); captured
+    # memory legitimately contains characters they cannot encode (e.g. "↔"
+    # from a real project file crashed `resume` during the first live run).
+    # Keep the console's own encoding so Cyrillic still renders, but replace
+    # unencodable characters instead of dying.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
     try:
         raise SystemExit(run(build_parser().parse_args()))
     except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
