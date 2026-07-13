@@ -390,6 +390,32 @@ class InstallerTest(unittest.TestCase):
         self.assertEqual(parsed.command, "setup")
         self.assertTrue(parsed.enable_extraction)
 
+    def test_wrapper_scope_flag_does_not_suppress_interactive_selection(self) -> None:
+        """install.ps1/install.sh always pass --scope; that alone must not be
+        treated as an explicit selection, or the guided installer silently
+        configures zero agents (first live-run regression)."""
+        from unittest.mock import patch
+
+        from joiny_mnemonic import cli as cli_module
+
+        args = build_parser().parse_args(
+            ["--project-root", str(self.project()), "setup", "--scope", "project"]
+        )
+        chosen = (("claude-code",), (), False, "project", False)
+        with (
+            patch.object(cli_module.sys.stdin, "isatty", return_value=True),
+            patch.object(
+                cli_module, "select_interactively", return_value=chosen
+            ) as interactive,
+            patch.object(cli_module, "run_setup", return_value={}) as setup_call,
+        ):
+            cli_module.run(args)
+        interactive.assert_called_once()
+        self.assertEqual(
+            interactive.call_args.kwargs.get("default_scope"), "project"
+        )
+        self.assertEqual(setup_call.call_args.kwargs["agents"], ("claude-code",))
+
     def test_uninstall_removes_only_owned_integrations_and_preserves_data(self) -> None:
         root = self.project()
         home = root / "home"

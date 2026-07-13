@@ -778,6 +778,7 @@ def confirm_data_deletion(
 def select_interactively(
     detections: Sequence[AgentDetection],
     *,
+    default_scope: str = "project",
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
 ) -> tuple[tuple[str, ...], tuple[str, ...], bool, str, bool]:
@@ -837,8 +838,8 @@ def select_interactively(
     )
     while True:
         scope = input_fn(
-            "Installation scope project/global [project]: "
-        ).strip().casefold() or "project"
+            f"Installation scope project/global [{default_scope}]: "
+        ).strip().casefold() or default_scope
         if scope in {"project", "global"}:
             break
         output_fn("Invalid scope; enter project or global.")

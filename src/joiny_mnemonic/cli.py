@@ -520,11 +520,11 @@ def run(args: argparse.Namespace) -> int:
             scope = args.scope or "project"
             enable_extraction = bool(args.enable_extraction)
         else:
-            explicit = (
-                args.agent or args.plugin or args.all_plugins or args.without_hooks
-                or args.scope or args.with_mcp or args.skip_plugin_install
-                or args.enable_extraction or args.dry_run
-            )
+            # Only a product/component *selection* makes the run non-interactive.
+            # Wrapper scripts always pass --scope/--source-root, and flags like
+            # --with-mcp alone select nothing; treating them as explicit made the
+            # guided installer silently configure zero agents.
+            explicit = bool(args.agent or args.plugin or args.all_plugins)
             if explicit:
                 agents = tuple(args.agent)
                 plugins = (
@@ -537,7 +537,9 @@ def run(args: argparse.Namespace) -> int:
             elif sys.stdin.isatty():
                 (
                     agents, plugins, with_mcp, scope, enable_extraction
-                ) = select_interactively(detections)
+                ) = select_interactively(
+                    detections, default_scope=args.scope or "project"
+                )
             else:
                 raise ValueError(
                     "setup requires --yes or explicit --agent/--plugin options "
