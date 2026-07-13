@@ -226,6 +226,33 @@ class EvidenceConsolidator:
             memory_ids.append(record.id)
             if candidate.block is None:
                 continue
+            if candidate.content.rstrip().endswith("?"):
+                # Live-run finding: "DECISION: <вопрос>?" — a user querying
+                # with a marker wrote a question into a protected block. A
+                # question is never a decision/task assertion; route the
+                # block write to the *_requested discipline instead. The
+                # searchable record above is still created.
+                service.store.append_internal_events_once(
+                    f"block-change-request:{event.id}:{candidate.block}",
+                    [
+                        {
+                            "kind": "state",
+                            "role": None,
+                            "content": f"block change requested: {candidate.block}",
+                            "payload": {
+                                "operation": "block_change_requested",
+                                "block": candidate.block,
+                                "content": candidate.content,
+                                "reason": "marker_content_is_a_question",
+                                "source_event_id": event.id,
+                            },
+                        }
+                    ],
+                    branch_id=event.branch_id,
+                    session_id=event.session_id,
+                )
+                skipped.append(candidate.block)
+                continue
             current = service.store.get_active_blocks(branch_id=event.branch_id).get(candidate.block)
             content = self._merge_block(
                 current.content if current else "",

@@ -1244,6 +1244,25 @@ class MemoryStore:
             origin_adapter=None,
         )
 
+    def append_internal_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        branch_id: str = "main",
+        session_id: str | None = None,
+    ) -> tuple[tuple[Event, ...], bool]:
+        """Idempotent ingress for deterministic system-derived events
+        (reconciler detections and similar); origin is honest: internal."""
+        return self._append_events_once(
+            receipt_key,
+            events,
+            branch_id=branch_id,
+            session_id=session_id,
+            origin_channel="internal",
+            origin_adapter=None,
+        )
+
     def append_host_events_once(
         self,
         receipt_key: str,

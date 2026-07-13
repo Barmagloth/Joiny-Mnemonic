@@ -411,6 +411,7 @@ def process_hook(
     # A retry may follow a crash after capture but before consolidation; receipts make
     # capture idempotent and every derived subsystem has its own idempotent receipt.
     service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
+    service.reconciler.reconcile(branch_id=branch_id)
     service.extraction.notify(detached=True)
     service.checkpoint_witness()
     decision = service.governor.evaluate_and_apply(

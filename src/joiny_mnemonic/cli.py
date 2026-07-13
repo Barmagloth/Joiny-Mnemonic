@@ -252,6 +252,11 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--include-unknown-validity", action="store_true")
     search.add_argument("--history", action="store_true")
 
+    reconcile = commands.add_parser(
+        "reconcile", help="detect evidence-completed tasks; close under policy flag"
+    )
+    reconcile.add_argument("--branch", default="main")
+
     stale = commands.add_parser("stale")
     stale.add_argument("--branch", default="main")
     selector = stale.add_mutually_exclusive_group()
@@ -644,6 +649,18 @@ def run(args: argparse.Namespace) -> int:
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes, valid_from=args.valid_from, valid_to=args.valid_to, temporal_expression=args.temporal_expression))
         elif args.command == "search":
             _print(service.search(query=args.query, branch_id=args.branch, memory_types=tuple(args.type), file=args.file, since=args.since, until=args.until, limit=args.limit, exact=args.exact, include_events=not args.no_events, semantic=not args.no_semantic, include_staleness=args.staleness, valid_at=args.valid_at, known_at=args.known_at, current=args.current, include_unknown_validity=args.include_unknown_validity, history=args.history))
+        elif args.command == "reconcile":
+            _print(
+                {
+                    **service.reconciler.reconcile(branch_id=args.branch),
+                    "pending": service.reconciler.pending_completions(
+                        branch_id=args.branch
+                    ),
+                    "hygiene": service.reconciler.hygiene_findings(
+                        branch_id=args.branch
+                    ),
+                }
+            )
         elif args.command == "stale":
             _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
         elif args.command == "precheck":

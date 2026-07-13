@@ -24,6 +24,7 @@ from .prompt import PromptAssembler
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
 from . import temporal
+from .reconciler import StateReconciler
 from .snapshots import SnapshotManager
 from .staleness import MemoryStaleness, StalenessService
 from .storage import CURRENT_SCHEMA_VERSION, MemoryStore
@@ -128,6 +129,7 @@ class MemoryService:
         self.reducer = ToolOutputReducer()
         self.tasks = TaskManager(self)
         self.governor = BudgetGovernor(self)
+        self.reconciler = StateReconciler(self)
         self.plugin_errors = self.plugins.errors
 
     def _sync_extraction_policy(self) -> bool:
@@ -163,11 +165,15 @@ class MemoryService:
         return f"{remote}|{initial[0] if initial else ''}"
 
     def initialize_project(
-        self, *, automatic_extraction_enabled: bool = False
+        self,
+        *,
+        automatic_extraction_enabled: bool = False,
+        automatic_task_closure_enabled: bool = False,
     ) -> dict[str, Any]:
         policy = {
             "version": 1,
             "automatic_extraction_enabled": bool(automatic_extraction_enabled),
+            "automatic_task_closure_enabled": bool(automatic_task_closure_enabled),
             "auto_threshold": (
                 self.extraction.config.auto_threshold
                 if self.extraction.config is not None else 0.85
@@ -847,6 +853,17 @@ class MemoryService:
                 "http_api": True,
                 "mcp": True,
                 "cli": True,
+                "state_maintenance": {
+                    "automatic_task_closure_enabled": (
+                        bool(
+                            (self.store.active_policy() or {"policy": {}})["policy"].get(
+                                "automatic_task_closure_enabled", False
+                            )
+                        )
+                    ),
+                    "pending_task_completions": self.reconciler.pending_completions(),
+                    "hygiene_findings": self.reconciler.hygiene_findings(),
+                },
                 "bitemporal_retrieval": {
                     "valid_time_fields": True,
                     "controls": (
