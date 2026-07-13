@@ -12,6 +12,7 @@ param(
     [string[]]$Plugin = @(),
     [switch]$AllPlugins,
     [switch]$WithMcp,
+    [switch]$WithoutMcp,
     [switch]$WithoutHooks,
     [switch]$EnableExtraction,
     [switch]$SkipPluginInstall,
@@ -77,6 +78,7 @@ foreach ($Value in $Agent) { $SetupArgs += @("--agent", $Value) }
 foreach ($Value in $Plugin) { $SetupArgs += @("--plugin", $Value) }
 if ($AllPlugins) { $SetupArgs += "--all-plugins" }
 if ($WithMcp) { $SetupArgs += "--with-mcp" }
+if ($WithoutMcp) { $SetupArgs += "--without-mcp" }
 if ($WithoutHooks) { $SetupArgs += "--without-hooks" }
 if ($EnableExtraction) { $SetupArgs += "--enable-extraction" }
 if ($SkipPluginInstall) { $SetupArgs += "--skip-plugin-install" }

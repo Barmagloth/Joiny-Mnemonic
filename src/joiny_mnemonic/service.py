@@ -614,8 +614,26 @@ class MemoryService:
                 return events, source_branch
         raise KeyError(f"unknown source identifier: {identifier}")
 
+    def _record_promotion(self, identifier: str, events: Sequence[Event]) -> None:
+        """Best-effort D5 telemetry; promotion must never fail over it."""
+        try:
+            family = "memory" if identifier.startswith("mem_") else "event"
+            for event in events:
+                if event.kind == "tool_output":
+                    from .reducers import ToolOutputReducer
+
+                    family = ToolOutputReducer.family(event)
+                    break
+            branch = events[0].branch_id if events else "main"
+            self.usage.record_source_promotion(
+                branch_id=branch, target_id=identifier, family=family
+            )
+        except Exception:
+            pass
+
     def exact_source(self, memory_or_event_id: str) -> list[Event]:
         events, _ = self._resolve_exact_source(memory_or_event_id)
+        self._record_promotion(memory_or_event_id, events)
         return list(events)
 
     def exact_sources(self, ids: Sequence[str]) -> tuple[ExactSourceResult, ...]:
@@ -627,6 +645,7 @@ class MemoryService:
         results: list[ExactSourceResult] = []
         for identifier in identifiers:
             events, _ = self._resolve_exact_source(identifier)
+            self._record_promotion(identifier, events)
             results.append(
                 ExactSourceResult(
                     id=identifier,

@@ -41,22 +41,95 @@ class PromptAssembler:
         self.token_counter = token_counter
         self.telemetry = telemetry
 
-    def _event_text(self, event: Event) -> str:
-        role = event.role or "none"
-        files = f" files={','.join(event.files)}" if event.files else ""
+    # task5.md D1/D2 (mechanisms from Headroom, Apache-2.0).
+    _FOLD_MIN_CHARS = 240
+    _QUIESCE_GROUPS = 5
+    _MAX_HOLD_GROUPS = 40
+
+    def _event_body(
+        self, event: Event, active_files: frozenset[str] = frozenset()
+    ) -> tuple[str, str]:
+        """Pick the representation: raw while the file is active, compact
+        view once it has been quiet (D2 — their measured insight: file-touch
+        gaps are fat-tailed, p50=4 turns p90=81, so fixed windows fail; raw
+        canonical is always recoverable regardless)."""
         content = event.content
         representation = "canonical-verbatim"
         if event.kind == "tool_output":
-            view = self.store.get_tool_output_view(event.id, level="compact")
-            if view is not None:
-                content = view.content
-                representation = f"derived-{view.level}:{view.id}"
+            touched_active = any(
+                str(item).replace("\\", "/").casefold() in active_files
+                for item in event.files
+            )
+            if not touched_active:
+                view = self.store.get_tool_output_view(event.id, level="compact")
+                if view is not None:
+                    content = view.content
+                    representation = f"derived-{view.level}:{view.id}"
+        return content, representation
+
+    @staticmethod
+    def _frame_event(event: Event, content: str, representation: str) -> str:
+        role = event.role or "none"
+        files = f" files={','.join(event.files)}" if event.files else ""
         return (
             f"<event id={event.id} seq={event.seq} kind={event.kind} role={role}{files} "
             f"representation={representation}>\n"
             f"{content}\n"
             "</event>"
         )
+
+    def _render_transcript(
+        self, events: list[Event], active_files: frozenset[str] = frozenset()
+    ) -> str:
+        """Render with cross-event verbatim folding (D1): a later event's
+        span that reproduces an earlier included event's body verbatim
+        becomes an absolute pointer. Prefix-monotonic by construction —
+        later bodies only reference strictly earlier ones — and
+        keep-earliest: the referenced original is always in the packet."""
+        corpus: list[tuple[str, str]] = []
+        parts: list[str] = []
+        for event in events:
+            body, representation = self._event_body(event, active_files)
+            folded = body
+            for earlier_id, earlier_body in corpus:
+                if (
+                    len(earlier_body) >= self._FOLD_MIN_CHARS
+                    and earlier_body in folded
+                ):
+                    folded = folded.replace(
+                        earlier_body, f"<folded: identical to {earlier_id}>"
+                    )
+            if folded != body:
+                representation += "+folded"
+            corpus.append((event.id, body))
+            parts.append(self._frame_event(event, folded, representation))
+        return "\n\n".join(parts)
+
+    def _active_files(self, all_events: list[Event]) -> frozenset[str]:
+        """Files touched within the last quiesce window of interaction
+        groups; bounded by max_hold so nothing stays verbatim forever."""
+        groups = interaction_groups(all_events)
+        recent = groups[-self._QUIESCE_GROUPS:]
+        hold_boundary = groups[-self._MAX_HOLD_GROUPS:]
+        held: set[str] = set()
+        for group in recent:
+            for event in group:
+                for item in event.files:
+                    held.add(str(item).replace("\\", "/").casefold())
+        if not held:
+            return frozenset()
+        bounded: set[str] = set()
+        for group in hold_boundary:
+            for event in group:
+                for item in event.files:
+                    normalized = str(item).replace("\\", "/").casefold()
+                    if normalized in held:
+                        bounded.add(normalized)
+        return frozenset(bounded)
+
+    def _event_text(self, event: Event) -> str:
+        content, representation = self._event_body(event)
+        return self._frame_event(event, content, representation)
 
     @staticmethod
     def _retrieval_text(hit: RetrievalHit) -> str:
@@ -224,6 +297,7 @@ class PromptAssembler:
             self._state_events(state) if state is not None
             else self.store.query_events(branch_id=branch_id)
         )
+        active_files = self._active_files(all_events)
         recent_groups = interaction_groups(all_events)[-recent_event_count:] if recent_event_count else []
         chosen_groups: list[list[Event]] = []
         for group in reversed(recent_groups):
@@ -232,8 +306,9 @@ class PromptAssembler:
                 (event for candidate_group in candidate_groups for event in candidate_group),
                 key=lambda event: event.seq,
             )
-            section = "[RECENT TRANSCRIPT - CANONICAL EVENTS; TOOL OUTPUTS MAY USE PROVENANCE-BOUND VIEWS]\n\n" + "\n\n".join(
-                self._event_text(item) for item in candidate_events
+            section = (
+                "[RECENT TRANSCRIPT - CANONICAL EVENTS; TOOL OUTPUTS MAY USE PROVENANCE-BOUND VIEWS]\n\n"
+                + self._render_transcript(candidate_events, active_files)
             )
             base = parts[:-1] if parts and parts[-1].startswith("[RECENT TRANSCRIPT") else parts
             if self._fits(base, section, transcript_budget):
@@ -246,7 +321,7 @@ class PromptAssembler:
         if chosen_recent:
             parts.append(
                 "[RECENT TRANSCRIPT - CANONICAL EVENTS; TOOL OUTPUTS MAY USE PROVENANCE-BOUND VIEWS]\n\n"
-                + "\n\n".join(self._event_text(item) for item in chosen_recent)
+                + self._render_transcript(chosen_recent, active_files)
             )
 
         if query and retrieval_limit:

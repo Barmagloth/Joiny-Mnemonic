@@ -186,6 +186,69 @@ class SnapshotAndPromptTest(unittest.TestCase):
         task = self.service.tasks.start("snapshot-protected-task", "Protected task")
         with self.assertRaisesRegex(ValueError, "active_task:snapshot-protected-task"):
             self.service.prune_snapshots([task.snapshot_id])
+    def test_transcript_folds_verbatim_repeats_keep_earliest(self) -> None:
+        """task5.md D1: a later event reproducing an earlier included body
+        verbatim folds into an absolute pointer; the original stays."""
+        blob = "line of repeated file content\n" * 12  # >= 240 chars
+        first = self.service.store.append_event(
+            kind="tool_output", content=blob,
+            payload={"tool_name": "Bash", "tool_input": {"command": "unusual-cmd-x"}},
+        )
+        second = self.service.store.append_event(
+            kind="tool_output", content="prefix noise\n" + blob + "suffix",
+            payload={"tool_name": "Bash", "tool_input": {"command": "unusual-cmd-y"}},
+        )
+        assembler = self.service.prompts
+        rendered = assembler._render_transcript(
+            [first, second], frozenset()
+        )
+        self.assertEqual(rendered.count(blob.strip().splitlines()[0]), 12)
+        self.assertIn(f"<folded: identical to {first.id}>", rendered)
+        # Prefix-monotonicity: adding a later event never changes how the
+        # earlier ones rendered.
+        third = self.service.store.append_event(
+            kind="message", role="user", content="unrelated turn"
+        )
+        longer = assembler._render_transcript([first, second, third], frozenset())
+        self.assertTrue(longer.startswith(rendered))
+
+    def test_view_maturation_by_file_activity(self) -> None:
+        """task5.md D2: raw representation while the file is active, compact
+        view once it has been quiet for the quiesce window."""
+        path = "src/hot_file.py"
+        lines = "\n".join(f"content line {index}" for index in range(300))
+        event = self.service.store.append_event(
+            kind="tool_output", content=lines,
+            # A generic command: 'cat'-style source reads intentionally
+            # pass through the reducer unreduced.
+            payload={"tool_name": "Bash", "tool_input": {"command": "analyze --all"}},
+            files=(path,),
+        )
+        self.service.reduce_tool_output(event)
+        assembler = self.service.prompts
+
+        active = frozenset({path.casefold()})
+        body_active, repr_active = assembler._event_body(event, active)
+        self.assertEqual(repr_active, "canonical-verbatim")
+        self.assertIn("content line 299", body_active)
+
+        body_quiet, repr_quiet = assembler._event_body(event, frozenset())
+        self.assertTrue(repr_quiet.startswith("derived-"), repr_quiet)
+        self.assertNotEqual(body_quiet, lines)
+
+        # End-to-end: activity computed from the tail of the event stream.
+        for index in range(6):  # six quiet interaction groups
+            self.service.store.append_event(
+                kind="message", role="user", content=f"quiet turn {index}"
+            )
+            self.service.store.append_event(
+                kind="message", role="assistant", content=f"ack {index}"
+            )
+        active_now = assembler._active_files(
+            self.service.store.query_events()
+        )
+        self.assertNotIn(path.casefold(), active_now)
+
     def test_trusted_restatement_follows_poisoned_transcript(self) -> None:
         """Live-run finding: a recent assistant message that misquotes a
         protected block wins on recency across agents. The packet must state

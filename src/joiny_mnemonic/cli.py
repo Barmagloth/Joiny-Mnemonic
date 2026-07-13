@@ -142,6 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument("--all-plugins", action="store_true")
     setup.add_argument("--scope", choices=["project", "global"])
     setup.add_argument("--with-mcp", action="store_true")
+    setup.add_argument(
+        "--without-mcp", action="store_true",
+        help="skip MCP registration (default registers it: memory tools let "
+        "agents quote protected state instead of paraphrasing)",
+    )
     setup.add_argument("--without-hooks", action="store_true")
     setup.add_argument("--skip-plugin-install", action="store_true")
     setup.add_argument(
@@ -256,6 +261,12 @@ def build_parser() -> argparse.ArgumentParser:
         "reconcile", help="detect evidence-completed tasks; close under policy flag"
     )
     reconcile.add_argument("--branch", default="main")
+
+    reduction_report = commands.add_parser(
+        "reduction-report",
+        help="correlate compact-view exposures with exact-source promotions",
+    )
+    reduction_report.add_argument("--branch", default="main")
 
     stale = commands.add_parser("stale")
     stale.add_argument("--branch", default="main")
@@ -513,6 +524,11 @@ def run(args: argparse.Namespace) -> int:
     if args.command == "setup":
         project_root = resolve_runtime_project(args.project_root)
         detections = detect_agents(project_root)
+        # task5.md A4: MCP registration defaults ON everywhere — quoting
+        # protected state must be cheaper than recalling it; --without-mcp
+        # is the explicit opt-out (review finding M11: the interactive path
+        # alone honoring the default was a half-measure).
+        default_mcp = bool(args.with_mcp) or not args.without_mcp
         if args.yes:
             agents = tuple(args.agent) or tuple(
                 item.id for item in detections if item.detected
@@ -521,7 +537,7 @@ def run(args: argparse.Namespace) -> int:
                 ("semantic-local", "knowledge-graph", "nuextract-local")
                 if args.all_plugins else tuple(args.plugin)
             )
-            with_mcp = bool(args.with_mcp)
+            with_mcp = default_mcp
             scope = args.scope or "project"
             enable_extraction = bool(args.enable_extraction)
         else:
@@ -536,7 +552,7 @@ def run(args: argparse.Namespace) -> int:
                     ("semantic-local", "knowledge-graph", "nuextract-local")
                     if args.all_plugins else tuple(args.plugin)
                 )
-                with_mcp = bool(args.with_mcp)
+                with_mcp = default_mcp
                 scope = args.scope or "project"
                 enable_extraction = bool(args.enable_extraction)
             elif sys.stdin.isatty():
@@ -661,6 +677,8 @@ def run(args: argparse.Namespace) -> int:
                     ),
                 }
             )
+        elif args.command == "reduction-report":
+            _print(service.usage.overcompression_report(branch_id=args.branch))
         elif args.command == "stale":
             _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
         elif args.command == "precheck":

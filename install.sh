@@ -23,7 +23,7 @@ while (($#)); do
     --scope) scope="$2"; shift 2 ;;
     --agent) agents+=("$2"); shift 2 ;;
     --plugin) plugins+=("$2"); shift 2 ;;
-    --all-plugins|--with-mcp|--without-hooks|--skip-plugin-install|--enable-extraction|--yes|--dry-run)
+    --all-plugins|--with-mcp|--without-mcp|--without-hooks|--skip-plugin-install|--enable-extraction|--yes|--dry-run)
       extra+=("$1"); shift ;;
     -h|--help)
       echo "Usage: install.sh [--project-root PATH] [--scope project|global]"

@@ -185,6 +185,57 @@ class UsageMeter:
             receipt_key=f"reduce:{event.id}:v1",
         )
 
+    def record_source_promotion(
+        self,
+        *,
+        branch_id: str,
+        target_id: str,
+        family: str,
+        session_id: str | None = None,
+    ) -> UsageSample:
+        """task5.md D5: a promotion to exact source shortly after a compact
+        exposure is the ground-truth signal of over-compression (Headroom's
+        TOIN insight, Apache-2.0, de-LLM-ified into plain correlation)."""
+        return self.store.record_usage(
+            branch_id=branch_id,
+            session_id=session_id,
+            source="joiny-mnemonic",
+            operation="source_promotion",
+            estimated=False,
+            metadata={"target": target_id, "family": family},
+        )
+
+    def overcompression_report(self, *, branch_id: str = "main") -> dict[str, Any]:
+        """Deterministic offline correlation: reduce exposures vs promotions
+        per reducer family. Warning-only; feeding it back into reducer levels
+        is a human decision."""
+        reduces: dict[str, int] = {}
+        promotions: dict[str, int] = {}
+        for sample in self.store.list_usage_samples(branch_id=branch_id):
+            family = str(sample.metadata.get("family", "")) or "unknown"
+            if sample.operation == "tool_output_reduce":
+                reduces[family] = reduces.get(family, 0) + 1
+            elif sample.operation == "source_promotion":
+                promotions[family] = promotions.get(family, 0) + 1
+        families = {}
+        for family in sorted(set(reduces) | set(promotions)):
+            reduce_count = reduces.get(family, 0)
+            promotion_count = promotions.get(family, 0)
+            ratio = promotion_count / reduce_count if reduce_count else 0.0
+            families[family] = {
+                "reduced_views": reduce_count,
+                "source_promotions": promotion_count,
+                "promotion_ratio": round(ratio, 4),
+                "over_compressed": reduce_count >= 5 and ratio > 0.2,
+            }
+        return {
+            "branch_id": branch_id,
+            "families": families,
+            "recommendation": [
+                family for family, item in families.items() if item["over_compressed"]
+            ],
+        }
+
     def record_retrieval_search(
         self,
         *,
