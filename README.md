@@ -18,6 +18,7 @@ separately installable plugins; KV storage remains an extension protocol.
 | Protected state | Versioned `instructions`, `goal`, `constraints`, `decisions`, `open_tasks` |
 | Retrieval | SQLite FTS5/BM25 plus optional local sentence-transformer retrieval over memories and canonical events |
 | Bitemporal memory | Nullable `valid_from`/`valid_to` with per-bound precision, Kleene three-valued temporal core, branch-local `known_at` replay, `valid_at`/`current`/`history` query controls, explicit `validity_status` incl. `current_open` |
+| State maintenance | Evidence-bound task-completion reconciler (policy-gated closure with provenance), block hygiene findings, question-marker guard, quote-don't-recall MCP tools |
 | Resume | Materialized snapshot state plus replay tail; protected packet capped at 1500 estimated tokens |
 | Snapshots | Recursive JSON patch deltas, cursor, parent/branch lineage, Git/file fingerprints and staleness warnings |
 | Memory staleness | On-demand Git commit counts for files referenced by live memories; warning-only and ranking-neutral |
@@ -62,8 +63,9 @@ For reproducible/non-interactive provisioning:
 
     .\install.ps1 -Yes -Scope project -Agent claude-code,codex -Plugin knowledge-graph,nuextract-local -WithMcp
 
-The conservative default selects detected products for hooks, installs no heavy optional
-component, and leaves MCP registration off. Installing NuExtract is also passive; the separate
+The conservative default selects detected products for hooks and installs no heavy optional
+component; MCP registration defaults to yes, because the memory tools let agents quote
+protected state instead of paraphrasing it from recalled context. Installing NuExtract is also passive; the separate
 `--enable-extraction` flag writes a fresh TOFU policy or requests a trusted change on an existing
 project. Use `--revision <tag-or-commit>` for a pinned source checkout and
 `joiny-mnemonic setup --dry-run --yes` to inspect a plan. Safe removal uses
