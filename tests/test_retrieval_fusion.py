@@ -165,6 +165,24 @@ class FusionTest(unittest.TestCase):
         self.assertNotIn("fusion_ranks", target.metadata)
         self.assertNotIn("boost_signals", target.metadata)
 
+    def test_query_timestamp_anchors_relative_windows(self) -> None:
+        anchored = parse_query_window(
+            "что решили вчера", now=datetime(2026, 3, 10, 1, 0, tzinfo=UTC)
+        )
+        self.assertEqual(str(anchored.start.date()), "2026-03-09")
+        # Through the search surface: hits carry the anchored window.
+        record = self._fact("решение по кэшу", valid_from="2026-03-09")
+        hits = self.service.search(
+            query="что решили вчера про кэш",
+            query_timestamp="2026-03-10T12:00:00+00:00",
+            include_events=False,
+            include_unknown_validity=True,
+            limit=10,
+        )
+        target = next((hit for hit in hits if hit.id == record.id), None)
+        self.assertIsNotNone(target)
+        self.assertIn("temporal", target.metadata.get("fusion_ranks", {}))
+
     def test_graph_arm_fuses_when_plugin_matches_entities(self) -> None:
         class FakeGraphPlugin:
             name = "fake-graph"

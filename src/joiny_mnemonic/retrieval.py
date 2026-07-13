@@ -64,6 +64,9 @@ class RetrievalContext:
     current: bool = False
     include_unknown_validity: bool = False
     history: bool = False
+    # Caller-supplied anchor for relative expressions ("вчера") so day
+    # boundaries resolve in the caller's clock, not UTC (review M11).
+    query_timestamp: str | None = None
 
     @property
     def temporal_active(self) -> bool:
@@ -182,11 +185,19 @@ class RetrievalEngine:
                  replace(hit, score=proximity, metadata=metadata))
             )
 
-        for record in self.store.list_memories(
+        memories = self.store.list_memories(
             branch_id=context.branch_id,
             memory_types=context.memory_types,
+            since=context.since,
+            until=context.until,
             file=context.file,
-        ):
+        )
+        if len(memories) > 2000:
+            # Deterministic cap (review M6): newest first by admission.
+            memories = sorted(
+                memories, key=lambda item: item.created_at, reverse=True
+            )[:2000]
+        for record in memories:
             interval = temporal.interval_from_fields(
                 record.valid_from, record.valid_from_precision,
                 record.valid_to, record.valid_to_precision,
@@ -205,7 +216,9 @@ class RetrievalEngine:
                 anchor = admitted
             consider(self._memory_hit(record, context), interval, anchor)
 
-        if context.include_events:
+        skip_events = window.start > datetime.now(UTC)  # review L7: nothing
+        # can have been admitted inside a future window.
+        if context.include_events and not skip_events:
             for event in self.store.query_events(
                 branch_id=context.branch_id,
                 since=window.start.isoformat(),
@@ -236,12 +249,16 @@ class RetrievalEngine:
                 self._TEMPORAL_BUCKETS - 1,
             )
             buckets.setdefault(max(index, 0), []).append(item)
-        selected: list[RetrievalHit] = []
-        while len(selected) < self._TEMPORAL_KEEP and any(buckets.values()):
+        picked: list[tuple[int, float, datetime, RetrievalHit]] = []
+        while len(picked) < self._TEMPORAL_KEEP and any(buckets.values()):
             for index in sorted(buckets):
-                if buckets[index] and len(selected) < self._TEMPORAL_KEEP:
-                    selected.append(buckets[index].pop(0)[3])
-        return selected
+                if buckets[index] and len(picked) < self._TEMPORAL_KEEP:
+                    picked.append(buckets[index].pop(0))
+        # Definite matches rank above possible ones across buckets too
+        # (review L5); the stable sort preserves coverage diversity within
+        # each class.
+        picked.sort(key=lambda item: item[0])
+        return [item[3] for item in picked]
 
     @staticmethod
     def _rrf_fuse(
@@ -424,8 +441,14 @@ class RetrievalEngine:
         # carries a temporal cue or the knowledge-graph plugin matches
         # entities; the legacy single-arm path stays untouched so existing
         # callers keep byte-identical ordering.
+        anchor_now = datetime.now(UTC)
+        if context.query_timestamp:
+            try:
+                anchor_now = datetime.fromisoformat(context.query_timestamp)
+            except ValueError:
+                pass  # best-effort anchor; fall back to real now
         window = (
-            temporal.parse_query_window(context.query, now=datetime.now(UTC))
+            temporal.parse_query_window(context.query, now=anchor_now)
             if context.query else None
         )
         arms: dict[str, list[RetrievalHit]] = {}
@@ -637,7 +660,17 @@ class RetrievalEngine:
                 record = self._ancestor_as_of(hit.id, by_id, lineage_links)
                 if record is None:
                     continue
-                hit = self._memory_hit(record, context)
+                # Carry the descendant's fused score and arm annotations onto
+                # the as-of ancestor (review M3): a rebuilt hit re-entering
+                # with a legacy-scale score would float above every RRF-scaled
+                # neighbor and its fusion audit trail would vanish.
+                rebuilt = self._memory_hit(record, context)
+                merged = dict(rebuilt.metadata)
+                for key in ("fusion_ranks", "boost_signals", "temporal_arm"):
+                    if key in hit.metadata:
+                        merged[key] = hit.metadata[key]
+                merged["as_of_ancestor_of"] = hit.id
+                hit = replace(rebuilt, score=hit.score, metadata=merged)
             process(record, hit)
             if context.history:
                 # Surface the full lineage visible at the cutoff, not only the

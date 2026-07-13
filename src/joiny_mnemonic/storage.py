@@ -2160,6 +2160,59 @@ class MemoryStore:
         return records
 
     @integrity_checked
+    def completion_evidence_events(
+        self, *, branch_id: str = "main", after_seq: int = 0
+    ) -> list[Event]:
+        """Hot-path support for the reconciler (review finding M5): only
+        host-hook tool outputs after the earliest anchor can be completion
+        evidence, so the filter belongs in SQL, not in Python over the
+        whole materialized lineage."""
+        with self._lock:
+            rows: list[sqlite3.Row] = []
+            for visible_branch, cutoff in self._lineage_locked(branch_id):
+                clauses = [
+                    "branch_id=?", "seq>?", "kind='tool_output'",
+                    "origin_channel='host_hook'",
+                ]
+                params: list[Any] = [visible_branch, after_seq]
+                if cutoff is not None:
+                    clauses.append("seq<=?")
+                    params.append(cutoff)
+                rows.extend(
+                    self._conn.execute(
+                        "SELECT * FROM events WHERE " + " AND ".join(clauses)
+                        + " ORDER BY seq",
+                        params,
+                    ).fetchall()
+                )
+        return [self._event_from_row(row) for row in sorted(rows, key=lambda r: r["seq"])]
+
+    @integrity_checked
+    def events_by_operation(
+        self, operation: str, *, branch_id: str = "main"
+    ) -> list[Event]:
+        """State events with a given payload operation, filtered in SQL."""
+        with self._lock:
+            rows: list[sqlite3.Row] = []
+            for visible_branch, cutoff in self._lineage_locked(branch_id):
+                clauses = [
+                    "branch_id=?", "kind='state'",
+                    "json_extract(payload_json,'$.operation')=?",
+                ]
+                params: list[Any] = [visible_branch, operation]
+                if cutoff is not None:
+                    clauses.append("seq<=?")
+                    params.append(cutoff)
+                rows.extend(
+                    self._conn.execute(
+                        "SELECT * FROM events WHERE " + " AND ".join(clauses)
+                        + " ORDER BY seq",
+                        params,
+                    ).fetchall()
+                )
+        return [self._event_from_row(row) for row in sorted(rows, key=lambda r: r["seq"])]
+
+    @integrity_checked
     def known_at_cutoff_seq(self, known_at: str, *, branch_id: str = "main") -> int:
         """Resolve ``known_at`` to the greatest lineage-visible ``seq`` admitted
         at or before that instant (task4.md invariant 2).

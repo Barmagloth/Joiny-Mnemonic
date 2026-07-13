@@ -198,6 +198,66 @@ class ReconcilerCase(unittest.TestCase):
         self.assertEqual(requests[0].payload["reason"], "marker_content_is_a_question")
         self.assertEqual(requests[0].payload["source_event_id"], events[0].id)
 
+    def test_command_prefix_matches_but_embedding_does_not(self) -> None:
+        """Review L1: `pytest -q` completes on "pytest -q --tb=short" but a
+        command merely containing the string is not evidence."""
+        self.service.initialize_project(automatic_task_closure_enabled=True)
+        self._open_task("прогнать `pytest -q` в CI")
+        self.store.append_host_events_once(
+            "evidence:echoed",
+            [
+                {
+                    "kind": "tool_output", "role": "tool", "content": "never",
+                    "payload": {
+                        "tool_name": "Bash", "hook_event_name": "PostToolUse",
+                        "tool_input": {"command": "echo never run pytest -q"},
+                    },
+                }
+            ],
+            adapter="claude-code",
+        )
+        self.assertEqual(self.service.reconciler.reconcile()["detected"], 0)
+        self.store.append_host_events_once(
+            "evidence:prefixed",
+            [
+                {
+                    "kind": "tool_output", "role": "tool", "content": "ok",
+                    "payload": {
+                        "tool_name": "Bash", "hook_event_name": "PostToolUse",
+                        "tool_input": {"command": "pytest -q --tb=short"},
+                    },
+                }
+            ],
+            adapter="claude-code",
+        )
+        self.assertEqual(self.service.reconciler.reconcile()["closed"], 1)
+
+    def test_closure_preserves_untouched_entry_formatting(self) -> None:
+        """Review L2: closing one entry must not reformat the others."""
+        self.service.initialize_project(automatic_task_closure_enabled=True)
+        self._open_task("создать файл alpha.md")
+        anchor = self.store.get_active_blocks()["open_tasks"]
+        # A hand-formatted entry through the explicit block API.
+        self.store.set_active_block(
+            "open_tasks",
+            anchor.content + "\n  * задача с ручным форматированием",
+            source_event_ids=anchor.source_event_ids,
+        )
+        self._write_evidence("alpha.md")
+        self.service.reconciler.reconcile()
+        block = self.store.get_active_blocks()["open_tasks"]
+        self.assertNotIn("alpha.md", block.content)
+        self.assertIn("  * задача с ручным форматированием", block.content)
+
+    def test_resume_packet_carries_pending_completion_line(self) -> None:
+        self.service.initialize_project()  # flag off
+        self._open_task("создать файл pending.md")
+        self._write_evidence("pending.md")
+        self.service.reconciler.reconcile()
+        packet = self.service.resume(token_budget=1500)
+        self.assertIn("PENDING TASK COMPLETIONS", packet.text)
+        self.assertIn("pending.md", packet.text)
+
     def test_hygiene_findings(self) -> None:
         self.service.initialize_project()
         # A '?' entry planted through the explicit block API (pre-guard data).

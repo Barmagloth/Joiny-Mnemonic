@@ -19,6 +19,7 @@ and the task memory is superseded, not removed.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -43,7 +44,38 @@ _DELETE_VERBS = re.compile(r"\b(удал|delete|remove|снес|drop)", re.IGNOR
 
 _WRITE_TOOLS = {"write", "edit", "multiedit", "notebookedit", "create_file"}
 
-_HYGIENE_TASK_AGE_DAYS = 14.0
+# Hygiene path tokens must look like real project files (review finding L3:
+# "e.g", "v1.2.3" and "example.com" are not paths).
+_PATH_EXTENSIONS = {
+    "py", "md", "js", "ts", "tsx", "jsx", "json", "yaml", "yml", "toml",
+    "txt", "rs", "go", "java", "cs", "cpp", "c", "h", "sql", "sh", "ps1",
+    "html", "css", "ini", "cfg", "csv",
+}
+
+
+def _hygiene_paths(entry: str) -> list[str]:
+    return [
+        token
+        for token in _PATH.findall(entry)
+        if token.rsplit(".", 1)[-1].casefold() in _PATH_EXTENSIONS
+    ]
+
+
+def _default_age_days() -> float:
+    raw = os.environ.get("JOINY_MNEMONIC_TASK_AGE_DAYS", "")
+    try:
+        return float(raw) if raw else 14.0
+    except ValueError:
+        return 14.0
+
+
+def _command_matches(entry_command: str, command_text: str) -> bool:
+    """Exact or command-prefix match (review finding L1): `pytest -q` is
+    evidence for "pytest -q --tb=short" but not for "echo never run
+    pytest -q"."""
+    text = " ".join(command_text.split())
+    command = " ".join(entry_command.split())
+    return text == command or text.startswith(command + " ")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,16 +113,9 @@ def _path_matches(entry_path: str, event_file: str) -> bool:
     return boundary < 0 or event_norm[boundary] == "/"
 
 
-def _trusted_completion_event(event: Event) -> bool:
-    """Evidence must come from the host hook channel and describe a
-    completed (non-failed) tool interaction (review finding H1): an
-    untrusted memory_append or a captured failure must never close a
-    protected task."""
-    if event.origin_channel != "host_hook":
-        return False
-    if event.kind != "tool_output":
-        return False
-    return event.payload.get("hook_event_name") not in ("PostToolUseFailure",)
+# Trust filter for completion evidence (review finding H1) now lives in SQL
+# (completion_evidence_events: host_hook channel + tool_output kind); the
+# PostToolUseFailure exclusion remains a Python-side check in the scan loop.
 
 
 def _event_tool_name(event: Event) -> str:
@@ -113,21 +138,27 @@ class StateReconciler:
 
     # --- detection ---------------------------------------------------------
 
-    def _anchor_seq(self, entry: str, branch_id: str) -> tuple[int, str | None, str | None]:
-        """The entry's admission point: its consolidated task memory's source
-        event when one exists, else 0 (scan whole lineage)."""
+    def _task_anchor_map(
+        self, branch_id: str
+    ) -> dict[str, tuple[int, str | None, str]]:
+        """One pass over task memories (review finding M5): normalized
+        content -> (anchor seq, anchor event id, memory id)."""
+        anchors: dict[str, tuple[int, str | None, str]] = {}
         for record in self.store.list_memories(
             branch_id=branch_id, memory_types=("task",)
         ):
-            if _normalized(record.content) == _normalized(entry):
-                if record.source_event_ids:
-                    try:
-                        source = self.store.get_event(record.source_event_ids[0])
-                    except KeyError:
-                        return 0, None, record.id
-                    return source.seq, source.id, record.id
-                return 0, None, record.id
-        return 0, None, None
+            key = _normalized(record.content)
+            if key in anchors:
+                continue
+            anchor_seq, anchor_id = 0, None
+            if record.source_event_ids:
+                try:
+                    source = self.store.get_event(record.source_event_ids[0])
+                    anchor_seq, anchor_id = source.seq, source.id
+                except KeyError:
+                    pass
+            anchors[key] = (anchor_seq, anchor_id, record.id)
+        return anchors
 
     def detect_completions(
         self, *, branch_id: str = "main"
@@ -135,23 +166,36 @@ class StateReconciler:
         block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
         if block is None or not block.content.strip():
             return []
-        events = self.store.query_events(branch_id=branch_id)
-        detections: list[tuple[CompletionDetection, str | None]] = []
+        anchors = self._task_anchor_map(branch_id)
+        candidates: list[tuple[str, int, str, str | None]] = []
         for entry in _entry_lines(block.content):
             if _DELETE_VERBS.search(entry):
                 continue
-            anchor_seq, anchor_id, task_memory_id = self._anchor_seq(entry, branch_id)
+            anchor_seq, anchor_id, task_memory_id = anchors.get(
+                _normalized(entry), (0, None, None)
+            )
             if anchor_id is None:
                 # Fail closed (review finding H3): without a provable
                 # admission point, pre-task history would count as
-                # completion evidence. Skip rather than scan from seq 0.
+                # completion evidence.
                 continue
+            candidates.append((entry, anchor_seq, anchor_id, task_memory_id))
+        if not candidates:
+            return []
+        events = self.store.completion_evidence_events(
+            branch_id=branch_id,
+            after_seq=min(anchor_seq for _, anchor_seq, _, _ in candidates),
+        )
+        detections: list[tuple[CompletionDetection, str | None]] = []
+        for entry, anchor_seq, anchor_id, task_memory_id in candidates:
             paths = _PATH.findall(entry) if _CREATE_VERBS.search(entry) else []
             commands = [item.strip() for item in _BACKTICK.findall(entry) if item.strip()]
             evidence: tuple[str, str, str] | None = None
             for event in events:
-                if event.seq <= anchor_seq or not _trusted_completion_event(event):
+                if event.seq <= anchor_seq:
                     continue
+                if event.payload.get("hook_event_name") == "PostToolUseFailure":
+                    continue  # SQL prefilter covers kind/channel, not failures
                 if paths and _event_tool_name(event) in _WRITE_TOOLS:
                     for path in paths:
                         if any(_path_matches(path, item) for item in event.files):
@@ -161,7 +205,7 @@ class StateReconciler:
                     command_text = _event_command(event)
                     if command_text:
                         for command in commands:
-                            if command in command_text:
+                            if _command_matches(command, command_text):
                                 evidence = (event.id, "command", command)
                                 break
                 if evidence is not None:
@@ -225,16 +269,20 @@ class StateReconciler:
             block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
             if block is None:
                 continue
+            # Remove only the completed entry's line; untouched lines keep
+            # their original bytes and formatting (review finding L2).
+            target = _normalized(detection.entry)
+            raw_lines = block.content.splitlines()
             remaining = [
-                line
-                for line in _entry_lines(block.content)
-                if _normalized(line) != _normalized(detection.entry)
+                raw
+                for raw in raw_lines
+                if _normalized(raw.strip().removeprefix("- ").strip()) != target
             ]
-            if len(remaining) == len(_entry_lines(block.content)):
+            if len(remaining) == len(raw_lines):
                 continue  # already closed by an earlier run
             self.store.set_active_block(
                 "open_tasks",
-                "\n".join(f"- {line}" for line in remaining),
+                "\n".join(remaining),
                 branch_id=branch_id,
                 source_event_ids=(detection_event.id, detection.evidence_event_id),
             )
@@ -271,10 +319,10 @@ class StateReconciler:
             return []
         pending: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for event in self.store.query_events(branch_id=branch_id, kinds=("state",)):
+        for event in self.store.events_by_operation(
+            "task_completion_detected", branch_id=branch_id
+        ):
             payload = event.payload
-            if payload.get("operation") != "task_completion_detected":
-                continue
             entry = _normalized(str(payload.get("entry", "")))
             if entry in live and entry not in seen:
                 seen.add(entry)
@@ -295,12 +343,16 @@ class StateReconciler:
         findings: list[dict[str, str]] = []
         blocks = self.store.get_active_blocks(branch_id=branch_id)
         now = datetime.now(UTC)
+        age_days = _default_age_days()
         tasks = blocks.get("open_tasks")
         if tasks:
-            root = self.service.project_root
+            root = self.service.project_root.resolve()
+            anchors = self._task_anchor_map(branch_id)
             for entry in _entry_lines(tasks.content):
-                for path in _PATH.findall(entry):
+                for path in _hygiene_paths(entry):
                     candidate = (root / path.replace("\\", "/")).resolve()
+                    if root not in candidate.parents and candidate != root:
+                        continue  # never probe outside the project (L3)
                     if _DELETE_VERBS.search(entry) is None and _CREATE_VERBS.search(entry):
                         continue  # creation targets legitimately absent
                     if not candidate.exists():
@@ -311,7 +363,9 @@ class StateReconciler:
                                 "path": path,
                             }
                         )
-                anchor_seq, anchor_id, _ = self._anchor_seq(entry, branch_id)
+                anchor_seq, anchor_id, _ = anchors.get(
+                    _normalized(entry), (0, None, None)
+                )
                 if anchor_id is not None:
                     try:
                         created = datetime.fromisoformat(
@@ -320,7 +374,7 @@ class StateReconciler:
                     except (KeyError, ValueError):
                         created = None
                     if created is not None and (
-                        (now - created).total_seconds() > _HYGIENE_TASK_AGE_DAYS * 86400
+                        (now - created).total_seconds() > age_days * 86400
                     ):
                         findings.append(
                             {

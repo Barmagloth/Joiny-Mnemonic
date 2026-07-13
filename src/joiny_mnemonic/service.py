@@ -745,6 +745,23 @@ class MemoryService:
                 "automatic extraction backlog is incomplete; "
                 f"oldest_pending_age={extraction_status.oldest_pending_age:.1f}s",
             )
+        instructions: tuple[str, ...] = (DURABLE_MEMORY_INSTRUCTION,)
+        try:
+            pending = self.reconciler.pending_completions(branch_id=branch_id)
+        except Exception:
+            pending = []
+        if pending:
+            # task5.md A1 flag-off contract (review M11): detections surface
+            # as one line in the packet, not only in capabilities.
+            lines = "\n".join(
+                f"- {item['entry']} (evidence {item['evidence_event_id']})"
+                for item in pending[:5]
+            )
+            instructions = (
+                *instructions,
+                "[PENDING TASK COMPLETIONS - EVIDENCE FOUND, CONFIRM TO CLOSE]\n"
+                + lines,
+            )
         packet = self.prompts.assemble(
             token_budget=budget,
             branch_id=branch_id,
@@ -752,7 +769,7 @@ class MemoryService:
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
             state=state,
-            protected_instructions=(DURABLE_MEMORY_INSTRUCTION,),
+            protected_instructions=instructions,
             session_id=session_id,
             task_key=task_key,
             telemetry_receipt=telemetry_receipt,
