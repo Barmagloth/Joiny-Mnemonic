@@ -2,169 +2,117 @@
 
 ## Status
 
-Proposed follow-up. This task is independent of automatic-extraction enablement and does not relax
-any trust, provenance, quarantine or evidence requirements from `task.md`.
+Proposed follow-up. This task is independent of automatic-extraction enablement and does not relax any trust, provenance, quarantine or evidence requirements from `task.md`.
 
 ## Problem
 
-Joiny-Mnemonic records `created_at` for events and materialized memories. Retrieval can filter and
-rank by that timestamp, and `supersedes_id` preserves version order. This describes when the store
-learned a fact, not when the fact was true.
-
-The system therefore cannot answer reliably:
-
-- what was true at a real-world time T;
-- what the system knew at transaction time K;
-- when a previous value stopped being valid;
-- whether two apparently conflicting facts describe different validity intervals.
-
-Calling the current state “no timestamps on facts” is imprecise. Ingestion timestamps exist; valid
-time and bitemporal queries do not.
+`created_at` records when the store learned evidence. It does not say when an asserted fact was true. The system therefore needs bitemporal retrieval without weakening append-only history or trust rules.
 
 ## Required semantics
 
 Keep two independent time dimensions:
 
-1. Transaction time: when evidence or a memory version entered the append-only store. Existing
-   `created_at` remains transaction time and must not be overloaded.
-2. Valid time: when the asserted fact applies in the represented world. Add optional
-   `valid_from` and `valid_to` values.
+1. Transaction time is the event or memory-version admission time. `created_at` remains its wall-clock representation; the canonical total order is `seq`, not the clock.
+2. Valid time is when the assertion applies in the represented world. Add nullable `valid_from` and `valid_to`, using `[valid_from, valid_to)`.
 
-Also retain:
+Retain `observed_at`, the exact `temporal_expression`, source event IDs and evidence spans. Store independent boundary precision fields:
 
-- `observed_at`: the timestamp of the source observation, normally the canonical source-event
-  timestamp;
-- `temporal_precision`: `instant | day | month | year | interval | unknown`;
-- `temporal_expression`: the exact evidence text used to derive the interval;
-- temporal provenance: source event IDs and exact evidence spans or offsets.
+- `valid_from_precision`: `instant | day | month | year | unknown`;
+- `valid_to_precision`: `instant | day | month | year | unknown`.
 
-All normalized timestamps use timezone-aware ISO 8601. An absent bound means unknown/open, not a
-model assertion of infinity. The interval convention is `[valid_from, valid_to)`.
+`interval` is a shape, not a precision. An absent bound means unknown/open, never an assertion of infinity. Normalized values are timezone-aware ISO 8601.
+
+Relative dates are resolved in the source-event timezone when that timezone is recorded; otherwise UTC. A day-precision value denotes the complete calendar day in that resolution timezone. A boundary that remains ambiguous after this policy must be lowered in precision or quarantined. The original expression is always retained.
 
 ## Append-only representation
 
 Memory history remains immutable.
 
-- Temporal fields are fixed when a memory version is appended.
-- Corrections append a new version linked with `supersedes_id`; they never update the old row.
-- A successor may close the effective interval of a predecessor in a materialized projection, but
-  the predecessor row remains byte-for-byte unchanged.
-- Retroactive corrections remain visible under transaction-time queries.
-- Every temporal derivation must be reproducible from canonical events.
+- Temporal fields are fixed when a version is appended.
+- Corrections append a successor linked by `supersedes_id`; old rows are never updated.
+- A materialized projection may derive an effective interval from successors, but source rows remain byte-for-byte unchanged.
+- Retroactive corrections remain visible through transaction-time queries.
+- Every derivation is reproducible from canonical events.
 
-Prefer nullable temporal columns on `memory_records` and `extraction_candidates` for the first
-version. If interval corrections need richer lineage, add an append-only temporal-assertion table
-rather than mutable interval updates.
+Start with nullable temporal columns on `memory_records` and `extraction_candidates`. Candidate uniqueness must include normalized `valid_from`, `valid_to`, and both boundary precisions. If an otherwise identical candidate conflicts only in temporal data, retain a second append-only candidate with an explicit rejection reason; never silently drop it.
 
 ## Evidence and trust rules
 
-Temporal metadata inherits the authority of the underlying memory; it never raises authority.
+Temporal metadata inherits the authority of its underlying memory and never raises it.
 
-- Explicit timestamps and intervals may be normalized from exact evidence.
-- Relative expressions such as “yesterday” are resolved only against the canonical source-event
-  timestamp, with the original expression retained.
-- Ambiguous dates, missing timezones and model-only guesses remain unknown or quarantined.
-- Inferred dates must not confirm, supersede or invalidate trusted memory.
-- Code blocks, quoted examples, tool output, prompt injection and private regions retain all
-  existing evidence-zone restrictions.
-- An extractor confidence score is routing input, not proof of temporal validity.
+- Normalize only explicit temporal evidence or permitted relative expressions.
+- Ambiguous dates, missing timezone context, and model-only guesses stay unknown or quarantined.
+- Inferred dates cannot confirm, supersede, or invalidate trusted memory.
+- Code blocks, quotes, tool output, prompt injection, and private regions retain all existing evidence-zone restrictions.
+- Extractor confidence is routing input, not proof of temporal validity.
 
 ## Retrieval contract
 
-Add orthogonal query controls:
+Add orthogonal controls:
 
-- `valid_at=T`: return memory whose valid interval contains T;
-- `known_at=K`: replay only knowledge present by transaction time K;
-- `current=true`: return the latest non-superseded view whose validity is current or unknown;
-- `history=true`: return all temporal versions and lineage.
+- `valid_at=T`: facts whose valid interval contains `T`.
+- `known_at=K`: in the requested branch lineage, select the greatest visible event `seq` with `created_at <= K`, then replay only events at or before that sequence. Ancestor events are visible only through each branch's fork cutoff. When equal wall-clock timestamps occur, `seq` is the documented tie-breaker. This prevents knowledge from leaking across forks and makes boundary calls deterministic even when clocks move backwards.
+- `current=true`: return only facts proven valid now. Unknown-validity records do not belong in this primary result.
+- `include_unknown_validity=true`: return unknown-validity records in a separately labelled partition, with each hit carrying `validity_status` before prompt rendering.
+- `history=true`: return superseded records and their transaction/valid time.
+- `since` and `until`: transaction-time filters with existing semantics.
 
-`since` and `until` retain their existing transaction-time meaning for backward compatibility.
-Existing callers with no temporal parameters must keep their current results.
+A hit includes stored bounds, both precisions, `temporal_expression`, `observed_at`, `validity_status`, and the effective interval when projected. The projection implementation has a version identifier (`temporal_projection_code_version`) in hit metadata and shares the versioning discipline of snapshot replay, because it affects prompt content and exposure audit.
 
-Each hit must expose transaction time, explicit valid-time fields, effective interval if computed,
-temporal precision and temporal provenance. Prompt rendering must distinguish “recorded at” from
-“valid during” and must not render unknown validity as current truth.
+For MVP, resume packets remain transaction-time by default and therefore preserve existing caller behaviour. A valid-now resume mode is opt-in. Changing that default requires a separate decision after metrics.
 
-## Conflict and supersession rules
+## Conflicts
 
-For the MVP, temporal resolution operates only on explicit version lineage and exact normalized
-matches. It must not guess that arbitrary prose describes the same property.
+Temporal conflicts are derived in a materialized projection: equal normalized content or relation keys with overlapping effective intervals and incompatible values are marked as temporal conflicts. A finding may report that projection, but no conflict status is written back to a memory-history row and no mutation is introduced.
 
-- Non-overlapping versions may coexist without being presented as contradictions.
-- Overlapping incompatible versions remain separately auditable and are marked as a temporal
-  conflict unless trusted evidence resolves them.
-- A newer transaction does not automatically mean a later valid interval.
-- A superseding record with an explicit `valid_from` may define the predecessor's effective end in
-  the materialized view, without mutating the predecessor.
+## Interfaces and observability
 
-Structured `subject + predicate + object` facts are a later extension. They are required for a
-full temporal knowledge graph but are not required for the bitemporal MVP.
+Extend MCP and HTTP retrieval with the controls above. Existing calls without temporal controls preserve current transaction-time results. Extend capabilities with temporal support and projection version. Record temporal normalization, quarantine, and conflict findings in the existing append-only audit pipeline without exposing private source text.
 
-## Interfaces
+## Snapshots and replay
 
-Expose the temporal fields and query controls consistently through:
+Temporal columns and projection inputs participate in canonical materialized state. Snapshot/replay metadata must carry the materialization code version and the temporal projection version where applicable; legacy replay remains readable. Rebuilds must verify canonical state hashes exactly as the snapshot hardening rules require.
 
-- Python service methods;
-- CLI derive/search/source commands;
-- MCP memory tools;
-- HTTP event/memory retrieval surfaces;
-- snapshot materialization and resume packets.
+## Delivery phases
 
-Old input shapes remain valid. Temporal behavior is activated only by explicit new fields or query
-parameters.
+### Phase A: schema and deterministic normalization
 
-## Snapshots and migration
+- Add nullable temporal fields and indexes without rewriting history.
+- Implement canonical parsing, timezone policy, precision handling, and quarantine.
+- Preserve legacy retrieval behaviour.
 
-- Add nullable columns with an online SQLite migration; existing rows remain valid with unknown
-  valid time.
-- Increment `replay_code_version` because the materialized state changes.
-- New full snapshots include temporal fields in canonical serialization and `state_sha256`.
-- Legacy event history and snapshots remain readable.
-- Rebuilds must produce the same effective temporal state within one replay-code version.
+### Phase B: extraction and consolidation
 
-## Extraction phases
+- Permit extraction candidates to carry temporal evidence and both precisions.
+- Enforce temporal candidate collision handling.
+- Materialize effective intervals and derived conflicts without row mutation.
 
-### Phase A: deterministic temporal core
+### Phase C: retrieval and evaluation
 
-Implement schema, validation, append-only versioning, `valid_at`/`known_at`, rendering, replay and
-manual CLI/MCP/HTTP inputs. No model-based temporal extraction is required.
-
-### Phase B: evidence-bound temporal extraction
-
-Extend extractor candidates with normalized intervals and exact temporal evidence. Add RU/EN
-corpora for explicit dates, relative dates, intervals, ambiguity, negation, quoted examples and
-retroactive correction. Temporal extraction remains disabled unless its own evaluation gates pass.
-
-### Phase C: structured temporal facts
-
-Optionally add normalized subjects, predicates and objects plus entity resolution. This is the
-point at which comparisons to temporal knowledge-graph products become meaningful.
+- Add temporal query controls and explicitly partition unknown validity.
+- Add opt-in valid-now resume mode; do not change the default.
+- Measure false trusted temporal records, quarantine rate, retrieval accuracy, replay determinism, and resume impact before any broader enablement.
 
 ## Required tests
 
-At minimum cover:
-
-- open, closed and one-sided intervals;
-- timezone normalization and invalid timestamps;
-- `valid_at` boundaries under `[from, to)` semantics;
-- different answers for `valid_at` and `known_at`;
-- sequential supersession and retroactive correction;
-- overlapping/conflicting intervals;
-- unknown validity not being presented as proven current truth;
-- relative dates anchored to source-event time;
-- ambiguous dates routed to quarantine;
-- unchanged behavior for legacy callers and rows;
-- full replay and snapshot restoration;
-- integrity hash coverage for temporal state;
-- RU/EN extraction positives, negatives and adversarial evidence zones.
+- Explicit instant, day, month, year, open-ended, and intervals with different start/end precision.
+- Relative dates resolved in recorded timezone and UTC fallback; ambiguous timezone boundaries are lowered or quarantined.
+- Append-only correction and retroactive-validity cases.
+- `valid_at`, valid-now, history, and separately partitioned unknown-validity retrieval.
+- `known_at` at a branch fork cutoff and two events whose wall-clock order disagrees with `seq`.
+- No temporal metadata from untrusted evidence can confirm or mutate trusted memory.
+- Candidate collisions differing only in temporal fields are retained or explicitly rejected, never lost.
+- Snapshot/replay and temporal projection versions remain deterministic and hash-verifiable.
+- Resume behaviour is unchanged by default.
 
 ## Acceptance criteria
 
-1. Existing databases migrate without rewriting event or memory history.
-2. Existing API/CLI/MCP callers retain their behavior.
-3. `created_at`, `observed_at`, valid time and effective derived intervals are never conflated.
-4. `valid_at` and `known_at` produce independently testable results.
-5. Every normalized temporal value has exact provenance or is explicitly unknown/quarantined.
-6. Temporal corrections are append-only and replay-deterministic.
-7. Full test suite, migration tests, replay tests and integrity tests pass.
-8. Documentation describes the MVP as bitemporal memory, not a full temporal knowledge graph.
+1. Existing callers without temporal controls keep transaction-time results.
+2. Valid-time results are deterministic, provenance-bound, and branch-lineage-safe.
+3. `known_at` is deterministic at equal or non-monotonic wall-clock values through canonical `seq` ordering.
+4. Unknown validity cannot be consumed as current truth through the primary result set.
+5. Temporal conflicts are derived projections, never mutations of memory history.
+6. Relative-date normalization has an explicit timezone policy and preserves source expressions.
+7. Candidate temporal collisions cannot silently discard data.
+8. Full replay, snapshots, and retrieval projection remain versioned and hash-verifiable.
+9. Resume behaviour remains unchanged by default.
