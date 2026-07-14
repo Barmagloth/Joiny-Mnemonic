@@ -16,7 +16,10 @@ preference questions into abstention.
 
 - [x] Harness (task5 Part C), local runner bridge, resumable runs
 - [x] Signed reports (provenance + artifact hashes)
-- [ ] Baseline v1 report checked in (run in flight)
+- [x] Baseline v1 checked in (2026-07-14, signed): 57.6% overall —
+      single-session-user 84.3%, assistant 82.1%, knowledge-update 79.5%,
+      temporal-reasoning 59.4%, multi-session 26.3%, preference 23.3%,
+      abstention 28/30
 - [ ] Error analysis: multi-session and preference misses against
       `retrieved_ids` — retrieval miss vs synthesis miss
 - [ ] Tuned run v2 (budget / retrieval limit; prompt stays honest)
