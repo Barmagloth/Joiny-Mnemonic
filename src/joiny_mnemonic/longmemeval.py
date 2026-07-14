@@ -235,6 +235,7 @@ class LMEHarness:
     distill_cache_dir: Path | None = None
     _cross_encoder: Any = field(default=None, repr=False)
     active_semantic_plugins: list[str] = field(default_factory=list)
+    active_reranker_plugins: list[str] = field(default_factory=list)
 
     def _distill_session(self, session: dict[str, Any]) -> list[str]:
         """LLM fact extraction for one session, disk-cached by content hash
@@ -444,6 +445,7 @@ class LMEHarness:
         started = time.perf_counter()
         with MemoryService(":memory:", project_root=Path.cwd()) as service:
             self.active_semantic_plugins = sorted(service.plugins.semantic.keys())
+            self.active_reranker_plugins = sorted(service.plugins.rerankers.keys())
             ingested = self.ingest(service, item)
             context, included, metrics = self.build_context(service, item)
         answer = self.runner.call(
@@ -513,6 +515,7 @@ class LMEHarness:
                 "rerank": self.rerank,
                 "ingest_mode": self.ingest_mode,
                 "semantic_plugins": self.active_semantic_plugins,
+                "reranker_plugins": self.active_reranker_plugins,
                 "runner_command": list(self.runner.command),
             },
             "per_type": {
