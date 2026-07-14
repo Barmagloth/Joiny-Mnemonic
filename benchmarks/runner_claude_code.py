@@ -24,8 +24,12 @@ ANSWER_PREAMBLE = (
     "You answer questions about a user's chat history. The [MEMORY PACKET] "
     "below was retrieved from that history; timestamps in [Date: ...] "
     "prefixes and event frames are authoritative. Answer concisely from the "
-    "packet. If the packet does not contain the information needed, say the "
-    "information is not available rather than guessing.\n\n"
+    "packet. For questions about the user's preferences, habits or tastes, "
+    "synthesize a grounded answer from whatever relevant evidence the packet "
+    "holds, citing the specifics you drew on — partial evidence deserves a "
+    "best-effort answer, not a refusal. Only when the packet holds nothing "
+    "relevant at all, say the information is not available rather than "
+    "guessing facts.\n\n"
 )
 
 

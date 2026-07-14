@@ -129,6 +129,7 @@ class LMEQuestion:
     answer: str
     question_date: str
     sessions: tuple[dict[str, Any], ...]
+    answer_session_ids: tuple[str, ...] = ()
 
 
 def load_dataset(path: str | Path) -> list[LMEQuestion]:
@@ -155,6 +156,9 @@ def load_dataset(path: str | Path) -> list[LMEQuestion]:
                 answer=str(entry.get("answer", "")),
                 question_date=str(entry.get("question_date", "")),
                 sessions=packed,
+                answer_session_ids=tuple(
+                    str(sid) for sid in entry.get("answer_session_ids") or ()
+                ),
             )
         )
     return items
@@ -251,12 +255,19 @@ class LMEHarness:
                 count += 1
         return count
 
-    def build_context(self, service: MemoryService, item: LMEQuestion) -> tuple[str, list[str]]:
+    def build_context(
+        self, service: MemoryService, item: LMEQuestion
+    ) -> tuple[str, list[str], dict[str, Any]]:
+        # question_date anchors relative expressions ("last Sunday") in the
+        # question's own clock — without it the temporal arm parses windows
+        # against the real now, years away from the haystack.
+        anchor = f"{item.question_date}T12:00:00+00:00" if item.question_date else None
         hits = service.search(
             query=item.question,
             limit=self.retrieval_limit,
             include_events=True,
             record_telemetry=False,
+            query_timestamp=anchor,
         )
         parts: list[str] = []
         included: list[str] = []
@@ -269,13 +280,38 @@ class LMEHarness:
             parts.append(block)
             included.append(hit.id)
             used += cost
-        return "\n\n".join(parts), included
+        # Attribution metrics: which haystack sessions the packet drew from
+        # (retrieval miss vs synthesis miss), and what the packet cost
+        # relative to shipping the whole haystack.
+        retrieved_sessions: set[str] = set()
+        for event_id in included:
+            try:
+                event = service.store.get_event(event_id)
+            except KeyError:
+                continue
+            session_id = event.payload.get("session_id")
+            if session_id:
+                retrieved_sessions.add(str(session_id))
+        haystack_tokens = sum(
+            conservative_token_estimate(str(turn.get("content", "")))
+            for session in item.sessions
+            for turn in session["turns"]
+        )
+        gold = set(item.answer_session_ids)
+        metrics = {
+            "context_tokens": used,
+            "haystack_tokens": haystack_tokens,
+            "retrieved_sessions": sorted(retrieved_sessions),
+            "gold_sessions": sorted(gold),
+            "retrieval_hit": bool(gold & retrieved_sessions) if gold else None,
+        }
+        return "\n\n".join(parts), included, metrics
 
     def run_question(self, item: LMEQuestion) -> dict[str, Any]:
         started = time.perf_counter()
         with MemoryService(":memory:", project_root=Path.cwd()) as service:
             ingested = self.ingest(service, item)
-            context, included = self.build_context(service, item)
+            context, included, metrics = self.build_context(service, item)
         answer = self.runner.call(
             {
                 "mode": "answer",
@@ -303,18 +339,28 @@ class LMEHarness:
             "retrieved_ids": included,
             "ingested_events": ingested,
             "latency_seconds": round(time.perf_counter() - started, 3),
+            **metrics,
         }
         self.results.append(record)
         return record
 
     def report(self) -> dict[str, Any]:
         by_type: dict[str, dict[str, int]] = {}
+        recall_by_type: dict[str, list[bool]] = {}
+        context_tokens = 0
+        haystack_tokens = 0
         for record in self.results:
             bucket = by_type.setdefault(
                 record["question_type"], {"total": 0, "correct": 0}
             )
             bucket["total"] += 1
             bucket["correct"] += int(record["correct"])
+            if record.get("retrieval_hit") is not None:
+                recall_by_type.setdefault(record["question_type"], []).append(
+                    bool(record["retrieval_hit"])
+                )
+            context_tokens += int(record.get("context_tokens") or 0)
+            haystack_tokens += int(record.get("haystack_tokens") or 0)
         overall_total = sum(item["total"] for item in by_type.values())
         overall_correct = sum(item["correct"] for item in by_type.values())
         return {
@@ -330,6 +376,14 @@ class LMEHarness:
                 name: {
                     **counts,
                     "accuracy": round(counts["correct"] / counts["total"], 4),
+                    **(
+                        {
+                            "retrieval_recall": round(
+                                sum(recall_by_type[name]) / len(recall_by_type[name]), 4
+                            )
+                        }
+                        if recall_by_type.get(name) else {}
+                    ),
                 }
                 for name, counts in sorted(by_type.items())
             },
@@ -338,6 +392,15 @@ class LMEHarness:
                 "correct": overall_correct,
                 "accuracy": round(overall_correct / overall_total, 4)
                 if overall_total else 0.0,
+            },
+            "tokens": {
+                "context_sent_total": context_tokens,
+                "haystack_total": haystack_tokens,
+                "savings_ratio": round(1 - context_tokens / haystack_tokens, 4)
+                if haystack_tokens else None,
+                "context_per_question_mean": round(
+                    context_tokens / overall_total
+                ) if overall_total else 0,
             },
             "unparseable_judgments": sum(
                 1 for record in self.results if not record["judge_parseable"]
@@ -356,6 +419,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--retrieval-limit", type=int, default=24)
     parser.add_argument("--limit-questions", type=int, default=0)
     parser.add_argument(
+        "--sample-per-type", type=int, default=0,
+        help="deterministic stratified subset: first N questions of each "
+        "type (for cheap config sweeps)",
+    )
+    parser.add_argument(
         "--offset", type=int, default=0,
         help="skip the first N questions and append to existing results "
         "(resume support for long runs)",
@@ -367,6 +435,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(command, list) or not all(isinstance(x, str) for x in command):
         raise SystemExit("--runner-command must be a JSON array of strings")
     items = load_dataset(args.dataset)
+    if args.sample_per_type:
+        taken: dict[str, int] = {}
+        sampled = []
+        for item in items:
+            if taken.get(item.question_type, 0) < args.sample_per_type:
+                sampled.append(item)
+                taken[item.question_type] = taken.get(item.question_type, 0) + 1
+        items = sampled
     if args.offset:
         items = items[args.offset:]
     if args.limit_questions:
