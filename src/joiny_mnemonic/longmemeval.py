@@ -173,8 +173,8 @@ class SubprocessLLMRunner:
         self.command = tuple(command)
         self.timeout_seconds = timeout_seconds
 
-    _ATTEMPTS = 3
-    _BACKOFF_SECONDS = (5.0, 20.0)
+    _ATTEMPTS = 4
+    _BACKOFF_SECONDS = (5.0, 30.0, 120.0)
 
     def call(self, request: dict[str, Any]) -> str:
         # Field finding (2026-07-14): a Windows child Python writes piped
@@ -186,7 +186,11 @@ class SubprocessLLMRunner:
         last_error: Exception | None = None
         for attempt in range(self._ATTEMPTS):
             if attempt:
-                time.sleep(self._BACKOFF_SECONDS[min(attempt - 1, 1)])
+                time.sleep(
+                    self._BACKOFF_SECONDS[
+                        min(attempt - 1, len(self._BACKOFF_SECONDS) - 1)
+                    ]
+                )
             try:
                 completed = subprocess.run(
                     self.command,

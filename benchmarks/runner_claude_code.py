@@ -83,7 +83,10 @@ def main() -> int:
         shell=(os.name == "nt"),  # claude is a shim script on Windows
     )
     if completed.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {completed.stderr[-2000:]}")
+        raise RuntimeError(
+            f"claude -p failed (rc={completed.returncode}): "
+            f"stderr: {completed.stderr[-1000:]} | stdout: {completed.stdout[-1000:]}"
+        )
     json.dump({"output": completed.stdout.strip()}, sys.stdout, ensure_ascii=False)
     return 0
 
