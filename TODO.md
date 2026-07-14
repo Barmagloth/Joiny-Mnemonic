@@ -26,16 +26,20 @@ preference questions into abstention.
       5/20 — multi-session plateaus at ~25-30% regardless of packing and
       budget; the wall is turn-sized fragments (400-1200 tok) vs one-shot
       aggregation
-- [ ] Tuned run v2 in flight: budget 12288 / limit 64 / rank packing +
-      validated fixes (query_timestamp anchor, preference synthesis,
-      enumerate prompt); sweep-projected ~63-68%
-- [ ] Future multi-session lever (separate work, not config): finer
-      ingestion granularity (sub-turn events) and/or two-pass aggregation
-      in the answering flow
-- [ ] README section with our numbers — ours only, no other systems' scores
+- [x] Final run (2026-07-15, signed, product plugin path — semantic-local +
+      reranker-local, 12288/64/rank): **88.0% overall** (440/500).
+      Per type: ssu 98.6 / ku 96.2 / ssa 92.9 / ms 85.7 / temporal 84.2 /
+      preference 60.0; abstention 28/30; retrieval recall ~100%; token
+      saving 92.9%. Multi-session plateau broken by full-pool cross-encoder
+      reranking in the engine (26.3% -> 85.7%)
+- [x] README section with our numbers — ours only, no other systems' scores
+- [ ] Remaining error-analysis target: preference (60%) — cross-encoder
+      optimizes question-relevance while preference answers need breadth of
+      taste evidence; and the temporal tail (84.2%)
+- [ ] A/B with LLM extraction (--ingest distill, facts alongside verbatim
+      through the derive path) — mechanism shipped, run pending
 
-Done when: a signed report lives in `benchmarks/results/` and the README
-states the figure and the configuration that produced it.
+Done when: (achieved for the headline; error-analysis items continue)
 
 ## 2. Hook-path timing report — task6A
 

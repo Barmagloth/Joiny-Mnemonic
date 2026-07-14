@@ -3,8 +3,17 @@
   "harness": "joiny-mnemonic-longmemeval",
   "judge_prompts": "arXiv 2512.12818 Appendix A.4 (verbatim)",
   "config": {
-    "context_budget_tokens": 4096,
-    "retrieval_limit": 24,
+    "context_budget_tokens": 12288,
+    "retrieval_limit": 64,
+    "packing": "rank",
+    "rerank": false,
+    "ingest_mode": "raw",
+    "semantic_plugins": [
+      "local-sentence-transformers"
+    ],
+    "reranker_plugins": [
+      "local-cross-encoder"
+    ],
     "runner_command": [
       "python",
       "benchmarks/runner_claude_code.py"
@@ -13,46 +22,64 @@
   "per_type": {
     "knowledge-update": {
       "total": 78,
-      "correct": 62,
-      "accuracy": 0.7949
+      "correct": 75,
+      "accuracy": 0.9615,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
     },
     "multi-session": {
       "total": 133,
-      "correct": 35,
-      "accuracy": 0.2632
+      "correct": 114,
+      "accuracy": 0.8571,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 0.9944
     },
     "single-session-assistant": {
       "total": 56,
-      "correct": 46,
-      "accuracy": 0.8214
+      "correct": 52,
+      "accuracy": 0.9286,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
     },
     "single-session-preference": {
       "total": 30,
-      "correct": 7,
-      "accuracy": 0.2333
+      "correct": 18,
+      "accuracy": 0.6,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
     },
     "single-session-user": {
       "total": 70,
-      "correct": 59,
-      "accuracy": 0.8429
+      "correct": 69,
+      "accuracy": 0.9857,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
     },
     "temporal-reasoning": {
       "total": 133,
-      "correct": 79,
-      "accuracy": 0.594
+      "correct": 112,
+      "accuracy": 0.8421,
+      "retrieval_recall": 0.9925,
+      "gold_coverage_mean": 0.9709
     }
   },
   "overall": {
     "total": 500,
-    "correct": 288,
-    "accuracy": 0.576
+    "correct": 440,
+    "accuracy": 0.88
+  },
+  "tokens": {
+    "context_sent_total": 5834193,
+    "haystack_total": 81678723,
+    "savings_ratio": 0.9286,
+    "context_per_question_mean": 11668
   },
   "unparseable_judgments": 0,
   "dataset_sha256_16": "d6f21ea9d60a0d56",
   "provenance": {
     "signing_version": "report-signing-v1",
-    "generated_at": "2026-07-14T01:56:49.003600+00:00",
-    "git_commit": "64764ef1095eef490affa8623b874c5cdd254431",
+    "generated_at": "2026-07-14T19:47:20.924541+00:00",
+    "git_commit": "b47ab231c6b46f60fc1869caa872dc5a85cae7e2",
     "git_dirty": false,
     "package_version": "0.8.0",
     "schema_version": 8,
@@ -62,8 +89,8 @@
     "platform": "win32",
     "artifact_sha256": {
       "dataset": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
-      "per_question_jsonl": "1f9d5bec1ff652d964e3fb6b1f8df374ebdcaf67664288649dc30e30cc4e4d93"
+      "per_question_jsonl": "647480bb448737fbd6d55bc9371b74fc8a108ff939a1640c7230460db3ae2823"
     }
   },
-  "report_sha256": "4b5d6e1651df34a4d5138a16e2bc700a0a4e7ed6935e3efebdb68849441724bc"
+  "report_sha256": "66a4d6d527cbb08dc83b4dcbebd7096c6de1a9567f96160687d652af8d451c33"
 }

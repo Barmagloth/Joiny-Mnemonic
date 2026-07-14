@@ -314,6 +314,41 @@ Without `tiktoken`, token counts are conservative estimates and the report says 
 usage captured by hooks remains authoritative. Latest checked results are in
 [benchmarks/results/latest.md](benchmarks/results/latest.md).
 
+## LongMemEval-S accuracy
+
+Full 500-question LongMemEval-S run through the shipped retrieval stack -
+FTS5+BM25 with signal enrichment, the temporal arm, RRF fusion, plus the
+optional `semantic-local` and `reranker-local` plugins (both local models,
+no network calls at query time). Answers and verbatim Appendix-A.4 judging
+via a local Claude Code runner (Sonnet); 12,288-token packets, retrieval
+limit 64.
+
+| Question type | Accuracy |
+|---|---|
+| single-session-user | 98.6% |
+| knowledge-update | 96.2% |
+| single-session-assistant | 92.9% |
+| multi-session | 85.7% |
+| temporal-reasoning | 84.2% |
+| single-session-preference | 60.0% |
+| **Overall** | **88.0%** (440/500) |
+
+Abstention subset: 28/30. Retrieval recall of gold sessions: ~100% per
+type. Mean packet cost ~11.7k tokens per question against a ~165k-token
+haystack - a measured 92.9% token saving.
+
+We publish our own numbers only; the report states the full configuration
+and the literature is one search away. The report is provenance-stamped
+(code commit, plugin set, per-question JSONL and dataset pinned by SHA-256)
+and verifiable offline:
+
+```powershell
+python -m joiny_mnemonic.report_signing verify benchmarks/results/longmemeval-latest.json
+```
+
+Reproduce with `joiny-mnemonic-longmemeval` against the public dataset; the
+harness, runner bridge and per-question rows are all in this repository.
+
 ## Evaluation
 
 The legacy diagnostic checks whether required evidence strings survive a policy:
