@@ -344,11 +344,16 @@ LongMemEval results and are stated here explicitly:
   Sonnet for both). This is not an independent judge; same-family judging
   is a known leniency risk. The per-question JSONL preserves every answer,
   so anyone can re-judge the rows with a different model without re-running
-  the benchmark — and this has been done: an independent cross-family
-  re-judge (GPT-5.4, all 500 persisted answers, same pinned dataset)
-  scored **87.6%** against our 88.0% — judge agreement 98.8%, six verdict
-  flips, none of them in multi-session. Evidence and per-batch verdicts:
-  `benchmarks/results/gpt-rejudge-codex-20260714-225820/`.
+  the benchmark — and this has been done, twice. Three-judge
+  triangulation over the same 500 persisted answers and pinned dataset:
+  Sonnet (original, same stack) **88.0%**, GPT-5.4 (independent family)
+  **87.6%**, Opus (same family, different tier) **89.0%** — a ±0.7pp
+  spread. Multi-session is identical under all three judges (85.7%, zero
+  flips); preference is the judge-sensitive type (60.0–76.7% depending on
+  judge — rubric judging is genuinely soft there, and at 30 questions it
+  barely moves the headline). Evidence:
+  `benchmarks/results/gpt-rejudge-codex-20260714-225820/` and
+  `benchmarks/results/rejudge-opus.json`, both offline-verifiable.
 - **The runner's answer prompt is benchmark-tuned**: it instructs dated
   enumeration for aggregation questions and grounded synthesis for
   preference questions. A production agent without such prompting would

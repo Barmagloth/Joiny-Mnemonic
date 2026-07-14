@@ -43,9 +43,13 @@ preference questions into abstention.
       from raw batches, report signed): **87.6%** vs 88.0%, agreement
       98.8%, 6 flips (4 down, 2 up), zero flips in multi-session. The
       same-stack-judge caveat is now empirically bounded at ~0.4pp
-- [ ] Methodology hardening, remaining: same-family Opus re-judge (in
-      flight) for triangulation; small stratified repeat runs for a
-      variance band; manual audit of judge leniency on the flip set
+- [x] Opus re-judge done (2026-07-15, signed): 89.0%, 9 flips (7 of them
+      preference). Triangulation Sonnet/GPT-5.4/Opus = 88.0/87.6/89.0 —
+      ±0.7pp; multi-session identical under all three judges; preference
+      is the judge-sensitive type (60.0–76.7%)
+- [ ] Methodology hardening, remaining: small stratified repeat runs for
+      a variance band; manual audit of judge rationales on the combined
+      flip set
 
 Done when: (achieved for the headline; error-analysis items continue)
 
