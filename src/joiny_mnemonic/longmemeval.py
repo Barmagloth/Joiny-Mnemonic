@@ -229,6 +229,7 @@ class LMEHarness:
     runner: SubprocessLLMRunner
     context_budget_tokens: int = 4096
     retrieval_limit: int = 24
+    packing: str = "rank"  # "rank" (greedy fused order) | "breadth" (see below)
 
     results: list[dict[str, Any]] = field(default_factory=list)
 
@@ -269,29 +270,70 @@ class LMEHarness:
             record_telemetry=False,
             query_timestamp=anchor,
         )
-        parts: list[str] = []
-        included: list[str] = []
-        used = 0
-        for hit in hits:
-            block = hit.content.strip()
-            cost = conservative_token_estimate(block)
-            if used + cost > self.context_budget_tokens:
-                break
-            parts.append(block)
-            included.append(hit.id)
-            used += cost
-        # Attribution metrics: which haystack sessions the packet drew from
-        # (retrieval miss vs synthesis miss), and what the packet cost
-        # relative to shipping the whole haystack.
-        retrieved_sessions: set[str] = set()
-        for event_id in included:
+        # Session-diversity packing (probe finding 2026-07-14: aggregation
+        # questions miss because RRF fills the packet with fragments of the
+        # lexically strongest sessions, crowding out weaker gold sessions —
+        # coverage, not synthesis, is the binding constraint). Two passes:
+        # rank order with a per-session cap first, then backfill.
+        def _hit_session(hit: Any) -> tuple[str, str]:
             try:
-                event = service.store.get_event(event_id)
+                event = service.store.get_event(hit.id)
             except KeyError:
-                continue
-            session_id = event.payload.get("session_id")
-            if session_id:
-                retrieved_sessions.add(str(session_id))
+                return ("", "")
+            return (
+                str(event.payload.get("session_id") or ""),
+                str(event.payload.get("session_date") or ""),
+            )
+
+        annotated = [(hit, *_hit_session(hit)) for hit in hits]
+        chosen: list[tuple[Any, str, str]] = []
+        used = 0
+        if self.packing == "breadth":
+            # Breadth-first (ceiling measurement 2026-07-14: the pool holds
+            # 100% of gold sessions at limit 128, but rank-order packing
+            # drowns the deep-ranked ones below the budget line; a hard
+            # per-session cap traded depth away at a loss). Phase 1 packs
+            # the first fragment of every unseen session in rank order —
+            # cheap full-width coverage; phase 2 backfills depth by rank.
+            seen_sessions: set[str] = set()
+            picked_ids: set[int] = set()
+            for index, entry in enumerate(annotated):
+                hit, session_id, _ = entry
+                if session_id and session_id in seen_sessions:
+                    continue
+                cost = conservative_token_estimate(hit.content.strip())
+                if used + cost > self.context_budget_tokens:
+                    continue
+                chosen.append(entry)
+                picked_ids.add(index)
+                seen_sessions.add(session_id)
+                used += cost
+            for index, entry in enumerate(annotated):
+                if index in picked_ids:
+                    continue
+                cost = conservative_token_estimate(entry[0].content.strip())
+                if used + cost > self.context_budget_tokens:
+                    continue
+                chosen.append(entry)
+                used += cost
+        else:  # "rank": plain greedy in fused order
+            for entry in annotated:
+                cost = conservative_token_estimate(entry[0].content.strip())
+                if used + cost > self.context_budget_tokens:
+                    break
+                chosen.append(entry)
+                used += cost
+        # Render grouped by session, sessions in date order — aggregation
+        # becomes a walk over a structured list instead of needle-hunting.
+        groups: dict[tuple[str, str], list[str]] = {}
+        for hit, session_id, date in chosen:
+            groups.setdefault((date, session_id), []).append(hit.content.strip())
+        parts = []
+        for (date, _), blocks in sorted(groups.items()):
+            header = f"## Session {date}" if date else "## Session (undated)"
+            parts.append(header + "\n" + "\n".join(blocks))
+        included = [hit.id for hit, _, _ in chosen]
+        retrieved_sessions = {sid for _, sid, _ in chosen if sid}
         haystack_tokens = sum(
             conservative_token_estimate(str(turn.get("content", "")))
             for session in item.sessions
@@ -304,6 +346,9 @@ class LMEHarness:
             "retrieved_sessions": sorted(retrieved_sessions),
             "gold_sessions": sorted(gold),
             "retrieval_hit": bool(gold & retrieved_sessions) if gold else None,
+            "gold_coverage": round(
+                len(gold & retrieved_sessions) / len(gold), 4
+            ) if gold else None,
         }
         return "\n\n".join(parts), included, metrics
 
@@ -347,6 +392,7 @@ class LMEHarness:
     def report(self) -> dict[str, Any]:
         by_type: dict[str, dict[str, int]] = {}
         recall_by_type: dict[str, list[bool]] = {}
+        coverage_by_type: dict[str, list[float]] = {}
         context_tokens = 0
         haystack_tokens = 0
         for record in self.results:
@@ -359,6 +405,10 @@ class LMEHarness:
                 recall_by_type.setdefault(record["question_type"], []).append(
                     bool(record["retrieval_hit"])
                 )
+            if record.get("gold_coverage") is not None:
+                coverage_by_type.setdefault(record["question_type"], []).append(
+                    float(record["gold_coverage"])
+                )
             context_tokens += int(record.get("context_tokens") or 0)
             haystack_tokens += int(record.get("haystack_tokens") or 0)
         overall_total = sum(item["total"] for item in by_type.values())
@@ -370,6 +420,7 @@ class LMEHarness:
             "config": {
                 "context_budget_tokens": self.context_budget_tokens,
                 "retrieval_limit": self.retrieval_limit,
+                "packing": self.packing,
                 "runner_command": list(self.runner.command),
             },
             "per_type": {
@@ -383,6 +434,15 @@ class LMEHarness:
                             )
                         }
                         if recall_by_type.get(name) else {}
+                    ),
+                    **(
+                        {
+                            "gold_coverage_mean": round(
+                                sum(coverage_by_type[name])
+                                / len(coverage_by_type[name]), 4
+                            )
+                        }
+                        if coverage_by_type.get(name) else {}
                     ),
                 }
                 for name, counts in sorted(by_type.items())
@@ -417,11 +477,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--budget", type=int, default=4096)
     parser.add_argument("--retrieval-limit", type=int, default=24)
+    parser.add_argument(
+        "--packing", choices=["rank", "breadth"], default="rank",
+        help="packet packing: greedy fused-rank order, or breadth-first "
+        "(first fragment of each session, then depth backfill)",
+    )
     parser.add_argument("--limit-questions", type=int, default=0)
     parser.add_argument(
         "--sample-per-type", type=int, default=0,
         help="deterministic stratified subset: first N questions of each "
         "type (for cheap config sweeps)",
+    )
+    parser.add_argument(
+        "--only-type", default="",
+        help="run only questions of this question_type (targeted probes)",
     )
     parser.add_argument(
         "--offset", type=int, default=0,
@@ -435,6 +504,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not isinstance(command, list) or not all(isinstance(x, str) for x in command):
         raise SystemExit("--runner-command must be a JSON array of strings")
     items = load_dataset(args.dataset)
+    if args.only_type:
+        items = [item for item in items if item.question_type == args.only_type]
     if args.sample_per_type:
         taken: dict[str, int] = {}
         sampled = []
@@ -457,6 +528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         SubprocessLLMRunner(command),
         context_budget_tokens=args.budget,
         retrieval_limit=args.retrieval_limit,
+        packing=args.packing,
     )
     mode = "a" if args.offset else "w"
     with jsonl_path.open(mode, encoding="utf-8") as stream:

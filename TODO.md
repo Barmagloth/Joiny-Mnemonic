@@ -20,9 +20,18 @@ preference questions into abstention.
       single-session-user 84.3%, assistant 82.1%, knowledge-update 79.5%,
       temporal-reasoning 59.4%, multi-session 26.3%, preference 23.3%,
       abstention 28/30
-- [ ] Error analysis: multi-session and preference misses against
-      `retrieved_ids` — retrieval miss vs synthesis miss
-- [ ] Tuned run v2 (budget / retrieval limit; prompt stays honest)
+- [x] Error analysis done (2026-07-14 probe series, 20 multi-session
+      questions): pool holds 100% of gold sessions at limit 128 — retrieval
+      exonerated; rank/12k 6/20, cap3 5/20, breadth 0/11 (killed), rank/20k
+      5/20 — multi-session plateaus at ~25-30% regardless of packing and
+      budget; the wall is turn-sized fragments (400-1200 tok) vs one-shot
+      aggregation
+- [ ] Tuned run v2 in flight: budget 12288 / limit 64 / rank packing +
+      validated fixes (query_timestamp anchor, preference synthesis,
+      enumerate prompt); sweep-projected ~63-68%
+- [ ] Future multi-session lever (separate work, not config): finer
+      ingestion granularity (sub-turn events) and/or two-pass aggregation
+      in the answering flow
 - [ ] README section with our numbers — ours only, no other systems' scores
 
 Done when: a signed report lives in `benchmarks/results/` and the README
