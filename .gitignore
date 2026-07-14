@@ -22,3 +22,5 @@ benchmarks/runtime/
 
 # Run logs are scratch, never trust artifacts
 benchmarks/results/*.log
+
+benchmarks/distill-cache/

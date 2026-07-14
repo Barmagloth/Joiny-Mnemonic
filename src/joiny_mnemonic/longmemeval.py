@@ -231,8 +231,50 @@ class LMEHarness:
     retrieval_limit: int = 24
     packing: str = "rank"  # "rank" (greedy fused order) | "breadth" (see below)
     rerank: bool = False  # cross-encoder rerank of the candidate pool
+    ingest_mode: str = "raw"  # "raw" turns | "distill" facts alongside turns
+    distill_cache_dir: Path | None = None
     _cross_encoder: Any = field(default=None, repr=False)
     active_semantic_plugins: list[str] = field(default_factory=list)
+
+    def _distill_session(self, session: dict[str, Any]) -> list[str]:
+        """LLM fact extraction for one session, disk-cached by content hash
+        (LongMemEval haystacks share sessions across questions). Fail-safe:
+        unparseable output means no facts, never a crashed run."""
+        transcript = "\n".join(
+            f"[{turn.get('role', 'user')}] {turn.get('content', '')}"
+            for turn in session["turns"]
+        )
+        key = hashlib.sha256(
+            (session["session_id"] + transcript).encode("utf-8")
+        ).hexdigest()[:24]
+        cache_file = (
+            self.distill_cache_dir / f"{key}.json"
+            if self.distill_cache_dir else None
+        )
+        if cache_file is not None and cache_file.exists():
+            return json.loads(cache_file.read_text(encoding="utf-8"))
+        output = self.runner.call(
+            {
+                "mode": "distill",
+                "session_date": session["date"],
+                "transcript": transcript[:60000],
+                "session_id": session["session_id"],
+            }
+        )
+        facts: list[str] = []
+        try:
+            start = output.index("[")
+            end = output.rindex("]") + 1
+            parsed = json.loads(output[start:end])
+            facts = [str(item) for item in parsed if str(item).strip()]
+        except (ValueError, json.JSONDecodeError):
+            facts = []
+        if cache_file is not None:
+            self.distill_cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(
+                json.dumps(facts, ensure_ascii=False), encoding="utf-8"
+            )
+        return facts
 
     def _rerank_hits(self, question: str, hits: list[Any]) -> list[Any]:
         """Cross-encoder rerank (calibration research 2026-07-14: +3-4pp in
@@ -255,16 +297,22 @@ class LMEHarness:
 
     def ingest(self, service: MemoryService, item: LMEQuestion) -> int:
         """Sessions become dated message events; the date rides in the text
-        (Hindsight's measured cheap win) because admission time is now."""
+        (Hindsight's measured cheap win) because admission time is now.
+
+        In "distill" mode LLM-extracted facts are ADDED alongside the
+        verbatim turns through the product derive path (provenance to the
+        session's events) — the A/B tests our Phase B shape, facts next to
+        verbatim, never a lossy replacement."""
         count = 0
         for session in item.sessions:
             date = session["date"]
+            event_ids: list[str] = []
             for turn in session["turns"]:
                 content = str(turn.get("content", "")).strip()
                 if not content:
                     continue
                 prefix = f"[Date: {date}] " if date else ""
-                service.store.append_event(
+                event = service.store.append_event(
                     kind="message",
                     role=str(turn.get("role", "user")),
                     content=prefix + content,
@@ -273,7 +321,17 @@ class LMEHarness:
                         "session_date": date,
                     },
                 )
+                event_ids.append(event.id)
                 count += 1
+            if self.ingest_mode == "distill" and event_ids:
+                for fact in self._distill_session(session):
+                    service.store.derive_memory(
+                        memory_type="fact",
+                        content=fact,
+                        source_event_ids=tuple(event_ids),
+                        valid_from=date[:10] if date else None,
+                        metadata={"session_id": session["session_id"]},
+                    )
         return count
 
     def build_context(
@@ -300,12 +358,20 @@ class LMEHarness:
         def _hit_session(hit: Any) -> tuple[str, str]:
             try:
                 event = service.store.get_event(hit.id)
+                return (
+                    str(event.payload.get("session_id") or ""),
+                    str(event.payload.get("session_date") or ""),
+                )
+            except KeyError:
+                pass
+            try:  # distilled facts are memory records with session metadata
+                record = service.store.get_memory(hit.id)
+                return (
+                    str(record.metadata.get("session_id") or ""),
+                    str(record.valid_from or ""),
+                )
             except KeyError:
                 return ("", "")
-            return (
-                str(event.payload.get("session_id") or ""),
-                str(event.payload.get("session_date") or ""),
-            )
 
         annotated = [(hit, *_hit_session(hit)) for hit in hits]
         chosen: list[tuple[Any, str, str]] = []
@@ -445,6 +511,7 @@ class LMEHarness:
                 "retrieval_limit": self.retrieval_limit,
                 "packing": self.packing,
                 "rerank": self.rerank,
+                "ingest_mode": self.ingest_mode,
                 "semantic_plugins": self.active_semantic_plugins,
                 "runner_command": list(self.runner.command),
             },
@@ -512,6 +579,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="cross-encoder rerank of the candidate pool "
         "(requires sentence-transformers)",
     )
+    parser.add_argument(
+        "--ingest", choices=["raw", "distill"], default="raw",
+        help="raw: verbatim turns only; distill: LLM-extracted facts "
+        "derived alongside the turns (A/B for the Phase B shape)",
+    )
+    parser.add_argument(
+        "--distill-cache", default="benchmarks/distill-cache",
+        help="disk cache for per-session distillations (sessions repeat "
+        "across questions)",
+    )
     parser.add_argument("--limit-questions", type=int, default=0)
     parser.add_argument(
         "--sample-per-type", type=int, default=0,
@@ -560,6 +637,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         retrieval_limit=args.retrieval_limit,
         packing=args.packing,
         rerank=args.rerank,
+        ingest_mode=args.ingest,
+        distill_cache_dir=Path(args.distill_cache),
     )
     mode = "a" if args.offset else "w"
     with jsonl_path.open(mode, encoding="utf-8") as stream:

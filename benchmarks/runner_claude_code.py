@@ -18,6 +18,8 @@ import sys
 import tempfile
 
 MODEL = os.environ.get("LME_MODEL", "sonnet")
+# Distillation is a bulk write-time task: default to the fast tier.
+DISTILL_MODEL = os.environ.get("LME_DISTILL_MODEL", "haiku")
 CLAUDE = os.environ.get("LME_CLAUDE", "claude")
 
 ANSWER_PREAMBLE = (
@@ -36,9 +38,25 @@ ANSWER_PREAMBLE = (
 )
 
 
+DISTILL_PROMPT = (
+    "Extract 2-5 comprehensive, self-contained narrative facts from this "
+    "conversation session (recipe per Hindsight, Apache-2.0: each fact "
+    "covers a whole exchange, names all participants explicitly - never "
+    "'the user said' without what/when - and preserves concrete details: "
+    "dates, quantities, names, decisions, preferences). Every fact must "
+    "embed the session date. Output ONLY a JSON array of strings, no prose.\n\n"
+    "Session date: {date}\n\nTranscript:\n{transcript}"
+)
+
+
 def build_prompt(payload: dict) -> str:
     if payload.get("mode") == "judge":
         return payload["prompt"]
+    if payload.get("mode") == "distill":
+        return DISTILL_PROMPT.format(
+            date=payload.get("session_date", "unknown"),
+            transcript=payload.get("transcript", ""),
+        )
     return (
         ANSWER_PREAMBLE
         + f"Current date: {payload.get('question_date', 'unknown')}\n\n"
@@ -52,8 +70,9 @@ def main() -> int:
     # Neutral cwd: don't drag project CLAUDE.md / MCP servers into each call.
     workdir = os.path.join(tempfile.gettempdir(), "jm-lme-runner")
     os.makedirs(workdir, exist_ok=True)
+    model = DISTILL_MODEL if payload.get("mode") == "distill" else MODEL
     completed = subprocess.run(
-        [CLAUDE, "-p", "--model", MODEL],
+        [CLAUDE, "-p", "--model", model],
         input=build_prompt(payload),
         capture_output=True,
         text=True,
