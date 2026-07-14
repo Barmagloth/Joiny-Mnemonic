@@ -230,6 +230,26 @@ class LMEHarness:
     context_budget_tokens: int = 4096
     retrieval_limit: int = 24
     packing: str = "rank"  # "rank" (greedy fused order) | "breadth" (see below)
+    rerank: bool = False  # cross-encoder rerank of the candidate pool
+    _cross_encoder: Any = field(default=None, repr=False)
+    active_semantic_plugins: list[str] = field(default_factory=list)
+
+    def _rerank_hits(self, question: str, hits: list[Any]) -> list[Any]:
+        """Cross-encoder rerank (calibration research 2026-07-14: +3-4pp in
+        the Emergence stack; model = ms-marco-MiniLM-L-6-v2, the same local
+        ~80MB cross-encoder Hindsight ships). Loaded lazily, cached across
+        questions."""
+        if self._cross_encoder is None:
+            from sentence_transformers import CrossEncoder
+
+            self._cross_encoder = CrossEncoder(
+                "cross-encoder/ms-marco-MiniLM-L-6-v2"
+            )
+        scores = self._cross_encoder.predict(
+            [(question, hit.content[:2000]) for hit in hits]
+        )
+        order = sorted(range(len(hits)), key=lambda i: scores[i], reverse=True)
+        return [hits[i] for i in order]
 
     results: list[dict[str, Any]] = field(default_factory=list)
 
@@ -270,6 +290,8 @@ class LMEHarness:
             record_telemetry=False,
             query_timestamp=anchor,
         )
+        if self.rerank and hits:
+            hits = self._rerank_hits(item.question, list(hits))
         # Session-diversity packing (probe finding 2026-07-14: aggregation
         # questions miss because RRF fills the packet with fragments of the
         # lexically strongest sessions, crowding out weaker gold sessions —
@@ -355,6 +377,7 @@ class LMEHarness:
     def run_question(self, item: LMEQuestion) -> dict[str, Any]:
         started = time.perf_counter()
         with MemoryService(":memory:", project_root=Path.cwd()) as service:
+            self.active_semantic_plugins = sorted(service.plugins.semantic.keys())
             ingested = self.ingest(service, item)
             context, included, metrics = self.build_context(service, item)
         answer = self.runner.call(
@@ -421,6 +444,8 @@ class LMEHarness:
                 "context_budget_tokens": self.context_budget_tokens,
                 "retrieval_limit": self.retrieval_limit,
                 "packing": self.packing,
+                "rerank": self.rerank,
+                "semantic_plugins": self.active_semantic_plugins,
                 "runner_command": list(self.runner.command),
             },
             "per_type": {
@@ -482,6 +507,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="packet packing: greedy fused-rank order, or breadth-first "
         "(first fragment of each session, then depth backfill)",
     )
+    parser.add_argument(
+        "--rerank", action="store_true",
+        help="cross-encoder rerank of the candidate pool "
+        "(requires sentence-transformers)",
+    )
     parser.add_argument("--limit-questions", type=int, default=0)
     parser.add_argument(
         "--sample-per-type", type=int, default=0,
@@ -529,6 +559,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         context_budget_tokens=args.budget,
         retrieval_limit=args.retrieval_limit,
         packing=args.packing,
+        rerank=args.rerank,
     )
     mode = "a" if args.offset else "w"
     with jsonl_path.open(mode, encoding="utf-8") as stream:
