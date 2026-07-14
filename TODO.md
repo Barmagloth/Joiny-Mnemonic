@@ -38,20 +38,28 @@ We shipped hot-path fixes (M5/M6) without measurements; that is debt.
 
 Done when: a regression in hook latency fails `--assert-gates`.
 
-## 3. Settle/confirm through the existing candidate ledger — task6B/6C
+## 3. Autonomous state maintenance with auditable undo — task6B/6C
 
-"Confirm to close" has no verb today. Live acceptance fixture already exists:
-the delme2.md completion detected on GPTShared (2026-07-14) sits pending with
-no way to settle it short of the global auto-closure flag or manual block-set.
+The user must not police memory. Detection is already automatic; the default
+must be automatic *closure* on strong deterministic evidence, with a passive
+one-line notice in the next injection and a one-command revert (block history
+makes undo lossless — that is what licenses the automation). Manual
+settlement verbs exist for the ambiguous tail and for reversal only; a
+growing pending queue is a detection-quality bug, not a UX feature. Live
+fixture: the delme2.md completion detected on GPTShared (2026-07-14) should
+have closed itself.
 
 - [ ] `candidate_kind` migration; `task_closure` + `block_change` kinds
-- [ ] Consume-once settlement transitions, fail-closed policy
-- [ ] `joiny-mnemonic candidates list/show/settle`
-- [ ] MCP read + write tools
-- [ ] The live GPTShared pending settled through the new verb — that is the
-      acceptance test
+- [ ] Evidence-strength ladder; strong evidence auto-applies by default
+      (actor `system`, full audit trail), passive notice line
+- [ ] Consume-once settlement transitions, fail-closed policy, first-class
+      `undo`
+- [ ] `joiny-mnemonic candidates list/show/settle/undo` + MCP read/write
+- [ ] Acceptance: a fresh GPTShared-style scenario closes the task with zero
+      user actions; `undo` restores the entry losslessly
 
-Done when: detection → review → settle works end-to-end with no manual magic.
+Done when: the common case needs no user action at all, and the wrong-closure
+case costs one command.
 
 ## 4. Host-level E2E: Claude + Codex, repeatable
 
@@ -67,7 +75,8 @@ One-off passes rot. This should be a checklist (or script) run per release.
       re-verified in ~15 minutes
 - [ ] Live finding tracked: verb-flip reproduced 2026-07-14 ("создать" in the
       block, "удалить" in a nested session's paraphrase) — the durable fix is
-      settlement (item 3) removing stale entries, not more prompt armor
+      autonomous closure (item 3) removing stale entries by itself, not more
+      prompt armor and not user vigilance
 
 Done when: both hosts pass the same written checklist on the current release.
 
@@ -79,14 +88,16 @@ architecture docs.
 
 - [x] MCP registered by default in every setup path (task5 A4 + M11)
 - [x] Pending completions surface in resume and capabilities
-- [ ] Settlement verb (item 3) closes the loop
+- [ ] Autonomous closure (item 3) removes the last manual step
 - [ ] Fresh-user walkthrough: clean project → setup → work session → marker →
-      recall question → `memory_source` citation → completion detected →
-      settle. Every step through shipped surfaces only
+      recall question → `memory_source` citation → task completes → closure
+      happens by itself, notice visible, nothing to confirm. Every step
+      through shipped surfaces only
 - [ ] Friction log from that walkthrough becomes the next UX batch
 
 Done when: the walkthrough succeeds on a machine that never saw the repo,
-performed by someone who did not build the system.
+performed by someone who did not build the system — and the memory required
+zero maintenance actions from them.
 
 ## 6. Recall / extraction quality
 

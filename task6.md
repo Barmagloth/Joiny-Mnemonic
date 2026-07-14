@@ -80,29 +80,61 @@ Data model changes (one schema migration):
 - Candidate provenance rules are unchanged: every candidate cites its source
   events; every transition cites an actor, a rule id and a source event.
 
+Design principle — **automation first, settlement as the exception**. The
+user must not police memory: if every marker or closure needs manual review,
+copy-pasting into a notepad wins on effort. The default path is autonomous,
+evidence-gated action with passive notification and cheap auditable undo;
+manual settlement verbs exist for the ambiguous tail and for reversal, not as
+a routine chore. The economics that make this safe already shipped: blocks
+are append-only with full version history, so reverting a wrong automatic
+closure costs one command and loses nothing.
+
+Evidence-strength ladder (deterministic, no LLM):
+
+- **strong** (e.g. trusted host-hook Write of the exact path after the task's
+  admission point): auto-apply by default. The closure writes through the
+  existing block/task APIs citing candidate + evidence, and the next
+  injection carries a one-line passive notice ("auto-closed: <entry> by
+  evt_..."), glanceable and ignorable.
+- **medium** (e.g. command prefix match): configurable; default auto-apply
+  with notice.
+- **weak/ambiguous**: candidate stays pending — this queue must be near-empty
+  in practice; a growing pending queue is a detection-quality bug, not a UX
+  feature.
+
+The existing `automatic_task_closure_enabled` flag generalizes into this
+per-kind, per-strength policy (its current semantics map to "auto-apply
+strong+medium"); the new default flips to ON for strong evidence.
+
 Semantics:
 
 - **task_closure**: the reconciler's detection (unchanged canonical
   `task_completion_detected` event) additionally creates a `task_closure`
-  candidate citing the detection and evidence events. Settlement verbs align
-  with the existing transition vocabulary; add new statuses only if the
-  existing set cannot express accepted/rejected/applied/discarded.
-  An accepted closure writes through the existing block/task APIs (new
-  `open_tasks` version, superseded task memory) and cites the candidate and its
-  evidence — exactly what the auto-closure flag does today, but per-candidate
-  and explicit.
+  candidate citing the detection and evidence events. Under the default
+  policy, strong-evidence candidates are settled automatically in the same
+  pass (actor `system`, rule id = the evidence rule); the candidate row is
+  the audit record, not a work item. Settlement verbs align with the existing
+  transition vocabulary; add new statuses only if the existing set cannot
+  express accepted/rejected/applied/discarded/reverted.
+- **undo/revert** is a first-class transition: reverting an applied closure
+  restores the previous block version through the normal write path, citing
+  the reversal reason; the candidate records the round trip. Cheap undo is
+  what licenses aggressive automation.
 - **block_change**: the `?`-marker guard and future request paths create a
-  `block_change` candidate instead of (or in addition to, during migration) the
-  loose `block_change_requested` state event. Old events stay readable;
-  acceptance writes through `set_active_block` citing the candidate.
+  `block_change` candidate instead of (or in addition to, during migration)
+  the loose `block_change_requested` state event. Old events stay readable;
+  acceptance writes through `set_active_block` citing the candidate. (These
+  stay manual-by-default: a question mark in a decision marker is precisely
+  the ambiguous tail.)
 - Settlement is consume-once: repeated identical settlements are idempotent,
   conflicting settlements fail closed — the existing candidate-transition
   discipline already guarantees this shape.
-- `settlement_policy` (per kind): which actors may settle. Defaults fail
-  closed: `task_closure` and `block_change` settle only from trusted origins —
-  local operator (CLI), a host-verified user event, or a policy-ledger flag
-  that explicitly delegates to the agent (MCP write). Untrusted public-API
-  text can never settle anything (same H1 discipline as completion evidence).
+- `settlement_policy` (per kind × evidence strength): which actors may settle
+  and what auto-applies. Manual settlement and undo accept only trusted
+  origins — local operator (CLI), a host-verified user event, or a
+  policy-ledger flag that explicitly delegates to the agent (MCP write).
+  Untrusted public-API text can never settle anything (same H1 discipline as
+  completion evidence).
 - `enforcement_level` recorded on settlement: `recorded_only` or `advisory`.
   Nothing in this task may claim OS enforcement; contracts are audit evidence,
   not magic authority.
@@ -110,7 +142,7 @@ Semantics:
 ## Task 6C — settlement surfaces
 
 - CLI: `joiny-mnemonic candidates list --kind --status`, `candidates show <id>`,
-  `candidates settle <id> --transition --reason`.
+  `candidates settle <id> --transition --reason`, `candidates undo <id>`.
 - MCP: one read tool (`memory_candidates`) and one explicit write tool
   (`memory_settle_candidate`) requiring candidate id + transition; tool
   descriptions state that settlement is auditable and gated by policy, and
