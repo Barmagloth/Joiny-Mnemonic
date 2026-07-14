@@ -194,7 +194,9 @@ Entry-point группы:
 
 - `joiny_mnemonic.semantic` — embeddings/vector retrieval;
 - `joiny_mnemonic.knowledge_graph` — graph projection;
-- `joiny_mnemonic.kv_tier` — физический KV storage.
+- `joiny_mnemonic.kv_tier` — физический KV storage;
+- `joiny_mnemonic.reranker` — финальный rerank кандидатов retrieval (применяется движком к
+  полному fused-порядку до limit; сбой плагина деградирует к детерминированному порядку).
 
 Legacy `llm_memory.*` entry-point groups are loaded first for compatibility; renamed `joiny_mnemonic.*` plugins take precedence by plugin name.
 
@@ -204,7 +206,10 @@ Legacy `llm_memory.*` entry-point groups are loaded first for compatibility; ren
 - `plugins/semantic-local` — локальный sentence-transformer, persistent SQLite vector index,
   cosine retrieval по typed memories и обычным canonical events;
 - `plugins/knowledge-graph` — persistent SQLite projection явных и маркированных entity
-  relations с `memory_id`, `source_event_ids` и branch-aware filtering.
+  relations с `memory_id`, `source_event_ids` и branch-aware filtering;
+- `plugins/reranker-local` — локальный cross-encoder (`ms-marco-MiniLM-L-6-v2`, ~80MB, CPU),
+  переранжирует кандидатский пул после fusion; каждый hit несёт `metadata.rerank`
+  (score, pre/post rank) для аудита. На LongMemEval-S поднял multi-session с 26.3% до 85.7%.
 
 `MemoryService` передаёт plugin factory проектный root и путь канонической БД. Derived indexes
 хранятся отдельно под `.joiny-mnemonic/plugins/`, могут быть перестроены из канонических данных
@@ -329,7 +334,9 @@ semantics in every temporal hit and follows snapshot replay versioning, because 
 affect prompt content and exposure audit.
 
 `known_at` resolves branch-locally to the greatest visible `seq` admitted at or before the
-instant; non-monotonic wall clocks resolve deterministically through `seq`. All derived temporal
+instant; non-monotonic wall clocks resolve deterministically through `seq`. `query_timestamp`
+anchors relative temporal expressions in the query ("вчера", "last Sunday") to the caller's
+clock instead of the server's now — without it, windows parse years away from historical data. All derived temporal
 state — effective intervals, validity status, lineage closure — is computed from the versions
 visible at that cutoff, never from full history: a retroactive correction admitted later cannot
 close or contradict an interval as seen at an earlier cutoff. A successor's `valid_from` closes

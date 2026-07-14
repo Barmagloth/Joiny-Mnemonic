@@ -196,6 +196,22 @@ greedily from `search` hits under the token budget. Reports land in
 `benchmarks/results/longmemeval-latest.json` (per-type and overall accuracy, config, dataset
 hash) plus a per-question JSONL.
 
+Key harness flags: `--budget` (packet tokens), `--retrieval-limit`, `--packing rank|breadth`,
+`--rerank` (harness-side cross-encoder; the product path is the `reranker-local` plugin),
+`--ingest raw|distill` (A/B: LLM-extracted facts derived alongside verbatim turns),
+`--sample-per-type` / `--only-type` (cheap targeted probes), `--offset` (resume). Rows are
+flushed per question; a crashed run resumes losslessly.
+
+Reports are provenance-stamped (`report_signing.py`): a `provenance` block records the code
+commit, tracked-tree cleanliness (code only — the report's own files do not count), package and
+schema versions, and SHA-256 of each backing artifact (per-question JSONL, dataset); the
+`report_sha256` covers the canonical JSON. Verify offline:
+
+    python -m joiny_mnemonic.report_signing verify benchmarks/results/longmemeval-latest.json
+
+The report `config` names the active semantic and reranker plugins — an environment-installed
+plugin silently changing the measured system would otherwise be invisible in the artifact.
+
 Honesty note: the harness ships tested against a deterministic stub runner; a real accuracy
 figure requires the published LongMemEval-S dataset and a real LLM runner. Until such a run is
 recorded in `benchmarks/results/`, retrieval-quality comparisons with benchmark-published
