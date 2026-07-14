@@ -344,7 +344,11 @@ LongMemEval results and are stated here explicitly:
   Sonnet for both). This is not an independent judge; same-family judging
   is a known leniency risk. The per-question JSONL preserves every answer,
   so anyone can re-judge the rows with a different model without re-running
-  the benchmark.
+  the benchmark — and this has been done: an independent cross-family
+  re-judge (GPT-5.4, all 500 persisted answers, same pinned dataset)
+  scored **87.6%** against our 88.0% — judge agreement 98.8%, six verdict
+  flips, none of them in multi-session. Evidence and per-batch verdicts:
+  `benchmarks/results/gpt-rejudge-codex-20260714-225820/`.
 - **The runner's answer prompt is benchmark-tuned**: it instructs dated
   enumeration for aggregation questions and grounded synthesis for
   preference questions. A production agent without such prompting would

@@ -38,13 +38,14 @@ preference questions into abstention.
       taste evidence; and the temporal tail (84.2%)
 - [ ] A/B with LLM extraction (--ingest distill, facts alongside verbatim
       through the derive path) — mechanism shipped, run pending
-- [ ] Methodology hardening for the 88.0% claim (review 2026-07-15):
-      re-judge the persisted 500 answers with a different judge model
-      (rows + pinned dataset make this a judge-only pass, no re-answering);
-      small stratified repeat runs for a variance band; manual audit of
-      judge leniency on a MISS/OK boundary sample. Until then the README
-      states the caveats explicitly (same-stack judge, benchmark-tuned
-      answer prompt, single run)
+- [x] Cross-family re-judge done (2026-07-14, GPT-5.4 over all 500
+      persisted answers, byte-pinned rows and dataset, verified by recount
+      from raw batches, report signed): **87.6%** vs 88.0%, agreement
+      98.8%, 6 flips (4 down, 2 up), zero flips in multi-session. The
+      same-stack-judge caveat is now empirically bounded at ~0.4pp
+- [ ] Methodology hardening, remaining: same-family Opus re-judge (in
+      flight) for triangulation; small stratified repeat runs for a
+      variance band; manual audit of judge leniency on the flip set
 
 Done when: (achieved for the headline; error-analysis items continue)
 

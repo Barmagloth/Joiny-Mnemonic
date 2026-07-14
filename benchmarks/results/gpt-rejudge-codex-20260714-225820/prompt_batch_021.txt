@@ -1,0 +1,5 @@
+You are an independent LongMemEval judge. Read the JSONL file R:\Projects\Joiny-Mnemonic\benchmarks\results\gpt-rejudge-codex-20260714-225820\batch_021.jsonl.
+
+For each row, judge whether model_answer correctly satisfies gold_answer_or_rubric for the question. Use the same broad LongMemEval rule: answer correct if the response contains the correct answer or is equivalent; for preference rubrics, correct if it recalls and uses the personal information adequately; for unanswerable questions, correct if it identifies missing information. Be stricter when the response leads with a materially wrong answer and only mentions the gold answer as a rejected alternative.
+
+Return JSON only matching the schema: {"verdicts": [{"question_id": "...", "correct": true, "rationale": "short reason"}]}. Include exactly one verdict per input row in the same order.
