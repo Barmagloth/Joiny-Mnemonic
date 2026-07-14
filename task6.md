@@ -120,6 +120,34 @@ Semantics:
   restores the previous block version through the normal write path, citing
   the reversal reason; the candidate records the round trip. Cheap undo is
   what licenses aggressive automation.
+- **Bidirectional reconciliation — the system catches its own mistakes.**
+  "How does the user learn about a wrong closure?" Mostly they must not have
+  to: the same deterministic watcher runs in reverse. Reopen triggers:
+  - a new user marker/TODO that normalizes to a closed entry **reopens** the
+    candidate (auto-undo, actor `system`, closure marked `contested`)
+    instead of creating a duplicate task — the natural human reaction to a
+    lost task ("TODO: сделать X" again) IS the correction signal, no new
+    habit required;
+  - closure evidence invalidated shortly after (e.g. the created file is
+    deleted within the evidence window) → hygiene finding
+    `closure_evidence_invalidated`, closure auto-reverted under the same
+    strong-evidence policy;
+  - a reverted/contested closure never auto-applies again from the same
+    evidence event (consume-once protects against flapping).
+  Damage of an undetected false positive is bounded by construction: nothing
+  is deleted, history keeps every version; the cost is a lost reminder, never
+  lost data.
+- **Human-visible notification, not just packet lines.** The injection notice
+  informs the agent; the user needs a channel the host renders directly.
+  Auto-settlements emitted during hook delivery also return the hook JSON
+  `systemMessage` field (verified against current docs: rendered to the
+  user in the Claude Code transcript UI, 10K cap, supported by all
+  JSON-output hooks), one line with the ready-made undo command:
+  `joiny: auto-closed "<entry>" (evt_...) — undo: jm candidates undo <id>`.
+  On hosts without an equivalent user-facing channel the capability reports
+  `notification: digest-only`. The session-start digest additionally lists
+  auto-actions since the previous session, so a returning user sees the
+  delta even if the moment-of-action line scrolled by.
 - **block_change**: the `?`-marker guard and future request paths create a
   `block_change` candidate instead of (or in addition to, during migration)
   the loose `block_change_requested` state event. Old events stay readable;
