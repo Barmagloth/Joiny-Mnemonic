@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joiny-mnemonic-reranker-local"
+version = "0.1.0"
+description = "Local cross-encoder reranking plugin for Joiny-Mnemonic retrieval"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "joiny-mnemonic>=0.4.0",
+  "sentence-transformers>=3.0",
+]
+license = {text = "MIT"}
+
+[project.entry-points."joiny_mnemonic.reranker"]
+local-cross-encoder = "joiny_mnemonic_reranker_local:create_plugin"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["joiny_mnemonic_reranker_local*"]

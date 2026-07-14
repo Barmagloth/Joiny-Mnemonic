@@ -79,6 +79,7 @@ PLUGIN_METADATA = {
     "semantic-local": ("Semantic search", "plugins/semantic-local"),
     "knowledge-graph": ("Knowledge graph", "plugins/knowledge-graph"),
     "nuextract-local": ("NuExtract local extractor", "plugins/nuextract-local"),
+    "reranker-local": ("Cross-encoder reranking", "plugins/reranker-local"),
 }
 
 GLOBAL_AGENT_MARKERS = {

@@ -63,6 +63,7 @@ class _EmptyPlugins:
         self.knowledge_graph: dict = {}
         self.extractors: dict = {}
         self.kv_tiers: dict = {}
+        self.rerankers: dict = {}
         self.errors: list[str] = []
 
 
@@ -182,6 +183,42 @@ class FusionTest(unittest.TestCase):
         target = next((hit for hit in hits if hit.id == record.id), None)
         self.assertIsNotNone(target)
         self.assertIn("temporal", target.metadata.get("fusion_ranks", {}))
+
+    def test_reranker_plugin_reorders_and_degrades_safely(self) -> None:
+        from dataclasses import replace
+
+        class StubReranker:
+            name = "stub-reranker"
+
+            def rerank(self, query, hits):
+                reordered = list(reversed(hits))
+                return [
+                    replace(h, metadata={**h.metadata, "rerank": {"plugin": self.name}})
+                    for h in reordered
+                ]
+
+        class BrokenReranker:
+            name = "broken"
+
+            def rerank(self, query, hits):
+                raise RuntimeError("model exploded")
+
+        first = self._fact("первый факт про кэш")
+        second = self._fact("второй факт про кэш")
+        baseline = self.service.search(query="факт про кэш", include_events=False, limit=5)
+        self.service.plugins.rerankers = {"stub": StubReranker()}
+        reranked = self.service.search(query="факт про кэш", include_events=False, limit=5)
+        self.assertEqual(
+            [h.id for h in reranked], [h.id for h in reversed(baseline)]
+        )
+        self.assertIn("rerank", reranked[0].metadata)
+        # A failing reranker degrades to the fused order and records an error.
+        self.service.plugins.rerankers = {"broken": BrokenReranker()}
+        degraded = self.service.search(query="факт про кэш", include_events=False, limit=5)
+        self.assertEqual([h.id for h in degraded], [h.id for h in baseline])
+        self.assertTrue(
+            any("reranker:broken" in e for e in self.service.plugins.errors)
+        )
 
     def test_graph_arm_fuses_when_plugin_matches_entities(self) -> None:
         class FakeGraphPlugin:

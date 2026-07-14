@@ -510,9 +510,22 @@ class RetrievalEngine:
         selected = list(deduplicated.values())
         if context.temporal_active:
             selected = self._apply_temporal_controls(selected, context)
-        return sorted(
+        ordered = sorted(
             selected, key=lambda hit: (hit.score, hit.created_at), reverse=True
-        )[: context.limit]
+        )
+        # Optional final-stage reranking (plugin, e.g. a local cross-encoder):
+        # applied to the full candidate ordering before the limit, so callers
+        # that truncate inherit the reranked prefix. Failures degrade to the
+        # fused order, never to an error.
+        if context.query and self.plugins.rerankers:
+            for plugin in self.plugins.rerankers.values():
+                try:
+                    ordered = list(plugin.rerank(context.query, ordered))
+                except Exception as exc:
+                    error = f"reranker:{plugin.name}: {exc}"
+                    if error not in self.plugins.errors:
+                        self.plugins.errors.append(error)
+        return ordered[: context.limit]
 
     @staticmethod
     def _ancestor_as_of(

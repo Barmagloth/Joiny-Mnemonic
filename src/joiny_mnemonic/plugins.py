@@ -59,12 +59,24 @@ class Extractor(Protocol):
     ) -> Any: ...
 
 
+@runtime_checkable
+class Reranker(Protocol):
+    """Optional final-stage reranker over retrieval hits (task5 benchmark
+    calibration: a local cross-encoder is the single largest precision
+    lever below oracle retrieval)."""
+
+    name: str
+
+    def rerank(self, query: str, hits: list[RetrievalHit]) -> list[RetrievalHit]: ...
+
+
 @dataclass(slots=True)
 class PluginRegistry:
     semantic: dict[str, SemanticRetriever]
     knowledge_graph: dict[str, KnowledgeGraphProjection]
     kv_tiers: dict[str, KVTier]
     extractors: dict[str, Extractor]
+    rerankers: dict[str, Reranker]
     errors: list[str]
     context: PluginContext | None
 
@@ -75,6 +87,7 @@ class PluginRegistry:
         self.knowledge_graph = {}
         self.kv_tiers = {}
         self.extractors = {}
+        self.rerankers = {}
         self.errors = []
         self.context = context
         if load_installed:
@@ -84,6 +97,7 @@ class PluginRegistry:
                 self._load_group(f"{namespace}.knowledge_graph", self.knowledge_graph)
                 self._load_group(f"{namespace}.kv_tier", self.kv_tiers)
                 self._load_group(f"{namespace}.extractor", self.extractors)
+                self._load_group(f"{namespace}.reranker", self.rerankers)
 
     def _instantiate(self, loaded: Any) -> Any:
         if not callable(loaded):

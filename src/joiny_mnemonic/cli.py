@@ -136,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     setup.add_argument(
         "--plugin",
         action="append",
-        choices=["semantic-local", "knowledge-graph", "nuextract-local"],
+        choices=["semantic-local", "knowledge-graph", "nuextract-local", "reranker-local"],
         default=[],
     )
     setup.add_argument("--all-plugins", action="store_true")
@@ -534,7 +534,7 @@ def run(args: argparse.Namespace) -> int:
                 item.id for item in detections if item.detected
             )
             plugins = (
-                ("semantic-local", "knowledge-graph", "nuextract-local")
+                ("semantic-local", "knowledge-graph", "nuextract-local", "reranker-local")
                 if args.all_plugins else tuple(args.plugin)
             )
             with_mcp = default_mcp
@@ -549,7 +549,7 @@ def run(args: argparse.Namespace) -> int:
             if explicit:
                 agents = tuple(args.agent)
                 plugins = (
-                    ("semantic-local", "knowledge-graph", "nuextract-local")
+                    ("semantic-local", "knowledge-graph", "nuextract-local", "reranker-local")
                     if args.all_plugins else tuple(args.plugin)
                 )
                 with_mcp = default_mcp
