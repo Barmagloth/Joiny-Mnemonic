@@ -337,6 +337,25 @@ Abstention subset: 28/30. Retrieval recall of gold sessions: ~100% per
 type. Mean packet cost ~11.7k tokens per question against a ~165k-token
 haystack - a measured 92.9% token saving.
 
+Read the number with its methodology caveats, which apply to most published
+LongMemEval results and are stated here explicitly:
+
+- **Answering and judging share one stack** (a local Claude Code runner,
+  Sonnet for both). This is not an independent judge; same-family judging
+  is a known leniency risk. The per-question JSONL preserves every answer,
+  so anyone can re-judge the rows with a different model without re-running
+  the benchmark.
+- **The runner's answer prompt is benchmark-tuned**: it instructs dated
+  enumeration for aggregation questions and grounded synthesis for
+  preference questions. A production agent without such prompting would
+  score lower; the prompt is in `benchmarks/runner_claude_code.py`.
+- **Single run, no variance estimate.** LLM answering and judging are
+  stochastic; treat the figure as a point estimate.
+- **The verbatim Appendix-A.4 judge is lenient in places** — e.g. an answer
+  opening with a wrong lead can pass when the correct fact also appears.
+  We did not tighten the prompts (comparability), but the leniency cuts
+  both ways across systems judged under the same protocol.
+
 We publish our own numbers only; the report states the full configuration
 and the literature is one search away. The report is provenance-stamped
 (code commit, plugin set, per-question JSONL and dataset pinned by SHA-256)

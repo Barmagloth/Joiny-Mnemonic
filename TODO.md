@@ -38,6 +38,13 @@ preference questions into abstention.
       taste evidence; and the temporal tail (84.2%)
 - [ ] A/B with LLM extraction (--ingest distill, facts alongside verbatim
       through the derive path) — mechanism shipped, run pending
+- [ ] Methodology hardening for the 88.0% claim (review 2026-07-15):
+      re-judge the persisted 500 answers with a different judge model
+      (rows + pinned dataset make this a judge-only pass, no re-answering);
+      small stratified repeat runs for a variance band; manual audit of
+      judge leniency on a MISS/OK boundary sample. Until then the README
+      states the caveats explicitly (same-stack judge, benchmark-tuned
+      answer prompt, single run)
 
 Done when: (achieved for the headline; error-analysis items continue)
 
