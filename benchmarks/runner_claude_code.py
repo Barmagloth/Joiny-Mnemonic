@@ -27,9 +27,12 @@ ANSWER_PREAMBLE = (
     "packet. For questions about the user's preferences, habits or tastes, "
     "synthesize a grounded answer from whatever relevant evidence the packet "
     "holds, citing the specifics you drew on — partial evidence deserves a "
-    "best-effort answer, not a refusal. Only when the packet holds nothing "
-    "relevant at all, say the information is not available rather than "
-    "guessing facts.\n\n"
+    "best-effort answer, not a refusal. For questions that aggregate across "
+    "multiple conversations (counts, totals, comparisons, lists, 'how many "
+    "times...'), first enumerate every relevant dated entry you can find in "
+    "the packet, then derive the answer strictly from that enumeration. Only "
+    "when the packet holds nothing relevant at all, say the information is "
+    "not available rather than guessing facts.\n\n"
 )
 
 
