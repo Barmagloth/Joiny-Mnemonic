@@ -85,9 +85,20 @@ def stamp_report(
         artifact_hashes[label] = hashlib.sha256(
             Path(path).read_bytes()
         ).hexdigest()
-    # Tracked-file modifications only: in-progress result files sitting
-    # untracked next to the report must not poison every stamp.
-    dirty = _git(["status", "--porcelain", "--untracked-files=no"], root)
+    # Tracked-file modifications only, and only to CODE: the report being
+    # stamped (and its sibling artifacts under benchmarks/results/) are
+    # products of the run — a report cannot avoid "modifying" itself, so
+    # counting it would make every stamp dirty by construction.
+    porcelain = _git(["status", "--porcelain", "--untracked-files=no"], root)
+    dirty = None
+    if porcelain is not None:
+        code_changes = [
+            line
+            for line in porcelain.splitlines()
+            if line.strip()
+            and "benchmarks/results/" not in line.replace("\\", "/")
+        ]
+        dirty = "\n".join(code_changes)
     stamped["provenance"] = {
         "signing_version": REPORT_SIGNING_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
