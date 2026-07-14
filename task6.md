@@ -1,224 +1,177 @@
-# Task 6: proposal settlement without growing a slow monster
+# Task 6: hot-path discipline and unified candidate settlement
 
 ## Status
 
-Proposed next milestone. The trigger is a design harvest from Shepherd
-(`shepherd-agents/shepherd`) plus an internal complexity check after Task 5.
+Proposed next milestone, restructured after review. The original draft harvested
+Shepherd's (`shepherd-agents/shepherd`) settlement contract as a new
+proposals/proposal_effects/proposal_transitions subsystem; review found that the
+repo already ships exactly that machine: `extraction_candidates` +
+`candidate_transitions` + `candidate_memory_links` + `candidate_current_status`
+are an append-only, consume-once status ledger with actor/rule/source-event
+provenance. Building a parallel twin would violate this task's own
+anti-complexity goal. Task 6 therefore **generalizes the existing candidate
+machinery** instead of adding a second one, and narrows scope to the
+memory/state domain.
 
-Shepherd's useful idea is not "another memory backend". It is a runtime
-contract for agent effects: an agent run produces retained outputs and
-changesets; those effects are inspected and then settled exactly once with a
-decision such as select/apply/release/discard. Permissions are declared on the
-task signature, per bound repository, and lower to the OS sandbox on supported
-hosts.
+The architectural gap this closes is real and already visible in production
+paths: `task_completion_detected` exists, the pending line in resume and
+capabilities exists, but there is no formal confirm/accept/reject verb — the
+only ways to settle a detected completion are enabling the global auto-closure
+flag or a manual `block-set`. `block_change_requested` is the same category: a
+request event with no formal settlement. Both become candidates under one
+settlement model.
 
-Joiny-Mnemonic should adopt the settlement model, not Shepherd as a required
-dependency. Shepherd is early alpha, Windows is unsupported, and its syscall
-enforcement is macOS/Linux only. Joiny remains the provenance, memory and audit
-core; Shepherd-like systems can later become optional execution backends.
+Complexity motivation stands regardless of measurement point: `storage.py` was
+~4262 lines when the first draft was written and ~4476 a day later after the
+task5 backlog pass — the file grows by hundreds of lines per working day, which
+is the monster argument demonstrating itself.
 
-This milestone must also pay down complexity. Current scale is already high:
-
-- `src/joiny_mnemonic/storage.py`: about 4262 lines.
-- `src/joiny_mnemonic/hooks.py`: about 1100 lines.
-- `src/joiny_mnemonic/service.py`: about 904 lines.
-- `src/joiny_mnemonic/cli.py`: about 840 lines.
-- core package: about 16812 Python lines.
-- tests: about 6776 Python lines.
-
-The project is not yet a slow monster, but the next feature can make it one if
-it adds another always-on subsystem. Task 6 therefore has two equal goals:
-
-1. capture proposed effects and explicit settlement decisions with exact
-   provenance;
-2. keep hook delivery, resume and search predictable by making proposal work
-   cold-path and budgeted.
+Execution order is strict: 6A (measure and isolate, zero behavior change) →
+6B (settlement semantics) → 6C (surfaces).
 
 ## Non-goals
 
-- No mandatory Shepherd dependency.
-- No mandatory sandbox runtime.
-- No background agent execution from hooks.
-- No automatic application of file, command or memory proposals.
+- No new proposal tables — the candidate ledger is the single settlement
+  machine.
+- No file-effect or command-result runtime semantics. A generic
+  `candidate_kind` enum slot is reserved, but nothing executes file changes.
+- No Shepherd dependency, no Shepherd bridge, no sandbox runtime — deferred
+  entirely (see Deferred below), like `hindsight-bridge` before it.
 - No LLM judge or meta-agent in the core.
+- No background agent execution from hooks.
+- No automatic application of any candidate; settlement is explicit.
 - No rewriting canonical events, memory records, task records or block history.
-- No large new logic inside `storage.py`, `hooks.py` or `MemoryService` unless it
-  is a thin delegating surface.
+- No large new logic inside `storage.py`, `hooks.py` or `MemoryService` beyond
+  thin delegating surfaces; settlement logic lives in focused modules.
 
-## Part A - proposal ledger
+## Task 6A — hot-path measurement and storage split
 
-Add a small append-only proposal layer for agent effects. A proposal is a
-claim that some external or internal run produced candidate effects. The
-proposal itself is not an applied effect.
+Zero behavior change. Ships first because 6B must be provably cold.
 
-Data model:
-
-- `proposals`
-  - id, branch_id, task_key, run_id, source_event_ids, status, created_at,
-    metadata_json;
-  - status is derived from transitions and cached only if the existing storage
-    pattern requires it; append-only transitions remain authoritative.
-- `proposal_effects`
-  - proposal_id, effect_id, effect_type, binding_name, path, content_hash,
-    summary, metadata_json;
-  - effect types: `file_change`, `memory_change`, `command_result`,
-    `artifact`, `note`;
-  - every effect cites either a canonical event, an artifact hash, or an
-    external retained-output hash.
-- `proposal_transitions`
-  - proposal_id, transition, actor, source_event_id, created_at,
-    metadata_json;
-  - transitions: `proposed`, `selected`, `applied`, `released`, `discarded`,
-    `superseded`, `failed`.
-
-Rules:
-
-- A proposal is immutable once written.
-- A proposal can be settled once. Repeated identical settlement requests are
-  idempotent; conflicting settlement requests fail closed.
-- `applied` records that the effect was accepted by a trusted settlement
-  action. The actual canonical file/memory/block event still gets its own
-  normal write path and cites the proposal.
-- `discarded` proposals remain searchable evidence. They are not active memory
-  and do not affect ranking.
-- Proposal IDs and effect IDs must resolve through `memory_source` /
-  `memory_context`-style exact provenance, or through a new proposal-specific
-  source command if widening the existing tool would break compatibility.
-
-## Part B - authority contract
-
-Adopt Shepherd's "permission in the contract" idea without relying on its
-runtime.
-
-Add a reviewable task/run contract object:
-
-- `bindings`: named roots, each with absolute resolved root, git identity,
-  and declared authority: `read_only`, `read_write`, `artifact_only`.
-- `declared_effects`: allowed effect types per binding.
-- `settlement_policy`: who or what may select/apply/release/discard.
-- `execution_backend`: `external`, `manual`, `shepherd`, `none`.
-- `enforcement_level`: `recorded_only`, `advisory`, `os_enforced`.
-
-Trust boundary:
-
-- On Windows, Shepherd-style enforcement is `recorded_only` or `advisory`
-  unless a future backend proves real isolation. Do not imply OS enforcement.
-- A shell-capable agent can spoof ordinary text. Strong settlement still needs
-  trusted host evidence, an explicit user event, or a future signed UI receipt.
-- Contracts are provenance evidence and audit controls, not magic authority.
-
-## Part C - settlement surfaces
-
-Expose proposal operations through CLI, Python and MCP/HTTP only where they add
-clear value.
-
-CLI:
-
-- `proposal create --from-artifact ...`
-- `proposal list --task ... --status ...`
-- `proposal show <id> --include-effects`
-- `proposal select <id>`
-- `proposal apply <id> --yes`
-- `proposal discard <id> --reason ...`
-
-MCP:
-
-- Prefer one `memory_proposals` read tool plus one explicit
-  `memory_settle_proposal` write tool.
-- Write calls must require an explicit proposal id and transition.
-- Tool descriptions must say settlement is auditable and may not imply OS
-  isolation.
-
-Prompt/resume:
-
-- Active proposals may appear only as a short warning/index line.
-- Full proposal content is not injected by default.
-- Agents should quote proposal details through tools before applying or
-  summarizing them.
-
-## Part D - optional Shepherd bridge
-
-Design a bridge, but keep it optional and cold-path.
-
-Bridge behavior:
-
-- detect Shepherd availability and supported host;
-- import a Shepherd run as a Joiny proposal;
-- pin retained-output hashes;
-- map Shepherd bindings to Joiny bindings;
-- map Shepherd `select/apply/release/discard` outcomes to proposal transitions;
-- record Shepherd version, run id and enforcement mode.
-
-Hard constraints:
-
-- no Shepherd import at module import time;
-- no Shepherd command on hook delivery;
-- no failure in the bridge can fail canonical capture;
-- unsupported Windows host reports `unsupported` capability, not a degraded
-  fake sandbox.
-
-## Part E - anti-monster work
-
-Before or alongside proposal implementation, split hot-path responsibilities
-without changing behavior:
-
-- Move proposal code into new modules such as `proposals.py` and
-  `proposal_cli.py`; keep `MemoryService` as a thin facade.
-- Do not add broad generic helpers to `storage.py`. Prefer small storage
-  sections with clear SQL and focused tests.
-- Add a hook-path timing report that measures:
+- Hook-path timing benchmark measuring, at minimum:
   - capture-only PostToolUse;
   - PostToolUse with reducer;
   - UserPromptSubmit with resume injection;
   - PreCompact/PostCompact compaction path;
   - reconciler path with and without pending candidates.
-- Add a "cold feature" rule: optional bridges, external runners and report
-  tooling must not execute during normal hook delivery, resume or search.
-- Update benchmark reporting so checked-in reports always identify project
-  root, commit, dirty state and backing artifacts.
+- Budgets asserted as benchmark gates (extend the existing gate set — the
+  p95-style gates in `joiny-mnemonic-benchmark` are the pattern). Agreed
+  budgets are recorded in the report, and regressions fail `--assert-gates`.
+- Cold-feature invariant, documented and tested: optional bridges, external
+  runners and report tooling must not import or execute during normal hook
+  delivery, resume or search.
+- Storage split/isolation: move cohesive sections (candidate/finding/extraction
+  storage is ~4k lines of the file) toward focused modules or clearly bounded
+  sections with their own tests. No behavior change; suite stays green
+  throughout.
+- The timing report is provenance-stamped and checked into
+  `benchmarks/results/` (report stamping itself shipped with task 5:
+  `report_signing.py`).
+
+## Task 6B — general candidate settlement
+
+Extend the existing ledger, not duplicate it.
+
+Data model changes (one schema migration):
+
+- `extraction_candidates` gains `candidate_kind` (default `extraction` for all
+  legacy rows). New kinds in this task: `task_closure`, `block_change`.
+  The enum is open for future kinds; only these three get semantics now.
+- Candidate provenance rules are unchanged: every candidate cites its source
+  events; every transition cites an actor, a rule id and a source event.
+
+Semantics:
+
+- **task_closure**: the reconciler's detection (unchanged canonical
+  `task_completion_detected` event) additionally creates a `task_closure`
+  candidate citing the detection and evidence events. Settlement verbs align
+  with the existing transition vocabulary; add new statuses only if the
+  existing set cannot express accepted/rejected/applied/discarded.
+  An accepted closure writes through the existing block/task APIs (new
+  `open_tasks` version, superseded task memory) and cites the candidate and its
+  evidence — exactly what the auto-closure flag does today, but per-candidate
+  and explicit.
+- **block_change**: the `?`-marker guard and future request paths create a
+  `block_change` candidate instead of (or in addition to, during migration) the
+  loose `block_change_requested` state event. Old events stay readable;
+  acceptance writes through `set_active_block` citing the candidate.
+- Settlement is consume-once: repeated identical settlements are idempotent,
+  conflicting settlements fail closed — the existing candidate-transition
+  discipline already guarantees this shape.
+- `settlement_policy` (per kind): which actors may settle. Defaults fail
+  closed: `task_closure` and `block_change` settle only from trusted origins —
+  local operator (CLI), a host-verified user event, or a policy-ledger flag
+  that explicitly delegates to the agent (MCP write). Untrusted public-API
+  text can never settle anything (same H1 discipline as completion evidence).
+- `enforcement_level` recorded on settlement: `recorded_only` or `advisory`.
+  Nothing in this task may claim OS enforcement; contracts are audit evidence,
+  not magic authority.
+
+## Task 6C — settlement surfaces
+
+- CLI: `joiny-mnemonic candidates list --kind --status`, `candidates show <id>`,
+  `candidates settle <id> --transition --reason`.
+- MCP: one read tool (`memory_candidates`) and one explicit write tool
+  (`memory_settle_candidate`) requiring candidate id + transition; tool
+  descriptions state that settlement is auditable and gated by policy, and
+  never imply OS isolation.
+- Resume/prompt: active candidates appear only as a bounded index line
+  (generalizing the existing `[PENDING TASK COMPLETIONS ...]` line); full
+  candidate content is never injected by default — agents quote it through
+  tools (A4 citation-over-recall discipline).
 
 ## Required tests
 
-- Proposal creation stores immutable proposal and effect rows with exact source
-  or artifact hashes.
-- Settlement is consume-once: same transition is idempotent, conflicting
-  transitions fail.
-- Applying a memory/block proposal writes through the existing explicit API and
-  cites the proposal; discarded proposals never become active memory.
-- Proposal source/context lookup returns the proposal event, effect metadata and
-  backing artifact/source events.
-- Untrusted public API text cannot mark a proposal as applied.
-- Windows Shepherd bridge capability is `unsupported` or `advisory`, never
-  `os_enforced`.
-- Bridge import failure is isolated and does not fail canonical capture.
-- Hook delivery does not import Shepherd and does not scan proposal artifacts.
-- Resume contains only bounded proposal index lines.
-- Performance tests assert no regression beyond agreed budgets.
+- 6A: timing benchmark produces a stamped report; gates fail on budget
+  regression; hook delivery imports no optional/cold modules (import-graph or
+  sys.modules assertion); behavior-freeze — full suite green with no
+  functional diffs.
+- 6B: legacy extraction rows migrate with `candidate_kind='extraction'` and
+  identical behavior; task_closure candidate created alongside detection;
+  settlement idempotent on repeat, fail-closed on conflict; accepted closure
+  writes through existing APIs and cites the candidate; rejected/discarded
+  candidates never touch active state but remain searchable evidence;
+  untrusted public-API text cannot settle; block_change candidate path covers
+  the `?`-marker guard end-to-end.
+- 6C: CLI round-trip list/show/settle; MCP read and write tools through the
+  real server handshake; resume line is bounded and disappears once settled.
 
 ## Acceptance criteria
 
-1. Proposal and settlement semantics are append-only, provenance-bound and
-   branch/task aware.
-2. No proposal path mutates active blocks or typed memories except through an
-   explicit accepted settlement that cites the proposal.
-3. Hook delivery remains cold with respect to Shepherd/external runners.
-4. Full suite passes.
-5. A hook-path timing report is produced and checked into
-   `benchmarks/results/` with provenance stamping.
-6. `docs/architecture.md`, `docs/security.md`, `docs/integrations.md` and
-   `docs/requirements-traceability.md` state the proposal model and its trust
-   limits.
-7. The implementation does not grow `storage.py`, `hooks.py` or `service.py`
-   by more than the minimum facade/storage code needed; most new logic lives in
-   focused proposal modules.
+1. Settlement semantics are append-only, provenance-bound, branch/task aware,
+   and expressed entirely through the existing candidate machinery.
+2. No candidate path mutates active blocks or typed memories except through an
+   explicit accepted settlement that cites the candidate.
+3. Hook delivery, resume and search remain cold with respect to settlement
+   tooling; the 6A timing report proves it with numbers.
+4. Full suite passes at each phase boundary (6A, 6B, 6C land separately).
+5. The stamped timing report is checked into `benchmarks/results/`.
+6. `docs/architecture.md`, `docs/security.md` and
+   `docs/requirements-traceability.md` state the unified candidate model and
+   its trust limits.
+7. `storage.py`/`hooks.py`/`service.py` grow only by facade/migration code;
+   settlement logic lives in focused modules.
+
+## Deferred (Task 7 material, not in scope)
+
+- Shepherd bridge in any form: early alpha, no Windows support — on a
+  Windows-first project a bridge to a runtime that cannot run here is pure
+  scope inflation. Revisit when Shepherd stabilizes or a WSL/Linux host
+  matters.
+- Authority-contract remainder: `bindings` with git identity,
+  `execution_backend`, OS-enforced levels — YAGNI until a real executor
+  exists.
+- `file_change` / `command_result` candidate semantics (enum reserved, runtime
+  deliberately unbuilt).
+- Import of external retained-artifact runs as candidates.
 
 ## Open questions
 
-- Should proposal settlement be tied to `TaskManager` status transitions, or
-  remain independent and only cite `task_key`?
-- Should `apply` ever write files directly, or should it only emit a reviewed
-  plan for an external tool to apply?
-- Should proposal effects be visible through ordinary `search`, or only through
-  proposal-specific tools until accepted?
-- What is the first real backend to import: Shepherd on WSL/Linux, a manual
-  retained-artifact importer, or our existing external task runner output?
+- Should settlement tie into `TaskManager` status transitions, or stay
+  independent and only cite `task_key`?
+- Are the existing candidate transition statuses sufficient for settlement
+  verbs, or is a minimal additive extension (e.g. `applied`) required? Decide
+  against the real vocabulary during 6B design, not by adding statuses
+  speculatively.
+- Should unsettled candidates be visible through ordinary `search`, or only
+  through candidate tools until accepted?
