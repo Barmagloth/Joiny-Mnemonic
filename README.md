@@ -365,8 +365,12 @@ LongMemEval results and are stated here explicitly:
   in `benchmarks/runner_claude_code.py` (`LME_PLAIN_PROMPT=1` reproduces
   the ablation); read the headline as "retrieval stack + a well-prompted
   reader", not the stack alone.
-- **Single run, no variance estimate.** LLM answering and judging are
-  stochastic; treat the figure as a point estimate.
+- **Sampling variance, measured on a stratified 60-question subset**:
+  three runs of the frozen config scored 86.7% / 91.7% / 90.0% (the
+  published full-run subset is the lowest of the three) — a 5pp band on
+  n=60, consistent with binomial noise and scaling to roughly ±1.5-2pp at
+  n=500. Preference is the volatile type (7/10, 10/10, 8/10 across runs).
+  The full 500-question figure remains a single run.
 - **The verbatim Appendix-A.4 judge is lenient in places** — e.g. an answer
   opening with a wrong lead can pass when the correct fact also appears.
   We did not tighten the prompts (comparability), but the leniency cuts

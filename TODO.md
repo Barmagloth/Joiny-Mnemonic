@@ -57,8 +57,11 @@ preference questions into abstention.
       on the same stratified 60 under the identical product stack — the
       benchmark-tuned prompt contributes ~17pp; README states it and how to
       reproduce (LME_PLAIN_PROMPT=1)
-- [ ] Methodology hardening, remaining: small stratified repeat runs for
-      a variance band
+- [x] Variance repeats done (2026-07-15): frozen config, same stratified
+      60, three points — 86.7 / 91.7 / 90.0 (published subset is the
+      lowest); 5pp band on n=60 ≈ ±1.5-2pp at n=500; preference confirmed
+      as the volatile type. Methodology hardening: COMPLETE — all seven
+      weaknesses measured or closed
 
 Done when: (achieved for the headline; error-analysis items continue)
 
