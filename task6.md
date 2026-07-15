@@ -181,7 +181,7 @@ Semantics:
   descriptions state that settlement is auditable and gated by policy, and
   never imply OS isolation.
 - Resume/prompt: active candidates appear only as a bounded index line
-  (generalizing the existing `[PENDING TASK COMPLETIONS ...]` line); full
+  (generalizing the existing `[STATE MAINTENANCE - PENDING CONFIRMATIONS]` line); full
   candidate content is never injected by default — agents quote it through
   tools (A4 citation-over-recall discipline).
 

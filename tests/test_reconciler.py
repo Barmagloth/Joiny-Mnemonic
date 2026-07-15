@@ -255,8 +255,10 @@ class ReconcilerCase(unittest.TestCase):
         self._write_evidence("pending.md")
         self.service.reconciler.reconcile()
         packet = self.service.resume(token_budget=1500)
-        self.assertIn("PENDING TASK COMPLETIONS", packet.text)
+        self.assertIn("STATE MAINTENANCE - PENDING CONFIRMATIONS", packet.text)
         self.assertIn("pending.md", packet.text)
+        # Provenance phrasing, not a bare TODO or an injected imperative.
+        self.assertIn("ask the user before treating it as closed", packet.text)
 
     def test_hygiene_findings(self) -> None:
         self.service.initialize_project()
