@@ -727,7 +727,7 @@ class MemoryService:
         stale_reasons: tuple[str, ...] = ()
         snapshot_id: str | None = None
         if snapshot:
-            restored = self.snapshots.restore(snapshot.id, branch_id=branch_id)
+            restored = self.snapshots.restore(snapshot, branch_id=branch_id)
             stale_reasons = restored.stale_reasons
             snapshot_id = snapshot.id
             state = restored.state

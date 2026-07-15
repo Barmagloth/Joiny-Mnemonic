@@ -191,6 +191,18 @@ CREATE TABLE IF NOT EXISTS consolidation_receipts (
     created_at TEXT NOT NULL
 );
 
+-- Rebuildable projection (task6 packet-assembly fix): SHA-256 per project
+-- file keyed by (size, mtime_ns) so resume-time snapshot staleness checks
+-- re-hash only files whose stat changed. Safe to drop at any time.
+CREATE TABLE IF NOT EXISTS file_hash_cache (
+    root TEXT NOT NULL,
+    path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY(root, path)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
@@ -2417,6 +2429,17 @@ class MemoryStore:
                     str(row["state_sha256"] or "missing"),
                     _hash(decoded),
                 )
+            # For the full-blob format the stored sha256 was computed over
+            # exactly these bytes at creation: hashing the decompressed
+            # text verifies integrity without a canonical re-serialization
+            # of the whole state (task6 packet-assembly hot path).
+            actual = _hash(decoded)
+            expected = row["state_sha256"]
+            if verify_hash and expected != actual:
+                raise SnapshotIntegrityError(
+                    snapshot_id, str(expected or "missing"), actual
+                )
+            return row, state
         else:
             parent_state: dict[str, Any] = {}
             if row["parent_snapshot_id"]:
@@ -2520,6 +2543,36 @@ class MemoryStore:
             blob_available=True,
         )
 
+    def file_hash_cache_load(self, root: str) -> dict[str, tuple[int, int, str]]:
+        """Rebuildable stat->hash projection for one project root."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT path, size, mtime_ns, sha256 FROM file_hash_cache "
+                "WHERE root=?",
+                (root,),
+            ).fetchall()
+        return {
+            str(row["path"]): (
+                int(row["size"]), int(row["mtime_ns"]), str(row["sha256"])
+            )
+            for row in rows
+        }
+
+    def file_hash_cache_store(
+        self, root: str, entries: dict[str, tuple[int, int, str]]
+    ) -> None:
+        if not entries:
+            return
+        with self._transaction() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO file_hash_cache"
+                "(root, path, size, mtime_ns, sha256) VALUES(?,?,?,?,?)",
+                [
+                    (root, path, size, mtime_ns, sha256)
+                    for path, (size, mtime_ns, sha256) in entries.items()
+                ],
+            )
+
     @integrity_checked
     def get_snapshot(self, snapshot_id: str) -> Snapshot:
         try:
@@ -2571,9 +2624,15 @@ class MemoryStore:
 
     @integrity_checked
     def snapshot_tail(
-        self, snapshot_id: str, *, target_branch_id: str | None = None
+        self, snapshot_id: "str | Snapshot", *, target_branch_id: str | None = None
     ) -> list[Event]:
-        snapshot = self.get_snapshot(snapshot_id)
+        # Accepting an already-materialized Snapshot avoids a redundant
+        # decompress+verify on the resume hot path (task6 packet-assembly).
+        snapshot = (
+            snapshot_id
+            if isinstance(snapshot_id, Snapshot)
+            else self.get_snapshot(snapshot_id)
+        )
         target_branch_id = target_branch_id or snapshot.branch_id
         lineage = dict(self.branch_lineage(target_branch_id))
         if snapshot.branch_id not in lineage:

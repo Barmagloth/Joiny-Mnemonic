@@ -11,14 +11,20 @@ from joiny_mnemonic.witness import WitnessRegistry
 
 
 class MemoryWitness(WitnessRegistry):
+    """In-memory double over the per-project seam (shard layout)."""
+
     def __init__(self) -> None:
-        self.value = None
+        self.value = None  # dict[project_id, project entry] | None
 
-    def _read(self):
-        return copy.deepcopy(self.value)
+    def _read_project(self, project_id):
+        if self.value is None:
+            return None
+        return copy.deepcopy(self.value.get(project_id))
 
-    def _write(self, value):
-        self.value = copy.deepcopy(value)
+    def _write_project(self, project_id, project):
+        if self.value is None:
+            self.value = {}
+        self.value[project_id] = copy.deepcopy(project)
 
 
 class FakeStore:
@@ -127,6 +133,142 @@ class WitnessTest(unittest.TestCase):
         result = registry.check_and_update(store)
         self.assertEqual(result["status"], "external_witness_missing")
         self.assertEqual(result["finding"], "external_witness_missing")
+
+    def test_shard_layout_hot_path_and_legacy_migration(self) -> None:
+        """Packet-assembly fix: the hot path touches only the project's own
+        shard; witnessed heads migrate read-only from the legacy monolith."""
+        runtime = Path(__file__).resolve().parent / "runtime"
+        runtime.mkdir(exist_ok=True)
+        suffix = uuid.uuid4().hex
+        registry_path = runtime / f"witnesses-shard-{suffix}.json"
+        try:
+            witness = WitnessRegistry(registry_path)
+            store = FakeStore(2, {1: "h1", 2: "h2"})
+            self.assertEqual(
+                witness.check_and_update(store, allow_first=True)["status"],
+                "first_checkpoint",
+            )
+            shard = witness._shard_path("project_1")
+            self.assertTrue(shard.exists())
+            # The monolith is never created or rewritten by the hot path.
+            self.assertFalse(registry_path.exists())
+            self.assertEqual(
+                witness.check_and_update(FakeStore(3, {1: "h1", 2: "h2", 3: "h3"}))[
+                    "status"
+                ],
+                "valid_extension",
+            )
+            # Rollback detection works from the shard alone.
+            self.assertEqual(
+                witness.check_and_update(FakeStore(1, {1: "h1"}))["finding"],
+                "history_rollback",
+            )
+
+            # Legacy migration: a monolith-only project keeps its witnessed
+            # head — a rollback below it is detected on the first sharded
+            # check, and the entry lands in a shard afterwards.
+            legacy_only = WitnessRegistry(
+                runtime / f"witnesses-legacy-{suffix}.json"
+            )
+            legacy_only._write(
+                {
+                    "version": 1,
+                    "projects": {
+                        "project_1": {
+                            "repository_identity": "repo",
+                            "canonical_path": "path",
+                            "bootstrap_hash": "bootstrap",
+                            "first_seen_at": "2026-01-01T00:00:00+00:00",
+                            "chains": {
+                                "chain_1": {
+                                    "project_instance_id": "project_1",
+                                    "chain_id": "chain_1",
+                                    "head_seq": 5,
+                                    "head_hash": "h5",
+                                    "bootstrap_hash": "bootstrap",
+                                    "first_seen_at": "2026-01-01T00:00:00+00:00",
+                                    "last_seen_at": "2026-01-01T00:00:00+00:00",
+                                }
+                            },
+                        }
+                    },
+                }
+            )
+            self.assertEqual(
+                legacy_only.check_and_update(FakeStore(2, {1: "h1", 2: "h2"}))[
+                    "finding"
+                ],
+                "history_rollback",
+            )
+            extended = legacy_only.check_and_update(
+                FakeStore(6, {5: "h5", 6: "h6"})
+            )
+            self.assertEqual(extended["status"], "valid_extension")
+            migrated = legacy_only._shard_path("project_1")
+            self.assertTrue(migrated.exists())
+            # After migration the monolith is dead weight: removing it must
+            # not lose the witnessed head.
+            legacy_only.path.unlink()
+            self.assertEqual(
+                legacy_only.check_and_update(FakeStore(4, {4: "h4"}))["finding"],
+                "history_rollback",
+            )
+        finally:
+            import shutil as _shutil
+
+            registry_path.unlink(missing_ok=True)
+            for candidate in (
+                registry_path.with_suffix(".d"),
+                (runtime / f"witnesses-legacy-{suffix}.json").with_suffix(".d"),
+            ):
+                _shutil.rmtree(candidate, ignore_errors=True)
+            (runtime / f"witnesses-legacy-{suffix}.json").unlink(missing_ok=True)
+
+    def test_environment_variable_sets_default_registry_path(self) -> None:
+        import os
+
+        runtime = Path(__file__).resolve().parent / "runtime"
+        runtime.mkdir(exist_ok=True)
+        target = runtime / f"witnesses-env-{uuid.uuid4().hex}.json"
+        previous = os.environ.get("JOINY_MNEMONIC_WITNESS_REGISTRY")
+        os.environ["JOINY_MNEMONIC_WITNESS_REGISTRY"] = str(target)
+        try:
+            witness = WitnessRegistry()
+            self.assertEqual(witness.path, target.resolve())
+            explicit = WitnessRegistry(runtime / "explicit.json")
+            self.assertEqual(explicit.path.name, "explicit.json")
+        finally:
+            if previous is None:
+                os.environ.pop("JOINY_MNEMONIC_WITNESS_REGISTRY", None)
+            else:
+                os.environ["JOINY_MNEMONIC_WITNESS_REGISTRY"] = previous
+
+    def test_known_project_database_missing_sees_shards(self) -> None:
+        runtime = Path(__file__).resolve().parent / "runtime"
+        runtime.mkdir(exist_ok=True)
+        suffix = uuid.uuid4().hex
+        project = runtime / f"witness-shard-project-{suffix}"
+        registry_path = runtime / f"witnesses-scan-{suffix}.json"
+        project.mkdir()
+        try:
+            witness = WitnessRegistry(registry_path)
+            witness._write_project(
+                "project_shard",
+                {
+                    "project_instance_id": "project_shard",
+                    "canonical_path": str(project.resolve()),
+                    "chains": {},
+                },
+            )
+            findings = witness.known_project_database_missing(project)
+            self.assertEqual(len(findings), 1)
+            self.assertEqual(
+                findings[0]["project_instance_id"], "project_shard"
+            )
+        finally:
+            shutil.rmtree(project, ignore_errors=True)
+            shutil.rmtree(registry_path.with_suffix(".d"), ignore_errors=True)
+            registry_path.unlink(missing_ok=True)
 
     def test_known_project_database_disappearance_is_reported(self) -> None:
         runtime = Path(__file__).resolve().parent / "runtime"

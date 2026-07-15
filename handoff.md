@@ -82,15 +82,37 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
 - GPTShared — живой полигон: store `R:\Projects\GPTShared\.joiny-mnemonic\memory.db`,
   hooks в `.claude/settings.json`. open_tasks чист, delme2-кандидат applied.
 
+### Packet assembly 354ms — РЕШЕНО (2026-07-15)
+
+354ms → **41-49ms p50 / ≤55ms p95** (resume-доставка целиком p95 ≤74ms,
+было ~450). Три причины, три структурных фикса (детали в
+docs/performance.md):
+1. Witness-реестр: глобальный witnesses.json вырос до 1.5MB/1920 записей
+   (813 бенчмарки + 537 тесты — эфемерные ран-ы), каждая доставка
+   читала+переписывала его целиком дважды. Теперь пер-проектные шарды
+   `witnesses.d/<project_id>.json` (монолит — read-only fallback для
+   миграции), env `JOINY_MNEMONIC_WITNESS_REGISTRY` для изоляции,
+   hook_timing изолирует реестр per-run. Тест-двойник MemoryWitness
+   переехал на шов `_read_project`/`_write_project`.
+2. Fingerprint на каждый resume хешировал ВСЕ файлы проекта + git
+   сабпроцесс. Теперь `file_hash_cache` (rebuildable проекция в SQLite,
+   ключ size+mtime_ns — та же эвристика, что у git index) + чтение
+   `.git/HEAD`/refs напрямую.
+3. Тройная материализация снапшота (latest→restore→tail) схлопнута в
+   одну; verify full-blob — хеш декомпрессированных байтов вместо
+   канонической ре-сериализации.
+Остаточный пол: decompress+parse снапшота ~18ms + stat-свип ~13ms.
+Бюджеты 6A не трогал (loose tripwires). Полный сьют стал быстрее на ~4
+минуты (322s против 560s) — тот же witness-фикс.
+
 ## Очередь (в порядке приоритета)
 
-1. **Packet assembly 354ms** — 92% resume-пути (отчёт 6A).
-2. **Distill A/B**: `--ingest distill` vs raw; baseline для битья 88.0 ± 0.7.
-3. Разбор ошибок: preference (60%) и temporal-хвост (84.2%).
-4. Storage split: candidate/finding/extraction секции из ~4.7k-строчного
+1. **Distill A/B**: `--ingest distill` vs raw; baseline для битья 88.0 ± 0.7.
+2. Разбор ошибок: preference (60%) и temporal-хвост (84.2%).
+3. Storage split: candidate/finding/extraction секции из ~4.7k-строчного
    storage.py в фокусные модули (остаток 6A, zero behavior change).
-5. Extraction eval corpus (TODO#6); task7 (native memory channels).
-6. Включение agent_settlement_delegation_enabled на существующем сторе:
+4. Extraction eval corpus (TODO#6); task7 (native memory channels).
+5. Включение agent_settlement_delegation_enabled на существующем сторе:
    пока только bootstrap-параметр; путь request→trusted activation есть
    (policy request + activate_policy), удобной CLI-обёртки нет.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import subprocess
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -33,31 +34,149 @@ def _git(root: Path, *args: str) -> str | None:
     return result.stdout.strip()
 
 
-def fingerprint_project(root: str | Path, files: Sequence[str] | None = None) -> dict[str, Any]:
+def _git_head(root: Path) -> str | None:
+    """Current commit hash without a subprocess (task6 packet-assembly):
+    parse .git/HEAD and the ref it names — loose ref file, then packed-refs.
+    Worktree pointers and commondir are followed; anything unrecognized
+    falls back to the git CLI, and a missing repository stays None exactly
+    like the subprocess path."""
+    git_dir = root / ".git"
+    try:
+        if git_dir.is_file():  # worktree/submodule pointer: "gitdir: <path>"
+            text = git_dir.read_text(encoding="utf-8", errors="replace").strip()
+            if not text.startswith("gitdir:"):
+                return _git(root, "rev-parse", "HEAD")
+            git_dir = (root / text.split(":", 1)[1].strip()).resolve()
+        head_file = git_dir / "HEAD"
+        if not head_file.is_file():
+            return None
+        head = head_file.read_text(encoding="utf-8", errors="replace").strip()
+        if not head.startswith("ref:"):
+            return head or None  # detached HEAD stores the hash directly
+        ref = head.split(":", 1)[1].strip()
+        common = git_dir
+        commondir = git_dir / "commondir"
+        if commondir.is_file():
+            common = (
+                git_dir / commondir.read_text(encoding="utf-8").strip()
+            ).resolve()
+        loose = common / ref
+        if loose.is_file():
+            value = loose.read_text(encoding="utf-8", errors="replace").strip()
+            return value or None
+        packed = common / "packed-refs"
+        if packed.is_file():
+            for line in packed.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines():
+                line = line.strip()
+                if not line or line.startswith(("#", "^")):
+                    continue
+                parts = line.split(" ", 1)
+                if len(parts) == 2 and parts[1].strip() == ref:
+                    return parts[0]
+        return _git(root, "rev-parse", "HEAD")  # e.g. unborn branch
+    except OSError:
+        return _git(root, "rev-parse", "HEAD")
+
+
+class FileHashCache:
+    """Store-backed (size, mtime_ns) -> sha256 projection so repeated
+    fingerprints re-hash only files whose stat changed — the same freshness
+    assumption git's index makes. Rebuildable; wrong entries only ever cost
+    a re-hash, never a wrong staleness verdict on changed content."""
+
+    def __init__(self, store: MemoryStore, root: str | Path) -> None:
+        self._store = store
+        self._root = str(Path(root).resolve())
+        self._entries: dict[str, tuple[int, int, str]] | None = None
+        self._updates: dict[str, tuple[int, int, str]] = {}
+
+    def lookup(self, path: str, size: int, mtime_ns: int) -> str | None:
+        if self._entries is None:
+            self._entries = self._store.file_hash_cache_load(self._root)
+        entry = self._entries.get(path)
+        if entry is not None and entry[0] == size and entry[1] == mtime_ns:
+            return entry[2]
+        return None
+
+    def record(self, path: str, size: int, mtime_ns: int, sha256: str) -> None:
+        if self._entries is None:
+            self._entries = self._store.file_hash_cache_load(self._root)
+        self._entries[path] = (size, mtime_ns, sha256)
+        self._updates[path] = (size, mtime_ns, sha256)
+
+    def flush(self) -> None:
+        if self._updates:
+            self._store.file_hash_cache_store(self._root, self._updates)
+            self._updates = {}
+
+
+def fingerprint_project(
+    root: str | Path,
+    files: Sequence[str] | None = None,
+    *,
+    cache: FileHashCache | None = None,
+) -> dict[str, Any]:
     root_path = Path(root).resolve()
-    head = _git(root_path, "rev-parse", "HEAD")
-    selected: list[Path] = []
+    root_str = str(root_path)
+    head = _git_head(root_path)
+    selected: list[str] = []  # candidate rel paths, posix separators
     if files is not None:
-        selected = [root_path / item for item in files]
+        selected = [str(item).replace("\\", "/") for item in files]
     else:
         tracked = _git(root_path, "ls-files", "-z")
         if tracked is not None:
-            selected = [root_path / item for item in tracked.split("\0") if item]
+            selected = [item for item in tracked.split("\0") if item]
         else:
             excluded = {".git", ".joiny-mnemonic", ".llm-memory", "__pycache__", ".pytest_cache", ".tmp"}
             for current, directories, filenames in os.walk(root_path, onerror=lambda _: None):
                 directories[:] = [item for item in directories if item not in excluded]
-                selected.extend(
-                    Path(current) / name for name in filenames
-                    if not name.endswith((".db", ".db-wal", ".db-shm", ".pyc"))
-                )
+                prefix = os.path.relpath(current, root_str).replace("\\", "/")
+                for name in filenames:
+                    if not name.endswith((".db", ".db-wal", ".db-shm", ".pyc")):
+                        selected.append(
+                            name if prefix == "." else f"{prefix}/{name}"
+                        )
     hashes: dict[str, str] = {}
-    for candidate in selected:
-        resolved = candidate.resolve()
+    for relative in selected:
+        candidate = os.path.join(root_str, relative)
+        if (
+            cache is not None
+            and not os.path.isabs(relative)
+            and ".." not in relative.split("/")
+        ):
+            # Cheap stat-cache hit path: one os.stat per unchanged file.
+            # The cache is only ever populated below the resolve() root
+            # guard, so escaping or symlinked-out paths never hit.
+            try:
+                stat_result = os.stat(candidate)
+            except OSError:
+                continue
+            if stat.S_ISREG(stat_result.st_mode):
+                cached = cache.lookup(
+                    relative, stat_result.st_size, stat_result.st_mtime_ns
+                )
+                if cached is not None:
+                    hashes[relative] = cached
+                    continue
+        resolved = Path(candidate).resolve()
         if not resolved.is_relative_to(root_path) or not resolved.is_file():
             continue
-        hashes[resolved.relative_to(root_path).as_posix()] = _file_hash(resolved)
-    return {"root": str(root_path), "git_head": head, "files": dict(sorted(hashes.items()))}
+        canonical = resolved.relative_to(root_path).as_posix()
+        # Stat before hashing: if the file changes mid-hash, the stale stat
+        # forces a re-hash next time instead of caching a wrong pairing.
+        try:
+            stat_result = resolved.stat()
+        except OSError:
+            stat_result = None
+        digest = _file_hash(resolved)
+        hashes[canonical] = digest
+        if cache is not None and stat_result is not None and canonical == relative:
+            cache.record(
+                canonical, stat_result.st_size, stat_result.st_mtime_ns, digest
+            )
+    return {"root": root_str, "git_head": head, "files": dict(sorted(hashes.items()))}
 
 
 def compare_fingerprints(previous: dict[str, Any], current: dict[str, Any]) -> tuple[str, ...]:
@@ -170,9 +289,14 @@ class SnapshotManager:
         parent_snapshot_id: str | None = None,
         tracked_files: Sequence[str] | None = None,
     ) -> Snapshot:
+        cache = FileHashCache(self.store, self.project_root)
+        project = fingerprint_project(
+            self.project_root, tracked_files, cache=cache
+        )
+        cache.flush()
         return self.store.create_snapshot(
             state=self.build_state(branch_id=branch_id),
-            project=fingerprint_project(self.project_root, tracked_files),
+            project=project,
             branch_id=branch_id,
             parent_snapshot_id=parent_snapshot_id,
         )
@@ -273,13 +397,24 @@ class SnapshotManager:
         }
         return result
 
-    def restore(self, snapshot_id: str, *, branch_id: str | None = None) -> RestoredState:
-        snapshot = self.store.get_snapshot(snapshot_id)
-        tail = self.store.snapshot_tail(snapshot_id, target_branch_id=branch_id)
+    def restore(
+        self, snapshot_id: str | Snapshot, *, branch_id: str | None = None
+    ) -> RestoredState:
+        # An already-materialized Snapshot skips a redundant
+        # decompress+verify round trip (task6 packet-assembly hot path).
+        snapshot = (
+            snapshot_id
+            if isinstance(snapshot_id, Snapshot)
+            else self.store.get_snapshot(snapshot_id)
+        )
+        tail = self.store.snapshot_tail(snapshot, target_branch_id=branch_id)
+        cache = FileHashCache(self.store, self.project_root)
         current = fingerprint_project(
             self.project_root,
             list(snapshot.project.get("files", {}).keys()),
+            cache=cache,
         )
+        cache.flush()
         return RestoredState(
             snapshot=snapshot,
             state=self._replay(snapshot.state, tail),

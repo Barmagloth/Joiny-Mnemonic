@@ -113,7 +113,12 @@ policy with bootstrap_tofu evidence, project identity, code version and bootstra
 Repeated bootstrap is a sticky security finding.
 
 The user-level witness registry stores one global-chain checkpoint per project instance and
-chain. It detects rollback or divergence only while that independent file survives. It is not
+chain, as one shard file per project under `witnesses.d/` (the legacy monolithic
+`witnesses.json` is consulted read-only to migrate witnessed heads; the hot path reads and
+rewrites only the current project's shard). `JOINY_MNEMONIC_WITNESS_REGISTRY` relocates the
+registry — benchmarks and disposable runs use it so ephemeral projects never pollute the
+user-global registry. It detects rollback or divergence only while that independent file
+survives. It is not
 non-repudiation or an external integrity anchor: a process with the user's shell privileges can
 alter both files. Database advancement with an older matching witness is a valid extension, and
 database commit plus registry update are not presented as cross-file atomic.

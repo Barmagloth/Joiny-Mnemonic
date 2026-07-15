@@ -250,7 +250,11 @@ def _measure_cold(root: Path, mode: str) -> dict[str, float]:
         [sys.executable, "-c", _COLD_PROBE, str(probe_root), mode],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=180,
-        env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        env={
+            **__import__("os").environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "JOINY_MNEMONIC_WITNESS_REGISTRY": str(probe_root / "witnesses.json"),
+        },
     )
     if completed.returncode != 0:
         return {"error": completed.stderr[-500:]}  # type: ignore[return-value]
@@ -280,7 +284,16 @@ def run_hook_timing(
                 {"plugins": plugins_factory()} if plugins_factory is not None else {}
             )
             db_path = runtime / f"hook-timing-{run_id}.db"
-            service = MemoryService(db_path, project_root=root, **kwargs)
+            # Isolated witness registry per run: benchmark runs must not
+            # grow the user-global registry (the packet-assembly regression
+            # was exactly that — ~2k dead benchmark/test entries paying an
+            # O(registry) read+rewrite on every delivery), and the measured
+            # cost must reflect the shard hot path, not accumulated debris.
+            service = MemoryService(
+                db_path, project_root=root,
+                witness_registry_path=runtime / f"hook-timing-{run_id}-witness.json",
+                **kwargs,
+            )
             try:
                 _seed_state(service, session, scale)
                 db_size_seeded = db_path.stat().st_size

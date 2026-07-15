@@ -113,19 +113,52 @@ SQLite store size at two scales, p50/p95/p99, and regression gates:
     joiny-mnemonic-hook-timing --project-root . --repetitions 50 --assert-gates
 
 Reference points (2026-07-15, development machine): warm capture ~22ms
-p50; resume delivery ~360-390ms of which **packet assembly is ~354ms —
-92% of the path and the standing optimization target**; reconciler
-3-8ms; every other stage under 0.1ms. After task6B (settlement candidates
-+ evidence-invalidation sweep now run inside reconcile) the stage stays in
-the same band: p95 ≤ 8ms across all scenarios and both scales, with
-settlement writes visible only as p99 tails of ~8-20ms on the pending
-path — well inside the 250/500ms budgets. Latencies are flat between a
-243-event/548KB store and a 1411-event/1.8MB store. Cold start: imports
-~130ms, service open ~190ms core / ~630ms with plugins (entry-point
-loading); heavyweight models stay lazy — the embedder loads on the first
-semantic query against a non-empty index, not at delivery time. The
-capture path is guarded by a cold-feature invariant test (no
-torch/sentence-transformers imports on delivery).
+p50; reconciler 3-8ms; every other capture stage under 0.1ms. After
+task6B (settlement candidates + evidence-invalidation sweep now run
+inside reconcile) the stage stays in the same band: p95 ≤ 8ms across all
+scenarios and both scales, with settlement writes visible only as p99
+tails of ~8-20ms on the pending path — well inside the 250/500ms budgets.
+Latencies are flat between a 243-event/548KB store and a
+1411-event/1.8MB store. Cold start: imports ~130ms, service open ~190ms
+core / ~630ms with plugins (entry-point loading); heavyweight models stay
+lazy — the embedder loads on the first semantic query against a non-empty
+index, not at delivery time. The capture path is guarded by a
+cold-feature invariant test (no torch/sentence-transformers imports on
+delivery).
+
+**Packet assembly — resolved (2026-07-15, same day).** The 6A report
+named packet assembly ~354ms = 92% of the resume path as the standing
+optimization target. Three compounding causes, three structural fixes:
+
+1. *Witness registry O(all-projects) IO.* Every delivery re-read and
+   atomically rewrote the entire user-global `witnesses.json`, which
+   every benchmark/test run had grown with a dead project entry (~1.9k
+   entries / 1.5MB observed). The registry is now sharded per project
+   (`witnesses.d/<project_id>.json`, legacy monolith read-only fallback),
+   benchmark runs isolate their registry via
+   `JOINY_MNEMONIC_WITNESS_REGISTRY`, and the hot path pays a
+   few-hundred-byte shard read+write.
+2. *Snapshot staleness re-hashed every project file.* `resume()` restores
+   the latest snapshot and fingerprints the project on every delivery —
+   previously SHA-256 of every tracked file plus a `git rev-parse`
+   subprocess. Hashes are now served from the rebuildable
+   `file_hash_cache` projection keyed by (size, mtime_ns) — the same
+   freshness assumption git's index makes — so unchanged files cost one
+   `os.stat`; git HEAD is read from `.git/HEAD`/refs directly with a CLI
+   fallback.
+3. *Triple snapshot materialization.* `latest_snapshot` → `restore` →
+   `snapshot_tail` each decompressed and hash-verified the same blob;
+   the materialized Snapshot object is now passed through, and full-blob
+   verification hashes the decompressed bytes instead of re-serializing
+   the state.
+
+Result (same machine, same schema-v2 report): packet assembly
+**41-49ms p50 / ≤ 55ms p95** across both scales and plugin modes; whole
+resume delivery p95 ≤ 74ms (previously ~360-450ms). The remaining floor
+is one snapshot decompress+parse (~18ms), the per-file `os.stat` sweep
+(~13ms at 241 files), and prompt assembly itself. Budgets stay at their
+loose 6A tripwire values; the honest per-stage numbers live in
+`benchmarks/results/hook-timing-latest.json`.
 
 Standing rule (task6A acceptance): **no new always-on feature lands
 without extending this report first** — the hot path stays observable

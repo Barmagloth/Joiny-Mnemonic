@@ -21,7 +21,9 @@ candidates and lineage outlive them.
 A legitimate restore/import that starts a new chain must declare a new chain_id, preserve linkage
 to the prior chain and emit a visible event/finding. It is not equivalent to a normal extension.
 The witness registry is backed up independently if rollback detection should survive loss of the
-workspace database.
+workspace database. It is per-project sharded: back up the `witnesses.d/` directory next to
+`witnesses.json` (the legacy monolith remains a read-only migration fallback; shards hold the
+current witnessed heads).
 ## Schema upgrades
 
 The durable database carries an integer `metadata.schema_version` and an immutable
