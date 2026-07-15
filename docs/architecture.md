@@ -302,6 +302,38 @@ descriptor covers model identity/version, inference parameters, prompt/schema/pa
 evidence and validator policy versions, and context/normalization versions. Reprocessing uses a
 new hash and never resets an older run.
 
+### Unified candidate settlement (task6B, schema v9)
+
+The extraction ledger doubles as the system's settlement journal.
+`extraction_candidates.candidate_kind` distinguishes rows: `extraction`
+(default, legacy behavior unchanged) versus settlement kinds `task_closure`
+and `block_change`. Settlement candidates ride a synthetic deterministic run
+(`run_settle_<sha(source_event)>`, config hash `settlement-reconciler-v1`) so
+one detection maps to exactly one run and one candidate, and all foreign
+keys stay honest.
+
+Settlement uses its own consume-once status flow on the shared transition
+journal: `pending → applied|contested`, `applied → reverted|contested`;
+`reverted` and `contested` are terminal. Repeated identical settlements are
+idempotent (no new transition), conflicting ones raise. The reconciler
+creates a `task_closure` candidate for every completion detection with a
+deterministic evidence strength (`file` → strong, `command` → medium);
+strong evidence auto-applies by default (actor `system`), medium follows
+`automatic_task_closure_enabled`, weak stays pending. Closure writes go
+through the normal block/memory APIs citing detection + evidence events and
+`closure_candidate_id`; `undo_closure` restores the entry line, supersedes
+the completed task memory with a `reopened` version and records the round
+trip. Reverse reconciliation: a user marker re-adding a closed entry
+contests it (consolidator hook), and `reconcile()` auto-reverts applied
+closures whose evidence file vanished inside the hygiene window
+(`closure_evidence_invalidated`, reported read-only by `hygiene_findings`).
+The `?`-marker guard files a `block_change` candidate (manual-by-default)
+alongside the legacy `block_change_requested` event. Auto-closures notify
+the user via the hook `systemMessage` on claude-code (with a ready
+`candidates undo` command) and via the resume digest
+`[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` elsewhere; capabilities report
+the per-kind settlement policy and the notification channel.
+
 
 ### v1 authority and ledger vocabulary
 

@@ -232,7 +232,7 @@ class EvidenceConsolidator:
                 # question is never a decision/task assertion; route the
                 # block write to the *_requested discipline instead. The
                 # searchable record above is still created.
-                service.store.append_internal_events_once(
+                request_events, _ = service.store.append_internal_events_once(
                     f"block-change-request:{event.id}:{candidate.block}",
                     [
                         {
@@ -250,6 +250,17 @@ class EvidenceConsolidator:
                     ],
                     branch_id=event.branch_id,
                     session_id=event.session_id,
+                )
+                # task6.md 6B: the request also becomes a settleable
+                # candidate (kind=block_change, manual-by-default — a
+                # question mark is precisely the ambiguous tail).
+                service.store.create_settlement_candidate(
+                    kind="block_change",
+                    content=candidate.content,
+                    source_event_id=request_events[0].id,
+                    memory_type=candidate.block,
+                    strength="weak",
+                    actor="consolidator",
                 )
                 skipped.append(candidate.block)
                 continue
@@ -275,6 +286,16 @@ class EvidenceConsolidator:
                 skipped.append(candidate.block)
             else:
                 block_ids.append(block.id)
+                if candidate.block == "open_tasks":
+                    # Bidirectional reconciliation (task6.md 6B): a marker
+                    # re-adding a closed entry IS the correction signal —
+                    # the applied closure flips to contested and never
+                    # re-applies from the same evidence.
+                    service.reconciler.contest_reasserted_entry(
+                        candidate.content,
+                        source_event_id=event.id,
+                        branch_id=event.branch_id,
+                    )
         result = ConsolidationResult(
             event_id=event.id,
             memory_ids=tuple(memory_ids),

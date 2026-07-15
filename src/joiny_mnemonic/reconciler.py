@@ -23,6 +23,7 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .models import Event
@@ -227,18 +228,37 @@ class StateReconciler:
 
     # --- reconciliation ----------------------------------------------------
 
-    def _closure_enabled(self) -> bool:
+    def _closure_flag(self) -> bool:
         active = self.store.active_policy()
         return bool(
             active and active["policy"].get("automatic_task_closure_enabled", False)
         )
 
+    @staticmethod
+    def _strength(evidence_kind: str) -> str:
+        # Deterministic evidence-strength ladder (task6.md 6B): a trusted
+        # host-hook write of the exact path is strong; a command prefix
+        # match is medium; anything else stays pending.
+        return {"file": "strong", "command": "medium"}.get(evidence_kind, "weak")
+
+    def _auto_apply_allowed(self, strength: str) -> bool:
+        # Automation first: strong evidence auto-applies BY DEFAULT (cheap
+        # lossless undo is what licenses this); medium follows the legacy
+        # policy flag; weak never auto-applies.
+        if strength == "strong":
+            return True
+        if strength == "medium":
+            return self._closure_flag()
+        return False
+
     def reconcile(self, *, branch_id: str = "main") -> dict[str, Any]:
-        summary = {"detected": 0, "closed": 0, "pending": 0}
+        summary: dict[str, Any] = {
+            "detected": 0, "closed": 0, "pending": 0, "auto_closed": [],
+            "invalidated": self.invalidated_closures(branch_id=branch_id),
+        }
         detections = self.detect_completions(branch_id=branch_id)
         if not detections:
             return summary
-        close = self._closure_enabled()
         for detection, task_memory_id in detections:
             summary["detected"] += 1
             receipt = "task-completion:{}:{}:{}".format(
@@ -246,7 +266,7 @@ class StateReconciler:
                 hashlib.sha256(_normalized(detection.entry).encode()).hexdigest()[:16],
                 detection.evidence_event_id,
             )
-            events, created = self.store.append_internal_events_once(
+            events, _created = self.store.append_internal_events_once(
                 receipt,
                 [
                     {
@@ -263,37 +283,93 @@ class StateReconciler:
                 branch_id=branch_id,
             )
             detection_event = events[0]
-            if not close:
+            strength = self._strength(detection.evidence_kind)
+            candidate_id, _fresh, status = self.store.create_settlement_candidate(
+                kind="task_closure",
+                content=detection.entry,
+                source_event_id=detection_event.id,
+                evidence_event_id=detection.evidence_event_id,
+                strength=strength,
+            )
+            if status != "pending":
+                # Consume-once: an applied candidate was handled; a reverted
+                # or contested one must never re-apply from the same evidence.
+                continue
+            if not self._auto_apply_allowed(strength):
                 summary["pending"] += 1
                 continue
-            block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
-            if block is None:
-                continue
-            # Remove only the completed entry's line; untouched lines keep
-            # their original bytes and formatting (review finding L2).
-            target = _normalized(detection.entry)
-            raw_lines = block.content.splitlines()
-            remaining = [
-                raw
-                for raw in raw_lines
-                if _normalized(raw.strip().removeprefix("- ").strip()) != target
-            ]
-            if len(remaining) == len(raw_lines):
-                continue  # already closed by an earlier run
-            self.store.set_active_block(
-                "open_tasks",
-                "\n".join(remaining),
-                branch_id=branch_id,
-                source_event_ids=(detection_event.id, detection.evidence_event_id),
-            )
-            if task_memory_id is not None:
-                record = self.store.get_memory(task_memory_id)
-                if record.metadata.get("status") == "completed":
-                    summary["closed"] += 1
-                    continue
+            if self._apply_closure(
+                detection, task_memory_id, candidate_id,
+                detection_event=detection_event, branch_id=branch_id,
+                rule_id=f"auto_closure_{strength}_evidence",
+            ):
+                summary["closed"] += 1
+                summary["auto_closed"].append(
+                    {
+                        "entry": detection.entry,
+                        "candidate_id": candidate_id,
+                        "evidence_event_id": detection.evidence_event_id,
+                    }
+                )
+            else:
+                summary["pending"] += 1
+        return summary
+
+    def _apply_closure(
+        self,
+        detection: CompletionDetection,
+        task_memory_id: str | None,
+        candidate_id: str,
+        *,
+        detection_event: Event,
+        branch_id: str,
+        rule_id: str,
+    ) -> bool:
+        block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
+        if block is None:
+            return False
+        # Remove only the completed entry's line; untouched lines keep
+        # their original bytes and formatting (review finding L2).
+        target = _normalized(detection.entry)
+        raw_lines = block.content.splitlines()
+        remaining = [
+            raw
+            for raw in raw_lines
+            if _normalized(raw.strip().removeprefix("- ").strip()) != target
+        ]
+        if len(remaining) == len(raw_lines):
+            return False  # already closed by an earlier run
+        applied_events, _ = self.store.append_internal_events_once(
+            f"task-closure-applied:{candidate_id}",
+            [
+                {
+                    "kind": "state",
+                    "role": None,
+                    "content": f"task closure applied: {detection.entry}",
+                    "payload": {
+                        "operation": "task_closure_applied",
+                        "candidate_id": candidate_id,
+                        "entry": detection.entry,
+                        "evidence_event_id": detection.evidence_event_id,
+                        # Audit evidence, not magic authority (task6.md):
+                        # nothing here claims OS enforcement.
+                        "enforcement_level": "recorded_only",
+                    },
+                }
+            ],
+            branch_id=branch_id,
+        )
+        self.store.set_active_block(
+            "open_tasks",
+            "\n".join(remaining),
+            branch_id=branch_id,
+            source_event_ids=(detection_event.id, detection.evidence_event_id),
+        )
+        if task_memory_id is not None:
+            record = self.store.get_memory(task_memory_id)
+            if record.metadata.get("status") != "completed":
                 # Gate on the record's own state, not on detection-event
-                # freshness (review finding M4): a detection made while the
-                # flag was off must still supersede on a later closure run.
+                # freshness (review finding M4).
                 self.store.derive_memory(
                     memory_type="task",
                     content=record.content,
@@ -305,19 +381,143 @@ class StateReconciler:
                         **record.metadata,
                         "status": "completed",
                         "completed_by": detection.evidence_event_id,
+                        "closure_candidate_id": candidate_id,
                     },
                 )
-            summary["closed"] += 1
-        return summary
+        self.store.settle_candidate(
+            candidate_id, "applied",
+            source_event_id=applied_events[0].id,
+            actor="system", rule_id=rule_id,
+        )
+        return True
+
+    def undo_closure(
+        self, candidate_id: str, *, branch_id: str = "main",
+        rule_id: str = "operator_undo", detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Lossless revert of an applied closure: the entry line returns to
+        open_tasks, the task memory gets a superseding 'reopened' version,
+        the candidate records the round trip. Cheap undo is what licenses
+        the automation."""
+        candidates = {
+            item["id"]: item for item in self.store.list_settlement_candidates(
+                kind="task_closure"
+            )
+        }
+        candidate = candidates.get(candidate_id)
+        if candidate is None:
+            raise KeyError(f"unknown settlement candidate: {candidate_id}")
+        entry = str(candidate["normalized_content"])
+        revert_events, created = self.store.append_internal_events_once(
+            f"task-closure-reverted:{candidate_id}",
+            [
+                {
+                    "kind": "state",
+                    "role": None,
+                    "content": f"task closure reverted: {entry}",
+                    "payload": {
+                        "operation": "task_closure_reverted",
+                        "candidate_id": candidate_id,
+                        "entry": entry,
+                        "rule_id": rule_id,
+                        "enforcement_level": "recorded_only",
+                        **(detail or {}),
+                    },
+                }
+            ],
+            branch_id=branch_id,
+        )
+        transition = self.store.settle_candidate(
+            candidate_id, "reverted",
+            source_event_id=revert_events[0].id,
+            actor="system", rule_id=rule_id,
+        )
+        block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
+        lines = block.content.splitlines() if block else []
+        target = _normalized(entry)
+        present = any(
+            _normalized(line.strip().removeprefix("- ").strip()) == target
+            for line in lines
+        )
+        if not present:
+            content = "\n".join([*lines, f"- {entry}"]) if lines else f"- {entry}"
+            self.store.set_active_block(
+                "open_tasks", content, branch_id=branch_id,
+                source_event_ids=(revert_events[0].id,),
+            )
+        for record in self.store.list_memories(
+            branch_id=branch_id, memory_types=("task",)
+        ):
+            if (
+                record.metadata.get("closure_candidate_id") == candidate_id
+                and record.metadata.get("status") == "completed"
+            ):
+                self.store.derive_memory(
+                    memory_type="task",
+                    content=record.content,
+                    summary=record.summary,
+                    source_event_ids=(revert_events[0].id,),
+                    branch_id=branch_id,
+                    supersedes_id=record.id,
+                    metadata={
+                        **record.metadata, "status": "reopened",
+                        "reopened_by": revert_events[0].id,
+                    },
+                )
+                break
+        return {
+            "candidate_id": candidate_id, "entry": entry,
+            "transition_id": transition, "already_reverted": not created,
+        }
+
+    def contest_reasserted_entry(
+        self, entry: str, *, source_event_id: str, branch_id: str = "main"
+    ) -> list[str]:
+        """Bidirectional reconciliation: a user marker re-adding a closed
+        entry IS the correction signal. Applied closures matching the entry
+        flip to contested and never re-apply from the same evidence."""
+        target = _normalized(entry)
+        contested: list[str] = []
+        for item in self.store.list_settlement_candidates(kind="task_closure"):
+            if (item.get("status") or "pending") != "applied":
+                continue
+            if _normalized(str(item["normalized_content"])) != target:
+                continue
+            transition = self.store.settle_candidate(
+                str(item["id"]), "contested",
+                source_event_id=source_event_id,
+                actor="system", rule_id="task_reasserted_by_marker",
+            )
+            if transition is not None:
+                contested.append(str(item["id"]))
+        return contested
 
     def pending_completions(self, *, branch_id: str = "main") -> list[dict[str, Any]]:
-        """Detections whose entry is still in the live block (flag off, or
-        detected before the flag was enabled)."""
+        """Settlement candidates awaiting confirmation whose entry is still
+        in the live block (medium/weak evidence, or auto-apply declined)."""
         block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
         live = {_normalized(line) for line in _entry_lines(block.content)} if block else set()
         if not live:
             return []
         pending: list[dict[str, Any]] = []
+        for item in self.store.list_settlement_candidates(
+            kind="task_closure", status="pending"
+        ):
+            entry = _normalized(str(item["normalized_content"]))
+            if entry not in live:
+                continue
+            pending.append(
+                {
+                    "entry": str(item["normalized_content"]),
+                    "candidate_id": str(item["id"]),
+                    "evidence_event_id": str(item["evidence_quote"]),
+                    "detection_event_id": str(item["source_event_id"]),
+                }
+            )
+        if pending:
+            return pending
+        # Legacy fallback: detections recorded before the candidate ledger
+        # (schema v8 era) surfaced as state events only.
         seen: set[str] = set()
         for event in self.store.events_by_operation(
             "task_completion_detected", branch_id=branch_id
@@ -337,13 +537,93 @@ class StateReconciler:
 
     # --- hygiene -----------------------------------------------------------
 
+    def invalidated_closures(self, *, branch_id: str = "main") -> list[dict[str, Any]]:
+        """Bidirectional reconciliation, evidence side: an applied closure
+        whose file evidence no longer exists inside the hygiene window is
+        auto-reverted — the system catches its own mistake, not the user.
+        This MUTATES (undo) and therefore runs from reconcile(), the write
+        path; hygiene_findings() only reads the resulting revert events."""
+        reverted: list[dict[str, Any]] = []
+        root = self.service.project_root.resolve()
+        now = datetime.now(UTC)
+        window = _default_age_days() * 86400
+        for item in self.store.list_settlement_candidates(
+            kind="task_closure", status="applied"
+        ):
+            if not str(item.get("evidence_zone", "")).endswith(":strong"):
+                continue
+            applied_at = str(item.get("status_at") or item["created_at"])
+            try:
+                age = (now - datetime.fromisoformat(applied_at)).total_seconds()
+            except ValueError:
+                continue
+            if age > window:
+                continue
+            try:
+                detection = self.store.get_event(str(item["source_event_id"]))
+            except KeyError:
+                continue
+            path = str(detection.payload.get("evidence_detail", ""))
+            if not path:
+                continue
+            # Probe the file the captured evidence actually named (host
+            # paths are absolute); fall back to the entry path under the
+            # project root. Outside-root paths are skipped, not probed (L3).
+            probe = None
+            try:
+                evidence = self.store.get_event(
+                    str(detection.payload.get("evidence_event_id", ""))
+                )
+            except KeyError:
+                evidence = None
+            if evidence is not None:
+                probe = next(
+                    (str(f) for f in evidence.files if _path_matches(path, str(f))),
+                    None,
+                )
+            if probe is not None and Path(probe).is_absolute():
+                candidate_path = Path(probe).resolve()
+            else:
+                candidate_path = (root / (probe or path).replace("\\", "/")).resolve()
+            if root not in candidate_path.parents and candidate_path != root:
+                continue
+            if candidate_path.exists():
+                continue
+            result = self.undo_closure(
+                str(item["id"]), branch_id=branch_id,
+                rule_id="closure_evidence_invalidated",
+                detail={"path": path},
+            )
+            reverted.append({**result, "path": path})
+        return reverted
+
     def hygiene_findings(self, *, branch_id: str = "main") -> list[dict[str, str]]:
         """Warning-only, recomputed on demand, ranking-neutral — the same
-        contract as staleness."""
+        contract as staleness. Strictly read-only: the invalidation sweep
+        itself runs in reconcile(); here we report its revert events while
+        they are inside the hygiene window."""
         findings: list[dict[str, str]] = []
         blocks = self.store.get_active_blocks(branch_id=branch_id)
         now = datetime.now(UTC)
         age_days = _default_age_days()
+        for event in self.store.events_by_operation(
+            "task_closure_reverted", branch_id=branch_id
+        ):
+            if event.payload.get("rule_id") != "closure_evidence_invalidated":
+                continue
+            try:
+                created = datetime.fromisoformat(event.created_at)
+            except ValueError:
+                continue
+            if (now - created).total_seconds() > age_days * 86400:
+                continue
+            findings.append(
+                {
+                    "finding": "closure_evidence_invalidated",
+                    "entry": str(event.payload.get("entry", "")),
+                    "path": str(event.payload.get("path", "")),
+                }
+            )
         tasks = blocks.get("open_tasks")
         if tasks:
             root = self.service.project_root.resolve()

@@ -115,7 +115,11 @@ SQLite store size at two scales, p50/p95/p99, and regression gates:
 Reference points (2026-07-15, development machine): warm capture ~22ms
 p50; resume delivery ~360-390ms of which **packet assembly is ~354ms —
 92% of the path and the standing optimization target**; reconciler
-3-8ms; every other stage under 0.1ms. Latencies are flat between a
+3-8ms; every other stage under 0.1ms. After task6B (settlement candidates
++ evidence-invalidation sweep now run inside reconcile) the stage stays in
+the same band: p95 ≤ 8ms across all scenarios and both scales, with
+settlement writes visible only as p99 tails of ~8-20ms on the pending
+path — well inside the 250/500ms budgets. Latencies are flat between a
 243-event/548KB store and a 1411-event/1.8MB store. Cold start: imports
 ~130ms, service open ~190ms core / ~630ms with plugins (entry-point
 loading); heavyweight models stay lazy — the embedder loads on the first

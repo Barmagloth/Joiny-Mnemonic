@@ -440,7 +440,7 @@ def process_hook(
     with _stage("consolidation"):
         service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
     with _stage("reconcile"):
-        service.reconciler.reconcile(branch_id=branch_id)
+        reconcile_summary = service.reconciler.reconcile(branch_id=branch_id)
     with _stage("maintenance"):
         service.extraction.notify(detached=True)
         service.checkpoint_witness()
@@ -508,8 +508,31 @@ def process_hook(
                 "Consider starting a new session for this task; a durable resume packet is "
                 "available."
             )
-        return _context_output(agent, event_name, context)
-    return {}
+        return _with_auto_notice(
+            _context_output(agent, event_name, context), agent, reconcile_summary
+        )
+    return _with_auto_notice({}, agent, reconcile_summary)
+
+
+def _with_auto_notice(
+    output: dict[str, Any], agent: str, summary: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Human-visible notice at action time (task6.md 6B): auto-settlements
+    ride the host's user-facing channel — Claude Code renders the hook JSON
+    'systemMessage' field directly to the user. Hosts with strict per-event
+    stdout schemas (Codex) get digest-only delivery via the next resume."""
+    if agent != "claude-code" or not summary:
+        return output
+    auto_closed = summary.get("auto_closed") or []
+    if not auto_closed:
+        return output
+    lines = "; ".join(
+        f"auto-closed «{item['entry']}» on evidence {item['evidence_event_id']}"
+        f" — undo: joiny-mnemonic candidates undo {item['candidate_id']}"
+        for item in auto_closed[:3]
+    )
+    return {**output, "systemMessage": f"joiny-mnemonic: {lines}"}
+
 
 @dataclass(frozen=True, slots=True)
 class InstallResult:

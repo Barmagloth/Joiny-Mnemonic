@@ -95,21 +95,26 @@ growing pending queue is a detection-quality bug, not a UX feature. Live
 fixture: the delme2.md completion detected on GPTShared (2026-07-14) should
 have closed itself.
 
-- [ ] `candidate_kind` migration; `task_closure` + `block_change` kinds
-- [ ] Evidence-strength ladder; strong evidence auto-applies by default
-      (actor `system`, full audit trail)
-- [ ] Bidirectional reconciliation: re-added marker reopens a closed entry
-      (auto-undo, `contested`); invalidated evidence reverts the closure —
+- [x] `candidate_kind` migration (schema v9); `task_closure` + `block_change`
+      kinds (2026-07-15)
+- [x] Evidence-strength ladder; strong evidence auto-applies by default
+      (actor `system`, full audit trail); medium stays behind the legacy flag
+- [x] Bidirectional reconciliation: re-added marker contests a closed entry;
+      invalidated evidence auto-reverts the closure in `reconcile()` —
       wrong closures are caught by the system, not by user vigilance
-- [ ] Human-visible notice at action time through the host's user-facing
-      hook output (with the ready undo command) + auto-action delta in the
-      session-start digest
-- [ ] Consume-once settlement transitions, fail-closed policy, first-class
-      `undo`; a reverted closure never re-applies from the same evidence
-- [ ] `joiny-mnemonic candidates list/show/settle/undo` + MCP read/write
-- [ ] Acceptance: a fresh GPTShared-style scenario closes the task with zero
-      user actions; re-adding the marker reopens it with zero user actions;
-      `undo` restores the entry losslessly
+- [x] Human-visible notice at action time: hook `systemMessage` on
+      claude-code with the ready undo command + `AUTO-CLOSED RECENTLY`
+      delta in the resume digest (24h, cap 3)
+- [x] Consume-once settlement transitions, fail-closed policy, first-class
+      `undo`; a reverted/contested closure never re-applies from the same
+      evidence (`tests/test_settlement.py`)
+- [ ] 6C: `candidates show/settle` + MCP `memory_candidates` /
+      `memory_settle_candidate` with trusted-origin checks for manual actors
+      (interim `candidates list/undo` CLI shipped with 6B)
+- [ ] Acceptance on a live host: a fresh GPTShared-style scenario closes the
+      task with zero user actions; re-adding the marker contests it with
+      zero user actions; `undo` restores the entry losslessly (unit-level
+      already covered; needs one live hook delivery after venv update)
 
 Done when: the common case needs no user action at all, and the wrong-closure
 case costs one command.

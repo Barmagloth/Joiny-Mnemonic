@@ -143,10 +143,11 @@ joiny-mnemonic verify
 
 | Requirement | Implementation | Verification |
 |---|---|---|
-| Evidence-bound task completion, deterministic-first | `reconciler.StateReconciler` (file/command evidence vs later canonical tool events; delete-verb tasks skipped) | `test_file_evidence_detection_and_pending_when_flag_off`, `test_command_evidence`, `test_delete_verb_tasks_are_skipped` |
-| Closure only under policy flag, provenance-bound, nothing deleted | `automatic_task_closure_enabled` in policy ledger; block version cites detection+evidence; task memory superseded with status=completed | `test_flag_on_closes_block_with_provenance_and_supersedes_task` |
-| Detections idempotent, internal origin | `append_internal_events_once` receipts | idempotency assert in flag-off test |
-| Question markers cannot write blocks | consolidation guard -> `block_change_requested` | `test_question_marker_routes_to_block_change_requested` |
+| Evidence-bound task completion, deterministic-first | `reconciler.StateReconciler` (file/command evidence vs later canonical tool events; delete-verb tasks skipped) | `test_file_evidence_auto_closes_even_with_flag_off`, `test_command_evidence`, `test_delete_verb_tasks_are_skipped` |
+| Evidence-strength ladder: strong auto-applies by default, medium behind flag, weak pends | `_strength` / `_auto_apply_allowed`; flag now gates medium only (task6B flip) | `test_file_evidence_auto_closes_even_with_flag_off`, `test_command_evidence_stays_pending_when_flag_off` |
+| Closure provenance-bound, nothing deleted | block version cites detection+evidence; task memory superseded with status=completed and `closure_candidate_id` | `test_flag_on_closes_block_with_provenance_and_supersedes_task` |
+| Detections idempotent, internal origin | `append_internal_events_once` receipts | idempotency asserts in both flag-off tests |
+| Question markers cannot write blocks | consolidation guard -> `block_change_requested` + `block_change` settlement candidate | `test_question_marker_routes_to_block_change_requested`, `test_question_marker_creates_block_change_candidate` |
 | Block hygiene warning-only | `hygiene_findings` (missing files, aged tasks, ?-decisions) | `test_hygiene_findings` |
 | Quote-don't-recall | `memory_blocks` MCP tool; durable-capture instruction; installer MCP default yes | `test_memory_blocks_tool_returns_verbatim_protected_state` |
 | Temporal query windows (RU/EN, fuzzy, no guessing) | `temporal.parse_query_window` | parser table in `test_retrieval_fusion` |
@@ -155,3 +156,15 @@ joiny-mnemonic verify
 | Boosts nudge never flip | `_apply_boosts` multiplicative-around-1 | monotonicity test |
 | JSON-array views, lossless-first, in-band sentinel | `_json_array_view` (dedup, quota'd cap, 15% CSV gate) | `test_json_reducer` lossless/lossy cases |
 | Protected patterns fail closed | reducer `protected_patterns` row/line enforcement | protected-row, protected-line and fail-closed guards in `test_json_reducer` |
+
+## Unified candidate settlement (task6.md, 6B)
+
+| Requirement | Implementation | Verification |
+|---|---|---|
+| One ledger, no new proposal tables | `candidate_kind` on `extraction_candidates` (v9 migration, default `extraction`); synthetic deterministic run per source event | `test_schema_v9_settlement_scaffolding`, v7-fixture chain test |
+| Consume-once settlement: idempotent repeats, fail-closed conflicts | `settle_candidate` + `_SETTLEMENT_FLOW` (`pending→applied\|contested`, `applied→reverted\|contested`, terminals absorb) | `test_consume_once_flow`, `test_create_is_idempotent_per_source_event` |
+| Undo is first-class and lossless | `undo_closure`: line restored, task memory superseded to `reopened`, transition recorded | `test_undo_restores_line_memory_and_ledger` |
+| Marker re-add contests the closure; no re-apply from same evidence | `contest_reasserted_entry` (consolidator hook after open_tasks writes) | `test_marker_reassertion_contests_the_closure` |
+| Evidence invalidation auto-reverts inside project root | `invalidated_closures` sweep in `reconcile()` (write path); `hygiene_findings` reports read-only | `test_missing_evidence_file_auto_reverts_inside_project_root` |
+| Human-visible notification | hook `systemMessage` on claude-code with ready undo command; resume `[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` digest; capability reports channel | `test_hook_delivery_surfaces_auto_closure_as_system_message`, `test_resume_packet_reports_recent_auto_closures_with_undo` |
+| No OS-enforcement claims | `enforcement_level: recorded_only` in applied/reverted receipts and capabilities | receipt payload asserts in settlement tests |

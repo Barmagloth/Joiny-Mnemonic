@@ -268,6 +268,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reduction_report.add_argument("--branch", default="main")
 
+    candidates = commands.add_parser(
+        "candidates", help="settlement candidates (task6B; full surfaces in 6C)"
+    )
+    candidates_commands = candidates.add_subparsers(dest="candidates_command", required=True)
+    candidates_list = candidates_commands.add_parser("list")
+    candidates_list.add_argument("--kind", default=None)
+    candidates_list.add_argument("--status", default=None)
+    candidates_undo = candidates_commands.add_parser(
+        "undo", help="lossless revert of an applied closure"
+    )
+    candidates_undo.add_argument("candidate_id")
+    candidates_undo.add_argument("--branch", default="main")
+
     stale = commands.add_parser("stale")
     stale.add_argument("--branch", default="main")
     selector = stale.add_mutually_exclusive_group()
@@ -679,6 +692,19 @@ def run(args: argparse.Namespace) -> int:
             )
         elif args.command == "reduction-report":
             _print(service.usage.overcompression_report(branch_id=args.branch))
+        elif args.command == "candidates":
+            if args.candidates_command == "list":
+                _print(
+                    service.store.list_settlement_candidates(
+                        kind=args.kind, status=args.status
+                    )
+                )
+            elif args.candidates_command == "undo":
+                _print(
+                    service.reconciler.undo_closure(
+                        args.candidate_id, branch_id=args.branch
+                    )
+                )
         elif args.command == "stale":
             _print(service.stale(branch_id=args.branch, memory_id=args.id, file=args.file, threshold=args.threshold))
         elif args.command == "precheck":

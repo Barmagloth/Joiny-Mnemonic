@@ -63,15 +63,21 @@ class ReconcilerCase(unittest.TestCase):
             files=(path,),
         )
 
-    def test_file_evidence_detection_and_pending_when_flag_off(self) -> None:
-        self.service.initialize_project()
+    def test_file_evidence_auto_closes_even_with_flag_off(self) -> None:
+        """task6.md 6B: strong evidence (trusted host write of the exact
+        path) auto-applies BY DEFAULT — cheap lossless undo licenses it.
+        The legacy flag now gates only medium (command) evidence."""
+        self.service.initialize_project()  # flag off
         self._open_task("создать файл delme2.md")
         self._write_evidence("R:\\Projects\\GPTShared\\delme2.md")
 
         summary = self.service.reconciler.reconcile()
         self.assertEqual(summary["detected"], 1)
-        self.assertEqual(summary["closed"], 0)
-        self.assertEqual(summary["pending"], 1)
+        self.assertEqual(summary["closed"], 1)
+        self.assertEqual(summary["pending"], 0)
+        self.assertEqual(len(summary["auto_closed"]), 1)
+        auto = summary["auto_closed"][0]
+        self.assertEqual(auto["entry"], "создать файл delme2.md")
 
         detections = [
             event for event in self.store.query_events(kinds=("state",))
@@ -80,15 +86,57 @@ class ReconcilerCase(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0].origin_channel, "internal")
         self.assertEqual(detections[0].payload["evidence_kind"], "file")
-        # The entry stays in the block and surfaces as pending.
+        self.assertEqual(
+            auto["evidence_event_id"], detections[0].payload["evidence_event_id"]
+        )
+        block = self.store.get_active_blocks().get("open_tasks")
+        self.assertTrue(block is None or "delme2.md" not in block.content)
+        candidates = self.store.list_settlement_candidates(kind="task_closure")
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["status"], "applied")
+        self.assertEqual(self.service.reconciler.pending_completions(), [])
+
+        # Idempotent: rerunning emits no second detection and no re-close.
+        again = self.service.reconciler.reconcile()
+        self.assertEqual(again["closed"], 0)
+        detections_after = [
+            event for event in self.store.query_events(kinds=("state",))
+            if event.payload.get("operation") == "task_completion_detected"
+        ]
+        self.assertEqual(len(detections_after), 1)
+
+    def test_command_evidence_stays_pending_when_flag_off(self) -> None:
+        """Medium evidence keeps the legacy consent gate: detection is
+        recorded, the entry stays, pending surfaces with candidate id."""
+        self.service.initialize_project()  # flag off
+        self._open_task("прогнать `pytest -q` перед релизом")
+        self.store.append_host_events_once(
+            "evidence:pytest-flag-off",
+            [
+                {
+                    "kind": "tool_output", "role": "tool", "content": "5 passed",
+                    "payload": {
+                        "tool_name": "Bash",
+                        "hook_event_name": "PostToolUse",
+                        "tool_input": {"command": "pytest -q"},
+                    },
+                }
+            ],
+            adapter="claude-code",
+        )
+        summary = self.service.reconciler.reconcile()
+        self.assertEqual(summary["detected"], 1)
+        self.assertEqual(summary["closed"], 0)
+        self.assertEqual(summary["pending"], 1)
         block = self.store.get_active_blocks()["open_tasks"]
-        self.assertIn("delme2.md", block.content)
+        self.assertIn("pytest", block.content)
         pending = self.service.reconciler.pending_completions()
         self.assertEqual(len(pending), 1)
-        self.assertEqual(
-            pending[0]["evidence_event_id"], detections[0].payload["evidence_event_id"]
+        self.assertTrue(pending[0]["candidate_id"].startswith("cand_"))
+        candidates = self.store.list_settlement_candidates(
+            kind="task_closure", status="pending"
         )
-
+        self.assertEqual(len(candidates), 1)
         # Idempotent: rerunning emits no second detection event.
         self.service.reconciler.reconcile()
         detections_after = [
@@ -250,13 +298,26 @@ class ReconcilerCase(unittest.TestCase):
         self.assertIn("  * задача с ручным форматированием", block.content)
 
     def test_resume_packet_carries_pending_completion_line(self) -> None:
-        self.service.initialize_project()  # flag off
-        self._open_task("создать файл pending.md")
-        self._write_evidence("pending.md")
+        self.service.initialize_project()  # flag off -> command evidence pends
+        self._open_task("прогнать `make docs` перед релизом")
+        self.store.append_host_events_once(
+            "evidence:make-docs",
+            [
+                {
+                    "kind": "tool_output", "role": "tool", "content": "built",
+                    "payload": {
+                        "tool_name": "Bash",
+                        "hook_event_name": "PostToolUse",
+                        "tool_input": {"command": "make docs"},
+                    },
+                }
+            ],
+            adapter="claude-code",
+        )
         self.service.reconciler.reconcile()
         packet = self.service.resume(token_budget=1500)
         self.assertIn("STATE MAINTENANCE - PENDING CONFIRMATIONS", packet.text)
-        self.assertIn("pending.md", packet.text)
+        self.assertIn("make docs", packet.text)
         # Provenance phrasing, not a bare TODO or an injected imperative.
         self.assertIn("ask the user before treating it as closed", packet.text)
 

@@ -133,6 +133,26 @@ the world — an agent that treats it as an instruction to execute has turned
 durable storage into prompt injection with good provenance.
 
 Actions on memory state flow through the deterministic machinery instead:
-the reconciler closes tasks on captured evidence, settlement (task6B)
-accepts or reverts under a fail-closed policy, and every transition cites
-its sources. The agent reads memory; the system acts on evidence.
+the reconciler closes tasks on captured evidence, settlement accepts or
+reverts under a fail-closed policy, and every transition cites its sources.
+The agent reads memory; the system acts on evidence.
+
+### Settlement discipline (task6B)
+
+Every autonomous state change is a settlement candidate on the extraction
+ledger (`candidate_kind`: `task_closure`, `block_change`) with a
+deterministic evidence-strength ladder: a trusted host-hook write of the
+exact path is **strong** (auto-applies by default — cheap lossless undo is
+what licenses this), a command prefix match is **medium** (gated by
+`automatic_task_closure_enabled`), everything else stays **pending**.
+Transitions are consume-once: `pending → applied|contested`,
+`applied → reverted|contested`; repeats are idempotent, conflicts fail
+closed, and a reverted or contested candidate never re-applies from the
+same evidence (no flapping). The system also reconciles in reverse: a user
+marker re-adding a closed entry contests the closure, and an applied
+closure whose evidence file disappears inside the hygiene window
+auto-reverts (`closure_evidence_invalidated`). Untrusted public-API text
+can never settle anything — the same H1 discipline as completion evidence;
+manual settlement surfaces arrive in 6C with trusted-origin checks. Every
+applied/reverted receipt records `enforcement_level: recorded_only`:
+settlement is audit evidence, never a claim of OS enforcement.

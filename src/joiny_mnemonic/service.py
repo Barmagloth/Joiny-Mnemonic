@@ -768,6 +768,40 @@ class MemoryService:
                 *instructions,
                 "[STATE MAINTENANCE - PENDING CONFIRMATIONS]\n" + lines,
             )
+        # Session-start digest of recent autonomous actions (task6.md 6B):
+        # a returning user sees the delta even if the moment-of-action
+        # notice scrolled by. Only candidates still applied qualify — a
+        # closure that was since reverted/contested must not advertise a
+        # stale undo command.
+        from datetime import UTC, datetime, timedelta
+
+        recent_auto = self.store.recent_settlement_transitions(
+            to_status="applied",
+            since_iso=(datetime.now(UTC) - timedelta(hours=24)).isoformat(),
+            kind="task_closure",
+        )
+        still_applied = {
+            item["id"]
+            for item in self.store.list_settlement_candidates(
+                kind="task_closure", status="applied"
+            )
+        }
+        recent_auto = [
+            row for row in recent_auto
+            if row.get("actor") == "system"
+            and row.get("candidate_id") in still_applied
+        ]
+        if recent_auto:
+            auto_lines = "\n".join(
+                f"- «{row['normalized_content']}» was auto-closed on captured "
+                f"evidence ({row['evidence_quote']}); undo: joiny-mnemonic "
+                f"candidates undo {row['candidate_id']}"
+                for row in recent_auto[:3]
+            )
+            instructions = (
+                *instructions,
+                "[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]\n" + auto_lines,
+            )
         packet = self.prompts.assemble(
             token_budget=budget,
             branch_id=branch_id,
@@ -908,6 +942,20 @@ class MemoryService:
                     ),
                     "pending_task_completions": self.reconciler.pending_completions(),
                     "hygiene_findings": self.reconciler.hygiene_findings(),
+                    # task6.md 6B settlement policy: per kind x strength.
+                    # "flag" = gated by automatic_task_closure_enabled.
+                    "settlement_policy": {
+                        "task_closure": {
+                            "strong": "auto", "medium": "flag", "weak": "manual",
+                        },
+                        "block_change": {"any": "manual"},
+                    },
+                    # claude-code renders hook systemMessage to the user;
+                    # other hosts see auto-actions in the resume digest only.
+                    "notification": {
+                        "claude-code": "system_message", "default": "digest-only",
+                    },
+                    "enforcement_level": "recorded_only",
                 },
                 "bitemporal_retrieval": {
                     "valid_time_fields": True,

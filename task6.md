@@ -77,6 +77,19 @@ Zero behavior change. Ships first because 6B must be provably cold.
 
 Extend the existing ledger, not duplicate it.
 
+**DELIVERED (2026-07-15).** Schema v9: `candidate_kind` on
+`extraction_candidates` (legacy rows default `extraction`), settlement rides
+a synthetic deterministic run per source event (`settlement-reconciler-v1`).
+Consume-once flow `pending→applied|contested`, `applied→reverted|contested`;
+strong (file) evidence auto-applies by default, medium (command) follows the
+legacy flag, weak pends. Undo, marker-reassertion contest, and
+evidence-invalidation auto-revert all shipped and tested
+(`tests/test_settlement.py`); notification via hook `systemMessage`
+(claude-code) + resume `AUTO-CLOSED RECENTLY` digest; interim CLI
+`candidates list|undo` (full surfaces in 6C). One deliberate deviation from
+the sketch below: medium evidence defaults to OFF (behind the flag), not
+auto-apply — only the trusted-host exact-path write earned the default flip.
+
 Data model changes (one schema migration):
 
 - `extraction_candidates` gains `candidate_kind` (default `extraction` for all

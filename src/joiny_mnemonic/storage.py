@@ -114,7 +114,8 @@ class SnapshotIntegrityError(RuntimeError):
         super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
+SETTLEMENT_CONFIG_HASH = "settlement-reconciler-v1"
 FIRST_VERSIONED_MIGRATION = 7
 # v2: memory records serialize bitemporal valid-time fields (task4.md); the
 # canonical state layout changed, so rebuilt hashes are only comparable within
@@ -882,6 +883,31 @@ class MemoryStore:
         # v7 establishes the immutable migration ledger and future-version gate.
         # BASE_SCHEMA creates the ledger so this step intentionally has no other DDL.
         return None
+
+    def _migrate_to_v9(self) -> None:
+        # v9: unified candidate settlement (task6.md 6B). The candidate ledger
+        # generalizes beyond extraction via candidate_kind; every legacy row is
+        # an 'extraction' candidate by definition. Settlement candidates cite a
+        # singleton deterministic extractor config (the reconciler IS a
+        # deterministic extractor of closure/block-change candidates), keeping
+        # foreign keys honest without a parallel table twin.
+        self._ensure_column(
+            "extraction_candidates",
+            "candidate_kind",
+            "TEXT NOT NULL DEFAULT 'extraction'",
+        )
+        self._conn.execute(
+            "INSERT OR IGNORE INTO extractor_configs"
+            "(config_hash, descriptor_json, created_at) VALUES(?,?,?)",
+            (
+                SETTLEMENT_CONFIG_HASH,
+                _json({
+                    "extractor": "deterministic-settlement",
+                    "version": SETTLEMENT_CONFIG_HASH,
+                }),
+                _now(),
+            ),
+        )
 
     def _migrate_to_v8(self) -> None:
         # v8: bitemporal valid-time fields (task4.md). Additive nullable columns
@@ -4174,6 +4200,187 @@ class MemoryStore:
                 ),
             )
         return transition_id
+
+    # --- candidate settlement (task6.md 6B) --------------------------------
+    # Thin primitives only; policy and semantics live in settlement.py /
+    # reconciler.py. Settlement candidates ride the extraction ledger with
+    # candidate_kind != 'extraction' and a settlement-specific status
+    # vocabulary: pending -> applied | contested; applied -> reverted |
+    # contested. Consume-once: repeats are idempotent, conflicts fail closed.
+
+    _SETTLEMENT_STATUSES = {"pending", "applied", "reverted", "contested"}
+    _SETTLEMENT_FLOW = {
+        "pending": {"applied", "contested"},
+        "applied": {"reverted", "contested"},
+        "reverted": set(),
+        "contested": set(),
+    }
+
+    @integrity_checked
+    def create_settlement_candidate(
+        self,
+        *,
+        kind: str,
+        content: str,
+        source_event_id: str,
+        evidence_event_id: str | None = None,
+        memory_type: str = "task",
+        strength: str = "weak",
+        actor: str = "reconciler",
+    ) -> tuple[str, bool, str]:
+        """Create (or find) the settlement candidate anchored to one source
+        event. Returns (candidate_id, created, current_status). The synthetic
+        run row keyed by the source event keeps the ledger's foreign keys and
+        uniqueness honest: one detection -> one run -> one candidate."""
+        if kind == "extraction":
+            raise ValueError("extraction candidates are created by the extractor")
+        created_at = _now()
+        with self._transaction() as conn:
+            run_id = f"run_settle_{hashlib.sha256(source_event_id.encode()).hexdigest()[:24]}"
+            conn.execute(
+                "INSERT OR IGNORE INTO extraction_runs"
+                "(id, event_id, extractor_config_hash, created_at) VALUES(?,?,?,?)",
+                (run_id, source_event_id, SETTLEMENT_CONFIG_HASH, created_at),
+            )
+            attempt_id = f"att_{run_id[12:]}"
+            conn.execute(
+                "INSERT OR IGNORE INTO extraction_attempts"
+                "(id, run_id, attempt_no, outcome, started_at, finished_at) "
+                "VALUES(?,?,1,'deterministic',?,?)",
+                (attempt_id, run_id, created_at, created_at),
+            )
+            candidate_id = f"cand_{uuid.uuid4().hex}"
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO extraction_candidates"
+                "(id, run_id, attempt_id, memory_type, normalized_content, "
+                "evidence_quote, evidence_start, evidence_end, evidence_zone, "
+                "confidence, created_at, candidate_kind) "
+                "VALUES(?,?,?,?,?,?,0,0,?,1.0,?,?)",
+                (
+                    candidate_id, run_id, attempt_id, memory_type, content,
+                    evidence_event_id or source_event_id, f"{kind}:{strength}",
+                    created_at, kind,
+                ),
+            )
+            if cursor.rowcount == 0:
+                row = conn.execute(
+                    "SELECT c.id, (SELECT t.to_status FROM candidate_transitions t "
+                    "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status "
+                    "FROM extraction_candidates c WHERE c.run_id=? AND "
+                    "c.normalized_content=? AND c.candidate_kind=?",
+                    (run_id, content, kind),
+                ).fetchone()
+                if row is None:
+                    raise StoreIntegrityError(
+                        "settlement candidate uniqueness violated without a match"
+                    )
+                return str(row["id"]), False, str(row["status"] or "pending")
+            conn.execute(
+                "INSERT INTO candidate_transitions"
+                "(id, candidate_id, from_status, to_status, source_event_id, "
+                "actor, rule_id, origin_evidence_type, replacement_candidate_id, "
+                "replacement_memory_id, extractor_run_id, created_at) "
+                "VALUES(?,?,NULL,'pending',?,?,?,?,NULL,NULL,?,?)",
+                (
+                    f"ctr_{uuid.uuid4().hex}", candidate_id, source_event_id,
+                    actor, f"{kind}_detected", "internal", run_id, created_at,
+                ),
+            )
+        return candidate_id, True, "pending"
+
+    @integrity_checked
+    def settle_candidate(
+        self,
+        candidate_id: str,
+        to_status: str,
+        *,
+        source_event_id: str,
+        actor: str,
+        rule_id: str,
+    ) -> str | None:
+        """Consume-once settlement transition. Idempotent on repeats (returns
+        None), fail-closed on conflicts (ValueError). Manual trust hardening
+        for non-system actors arrives with the 6C surfaces."""
+        if to_status not in self._SETTLEMENT_STATUSES:
+            raise ValueError(f"unsupported settlement status: {to_status}")
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT candidate_kind FROM extraction_candidates WHERE id=?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown candidate: {candidate_id}")
+            if str(row["candidate_kind"]) == "extraction":
+                raise ValueError(
+                    "extraction candidates settle through transition_candidate"
+                )
+            current = self._candidate_status_locked(conn, candidate_id) or "pending"
+            if current == to_status:
+                return None  # idempotent repeat
+            if to_status not in self._SETTLEMENT_FLOW.get(current, set()):
+                raise ValueError(
+                    f"conflicting settlement: {current} -> {to_status} is not allowed"
+                )
+            transition_id = f"ctr_{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO candidate_transitions"
+                "(id, candidate_id, from_status, to_status, source_event_id, "
+                "actor, rule_id, origin_evidence_type, replacement_candidate_id, "
+                "replacement_memory_id, extractor_run_id, created_at) "
+                "VALUES(?,?,?,?,?,?,?,?,NULL,NULL,NULL,?)",
+                (
+                    transition_id, candidate_id, current, to_status,
+                    source_event_id, actor, rule_id, "internal", _now(),
+                ),
+            )
+        return transition_id
+
+    @integrity_checked
+    def list_settlement_candidates(
+        self, *, kind: str | None = None, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        clauses = ["c.candidate_kind != 'extraction'"]
+        params: list[Any] = []
+        if kind is not None:
+            clauses.append("c.candidate_kind = ?")
+            params.append(kind)
+        rows = self._conn.execute(
+            "SELECT c.*, r.event_id AS source_event_id, "
+            "(SELECT t.to_status FROM candidate_transitions t "
+            "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status, "
+            "(SELECT t.created_at FROM candidate_transitions t "
+            "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status_at "
+            "FROM extraction_candidates c "
+            "JOIN extraction_runs r ON r.id = c.run_id "
+            "WHERE " + " AND ".join(clauses)
+            + " ORDER BY c.created_at DESC",
+            params,
+        ).fetchall()
+        results = []
+        for row in rows:
+            item = {key: row[key] for key in row.keys()}
+            if status is not None and (item.get("status") or "pending") != status:
+                continue
+            results.append(item)
+        return results
+
+    @integrity_checked
+    def recent_settlement_transitions(
+        self, *, to_status: str, since_iso: str, kind: str | None = None
+    ) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT t.*, c.normalized_content, c.candidate_kind, c.evidence_quote "
+            "FROM candidate_transitions t "
+            "JOIN extraction_candidates c ON c.id = t.candidate_id "
+            "WHERE t.to_status=? AND t.created_at>=? AND c.candidate_kind != 'extraction' "
+            "ORDER BY t.created_at DESC",
+            (to_status, since_iso),
+        ).fetchall()
+        return [
+            {key: row[key] for key in row.keys()}
+            for row in rows
+            if kind is None or str(row["candidate_kind"]) == kind
+        ]
 
     @integrity_checked
     def find_auto_candidate_match(
