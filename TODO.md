@@ -69,14 +69,17 @@ Done when: (achieved for the headline; error-analysis items continue)
 
 We shipped hot-path fixes (M5/M6) without measurements; that is debt.
 
-- [ ] Timing benchmark: capture-only PostToolUse; PostToolUse+reducer;
-      UserPromptSubmit with resume injection; PreCompact/PostCompact;
-      reconciler with/without pendings
-- [ ] Budgets asserted as gates in `joiny-mnemonic-benchmark`
-- [ ] Cold-feature invariant test (hook delivery imports no optional modules)
-- [ ] Stamped report checked into `benchmarks/results/`
+- [x] Timing benchmark shipped (`joiny-mnemonic-hook-timing`): all six
+      scenarios, two plugin modes. Measured 2026-07-15: capture ~20ms,
+      reducer p50 52ms (tail ~390ms), resume ~330ms, compact ~390ms,
+      reconciler 3-5ms — the M5/M6 hot-path work is vindicated by numbers;
+      warm plugins cost ~20ms at p95
+- [x] p95 budgets asserted as gates (`--assert-gates`)
+- [x] Cold-feature invariant test: capture-path hook delivery imports no
+      torch/sentence-transformers even with plugins installed
+- [x] Stamped report in `benchmarks/results/hook-timing-latest.json`
 
-Done when: a regression in hook latency fails `--assert-gates`.
+Done when: a regression in hook latency fails `--assert-gates`. ACHIEVED.
 
 ## 3. Autonomous state maintenance with auditable undo — task6B/6C
 

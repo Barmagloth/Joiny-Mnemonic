@@ -100,3 +100,23 @@ Runtime telemetry reports pending events, oldest pending age, failed events, ret
 success. Worker concurrency is bounded by configuration. At-least-once inference means a crash
 may repeat model execution; uniqueness plus the atomic success transaction provides exactly-once
 durable candidate/memory effects for an event and configuration hash.
+
+
+## Hook-path timing (task6A)
+
+`joiny-mnemonic-hook-timing` measures what a host pays per hook delivery,
+per scenario, in two modes (core only / installed plugins), and asserts
+loose p95 budgets as gates — order-of-magnitude tripwires against silent
+hot-path regressions, not micro-benchmarks:
+
+    joiny-mnemonic-hook-timing --project-root . --repetitions 30 --assert-gates
+
+Reference points (2026-07-15, development machine, warm process): capture
+~20ms p50; reducer path p50 ~52ms with a variance-prone tail (~390ms p95);
+resume injection ~330ms; compact path ~390ms; reconciler passes 3-5ms.
+Installed plugins (semantic + reranker) cost ~20ms extra at p95 on warm
+paths; the first semantic search of a process additionally pays one-time
+model load. The capture path is guarded by a cold-feature invariant test:
+hook delivery must never import heavyweight optional dependencies
+(torch/sentence-transformers stay lazy until a retrieval surface runs).
+The stamped report lands in `benchmarks/results/hook-timing-latest.json`.
