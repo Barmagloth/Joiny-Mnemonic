@@ -1,0 +1,122 @@
+{
+  "schema": "joiny-mnemonic-hook-timing-v1",
+  "repetitions": 30,
+  "budgets_ms": {
+    "capture_only": 250.0,
+    "capture_with_reducer": 1000.0,
+    "prompt_submit_resume": 1500.0,
+    "compact_path": 2000.0,
+    "reconcile_idle": 250.0,
+    "reconcile_pending": 500.0
+  },
+  "modes": {
+    "core_only": {
+      "sections": {
+        "capture_only": {
+          "p50_ms": 19.93,
+          "p95_ms": 20.801,
+          "max_ms": 29.49,
+          "samples": 30
+        },
+        "capture_with_reducer": {
+          "p50_ms": 52.871,
+          "p95_ms": 357.614,
+          "max_ms": 626.214,
+          "samples": 30
+        },
+        "prompt_submit_resume": {
+          "p50_ms": 323.232,
+          "p95_ms": 349.201,
+          "max_ms": 354.292,
+          "samples": 30
+        },
+        "compact_path": {
+          "p50_ms": 371.967,
+          "p95_ms": 387.196,
+          "max_ms": 393.279,
+          "samples": 30
+        },
+        "reconcile_idle": {
+          "p50_ms": 2.67,
+          "p95_ms": 3.08,
+          "max_ms": 3.795,
+          "samples": 30
+        },
+        "reconcile_pending": {
+          "p50_ms": 2.739,
+          "p95_ms": 3.151,
+          "max_ms": 3.86,
+          "samples": 30
+        }
+      },
+      "plugins": []
+    },
+    "installed_plugins": {
+      "sections": {
+        "capture_only": {
+          "p50_ms": 20.172,
+          "p95_ms": 21.639,
+          "max_ms": 29.99,
+          "samples": 30
+        },
+        "capture_with_reducer": {
+          "p50_ms": 47.981,
+          "p95_ms": 342.468,
+          "max_ms": 614.867,
+          "samples": 30
+        },
+        "prompt_submit_resume": {
+          "p50_ms": 313.724,
+          "p95_ms": 329.759,
+          "max_ms": 402.361,
+          "samples": 30
+        },
+        "compact_path": {
+          "p50_ms": 364.387,
+          "p95_ms": 383.19,
+          "max_ms": 386.781,
+          "samples": 30
+        },
+        "reconcile_idle": {
+          "p50_ms": 2.562,
+          "p95_ms": 3.02,
+          "max_ms": 3.4,
+          "samples": 30
+        },
+        "reconcile_pending": {
+          "p50_ms": 2.622,
+          "p95_ms": 2.736,
+          "max_ms": 3.737,
+          "samples": 30
+        }
+      },
+      "plugins": [
+        "local-sentence-transformers",
+        "local-cross-encoder"
+      ]
+    }
+  },
+  "gates": {
+    "capture_only_p95_under_250ms": true,
+    "capture_with_reducer_p95_under_1000ms": true,
+    "prompt_submit_resume_p95_under_1500ms": true,
+    "compact_path_p95_under_2000ms": true,
+    "reconcile_idle_p95_under_250ms": true,
+    "reconcile_pending_p95_under_500ms": true
+  },
+  "passed": true,
+  "provenance": {
+    "signing_version": "report-signing-v1",
+    "generated_at": "2026-07-15T08:30:13.442212+00:00",
+    "git_commit": "3561b8146f40f3bc5f0024500c1c1cee0a25b294",
+    "git_dirty": false,
+    "package_version": "0.8.0",
+    "schema_version": 8,
+    "temporal_projection_code_version": "temporal-core-v1",
+    "snapshot_replay_code_version": "snapshot-materializer-v2",
+    "python": "3.13.1",
+    "platform": "win32",
+    "artifact_sha256": {}
+  },
+  "report_sha256": "4d9dd5ad7f199f23eae3ee2a403df9c91896b51bdb170886dc63097084796250"
+}
