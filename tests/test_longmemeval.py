@@ -111,7 +111,10 @@ class LongMemEvalHarnessTest(unittest.TestCase):
             harness.run_question(item)
         report = harness.report()
         # q-1: retrieval must surface the SECRET token; q-2_abs: abstention.
-        self.assertEqual(report["overall"], {"total": 2, "correct": 2, "accuracy": 1.0})
+        self.assertEqual(
+            report["overall"],
+            {"total": 2, "correct": 2, "accuracy": 1.0, "ci95": 0.0},
+        )
         self.assertEqual(report["unparseable_judgments"], 0)
         abstention = next(
             record for record in harness.results

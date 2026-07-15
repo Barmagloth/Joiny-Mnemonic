@@ -331,11 +331,14 @@ limit 64.
 | multi-session | 85.7% |
 | temporal-reasoning | 84.2% |
 | single-session-preference | 60.0% |
-| **Overall** | **88.0%** (440/500) |
+| **Overall** | **88.0% ± 2.8** (440/500, 95% CI) |
 
 Abstention subset: 28/30. Retrieval recall of gold sessions: ~100% per
 type. Mean packet cost ~11.7k tokens per question against a ~165k-token
-haystack - a measured 92.9% token saving.
+haystack - a measured 92.9% token saving. Per-type intervals are wide for
+small types (preference: ±17.5pp at n=30) — read those rows accordingly.
+Dataset: the benchmark author's cleaned release
+(`xiaowu0162/longmemeval-cleaned`), SHA-256-pinned in the report.
 
 Read the number with its methodology caveats, which apply to most published
 LongMemEval results and are stated here explicitly:

@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import re
+import math
 import os
 import subprocess
 import time
@@ -162,6 +163,14 @@ def load_dataset(path: str | Path) -> list[LMEQuestion]:
             )
         )
     return items
+
+
+def _binomial_ci95(correct: int, total: int) -> float | None:
+    """Half-width of the 95% normal-approximation binomial CI."""
+    if not total:
+        return None
+    p = correct / total
+    return round(1.96 * math.sqrt(p * (1 - p) / total), 4)
 
 
 class SubprocessLLMRunner:
@@ -521,11 +530,20 @@ class LMEHarness:
                 "semantic_plugins": self.active_semantic_plugins,
                 "reranker_plugins": self.active_reranker_plugins,
                 "runner_command": list(self.runner.command),
+                # Model aliases ("sonnet") drift across releases; the env
+                # knobs that select them must live in the artifact
+                # (methodology review 2026-07-15, weakness 4).
+                "runner_env": {
+                    key: value
+                    for key, value in sorted(os.environ.items())
+                    if key.startswith("LME_")
+                },
             },
             "per_type": {
                 name: {
                     **counts,
                     "accuracy": round(counts["correct"] / counts["total"], 4),
+                    "ci95": _binomial_ci95(counts["correct"], counts["total"]),
                     **(
                         {
                             "retrieval_recall": round(
@@ -551,6 +569,7 @@ class LMEHarness:
                 "correct": overall_correct,
                 "accuracy": round(overall_correct / overall_total, 4)
                 if overall_total else 0.0,
+                "ci95": _binomial_ci95(overall_correct, overall_total),
             },
             "tokens": {
                 "context_sent_total": context_tokens,

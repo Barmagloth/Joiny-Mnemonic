@@ -212,6 +212,24 @@ schema versions, and SHA-256 of each backing artifact (per-question JSONL, datas
 The report `config` names the active semantic and reranker plugins — an environment-installed
 plugin silently changing the measured system would otherwise be invisible in the artifact.
 
+Methodology notes for the published LongMemEval-S figure (frozen 2026-07-15):
+
+- **Dataset**: `longmemeval_s_cleaned.json` from the benchmark author's own cleaned release
+  (HuggingFace `xiaowu0162/longmemeval-cleaned`), pinned by SHA-256 in every report.
+- **Frozen configuration**: 12288-token packets, retrieval limit 64, rank packing,
+  `semantic-local` + `reranker-local` plugins. Config selection used probes and sweeps over
+  subsets of the same 500 questions (no held-out split existed); the overfit check on the
+  final run shows no optimism: the 20 multi-session questions used for tuning scored 75.0%
+  vs 87.6% on the 113 untouched ones, and the 60 sweep questions scored 86.7% vs 88.2%
+  outside the sweep. Any future tuning must use an external held-out set (e.g.
+  LongMemEval-M) before touching this configuration.
+- **Uncertainty**: overall 88.0% ± 2.8pp (95% binomial CI); small types are wide —
+  preference ± 17.5pp at n=30. Reports now carry `ci95` per type. Judge sensitivity is
+  bounded by three-judge triangulation (87.6–89.0%).
+- **Model aliases**: `LME_*` environment knobs are recorded in the report config; note that
+  aliases like `sonnet` resolve at run time, so the run date in provenance is part of the
+  model identity.
+
 Honesty note: the harness ships tested against a deterministic stub runner; a real accuracy
 figure requires the published LongMemEval-S dataset and a real LLM runner. Until such a run is
 recorded in `benchmarks/results/`, retrieval-quality comparisons with benchmark-published

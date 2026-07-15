@@ -38,6 +38,14 @@ ANSWER_PREAMBLE = (
 )
 
 
+# Ablation mode (methodology weakness 2): a plain prompt with none of the
+# benchmark-tuned instructions, to measure what the prompt itself contributes.
+PLAIN_PREAMBLE = (
+    "You answer questions about a user's chat history using the "
+    "[MEMORY PACKET] below. Answer concisely. If the information is not "
+    "in the packet, say it is not available.\n\n"
+)
+
 DISTILL_PROMPT = (
     "Extract 2-5 comprehensive, self-contained narrative facts from this "
     "conversation session (recipe per Hindsight, Apache-2.0: each fact "
@@ -57,8 +65,11 @@ def build_prompt(payload: dict) -> str:
             date=payload.get("session_date", "unknown"),
             transcript=payload.get("transcript", ""),
         )
+    preamble = (
+        PLAIN_PREAMBLE if os.environ.get("LME_PLAIN_PROMPT") else ANSWER_PREAMBLE
+    )
     return (
-        ANSWER_PREAMBLE
+        preamble
         + f"Current date: {payload.get('question_date', 'unknown')}\n\n"
         + f"[MEMORY PACKET]\n{payload.get('context', '')}\n\n"
         + f"Question: {payload['question']}"
