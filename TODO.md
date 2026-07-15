@@ -47,9 +47,14 @@ preference questions into abstention.
       preference). Triangulation Sonnet/GPT-5.4/Opus = 88.0/87.6/89.0 —
       ±0.7pp; multi-session identical under all three judges; preference
       is the judge-sensitive type (60.0–76.7%)
-- [ ] Methodology hardening, remaining: small stratified repeat runs for
-      a variance band; manual audit of judge rationales on the combined
-      flip set
+- [x] Flip-set audit done (2026-07-15, benchmarks/results/flip-audit.md):
+      12 unique flips; against the 3-judge majority the published number is
+      slightly conservative (majority consensus 88.2%); one genuine
+      leniency instance found and documented; wrong-lead-right-string
+      archetype exists, adjudicated split; preference carries 7/12 flips;
+      zero multi-session flips under any judge
+- [ ] Methodology hardening, remaining: prompt ablation (running) and
+      small stratified repeat runs for a variance band
 
 Done when: (achieved for the headline; error-analysis items continue)
 
