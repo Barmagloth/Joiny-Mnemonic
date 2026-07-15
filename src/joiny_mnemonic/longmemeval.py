@@ -343,7 +343,9 @@ class LMEHarness:
                         memory_type="fact",
                         content=fact,
                         source_event_ids=tuple(event_ids),
-                        valid_from=date[:10] if date else None,
+                        # Dataset dates read "2023/05/20 (Sat) 02:21";
+                        # valid_from wants ISO dashes.
+                        valid_from=date[:10].replace("/", "-") if date else None,
                         metadata={"session_id": session["session_id"]},
                     )
         return count

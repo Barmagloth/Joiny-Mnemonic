@@ -37,7 +37,13 @@ preference questions into abstention.
       optimizes question-relevance while preference answers need breadth of
       taste evidence; and the temporal tail (84.2%)
 - [ ] A/B with LLM extraction (--ingest distill, facts alongside verbatim
-      through the derive path) — mechanism shipped, run pending
+      through the derive path) — mechanism shipped, run started 2026-07-15.
+      Decision rule against the triangulated band 88.0 ± 0.7: above →
+      distill shape earns default; inside → stays opt-in, question moves to
+      extractor quality (item 6); below → extraction destroys signal, fix
+      before task7. Note: the A/B distiller is the runner LLM, not the
+      shipped extractor plugin — it validates the *shape*, item 6 measures
+      the shipped extractor
 - [x] Cross-family re-judge done (2026-07-14, GPT-5.4 over all 500
       persisted answers, byte-pinned rows and dataset, verified by recount
       from raw batches, report signed): **87.6%** vs 88.0%, agreement
@@ -153,7 +159,10 @@ architecture docs.
 - [ ] Fresh-user walkthrough: clean project → setup → work session → marker →
       recall question → `memory_source` citation → task completes → closure
       happens by itself, notice visible, nothing to confirm. Every step
-      through shipped surfaces only
+      through shipped surfaces only. Timing note (2026-07-15): run this
+      after the resume-packet surface stabilizes — task6C just changed the
+      maintenance lines (bounded candidate index), measuring the walkthrough
+      against a moving packet wastes the friction log
 - [ ] Friction log from that walkthrough becomes the next UX batch
 
 Done when: the walkthrough succeeds on a machine that never saw the repo,
@@ -167,6 +176,12 @@ small eval: markers and automatic extraction against a fixture corpus with
 known expected candidates — precision/recall per marker type, quarantine
 behavior on the fuzzy tail. No LLM in the loop; the corpus is hand-labeled
 once.
+
+Ordering (2026-07-15): sequenced AFTER the distill A/B in item 1 — the A/B
+answers whether the distilled-facts shape pays at all (with a strong LLM
+distiller as the ceiling); if it does, this corpus gets a concrete target
+("close the gap to the A/B distiller"), if it does not, component tuning
+is premature.
 
 - [ ] Fixture corpus + expected-candidate labels
 - [ ] Extraction eval runner + signed report
