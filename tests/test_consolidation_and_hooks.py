@@ -84,11 +84,11 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         report = evaluate_policies(
             self.service,
             [task],
-            policies=[FullHistoryPolicy(), ResumePolicy(700)],
+            policies=[FullHistoryPolicy(), ResumePolicy(768)],
         )
         rows = {row["policy"]: row for row in report["results"]}
         self.assertEqual(rows["full-history"]["quality"], 1.0)
-        self.assertEqual(rows["resume-700"]["quality_vs_full_history"], 0.0)
+        self.assertEqual(rows["resume-768"]["quality_vs_full_history"], 0.0)
         hits = self.service.search(query="ORBITAL741", include_events=True, semantic=False)
         self.assertIn(source.id, {hit.id for hit in hits})
 
@@ -104,10 +104,10 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         promoted = evaluate_policies(
             self.service,
             [task],
-            policies=[FullHistoryPolicy(), ResumePolicy(700)],
+            policies=[FullHistoryPolicy(), ResumePolicy(768)],
         )
         promoted_rows = {row["policy"]: row for row in promoted["results"]}
-        self.assertEqual(promoted_rows["resume-700"]["quality_vs_full_history"], 1.0)
+        self.assertEqual(promoted_rows["resume-768"]["quality_vs_full_history"], 1.0)
 
     def test_compaction_is_extractive_and_provenance_bound(self) -> None:
         events = [

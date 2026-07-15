@@ -52,3 +52,4 @@ release blocker or a documented known-issue with a TODO reference.
 | Date | Release | Host | Result | Notes |
 |---|---|---|---|---|
 | 2026-07-14 | post-task5 (59fb5bb..e524616) | claude-code | PASS | FTS signal rebuild transparent; reconciler detected historical delme2 completion; verb-flip observed in nested paraphrase (see TODO#4) |
+| 2026-07-15 | post-task6A + neutral wording (e66ea7f+) | claude-code | PASS (steps 2-4) | authority probe: packet treated as neutral local data, cross-validated against host auto-memory, no-execute rule complied with verbatim; verb quoted correctly («создать») — verb-flip gone after UTF-8 stdout fix; residual skepticism toward the prefer-on-conflict clause noted (task7 target) |

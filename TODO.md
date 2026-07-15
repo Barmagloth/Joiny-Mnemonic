@@ -126,10 +126,13 @@ One-off passes rot. This should be a checklist (or script) run per release.
       silence)
 - [ ] Checklist written down (docs/host-e2e.md) so any release can be
       re-verified in ~15 minutes
-- [ ] Live finding tracked: verb-flip reproduced 2026-07-14 ("создать" in the
-      block, "удалить" in a nested session's paraphrase) — the durable fix is
-      autonomous closure (item 3) removing stale entries by itself, not more
-      prompt armor and not user vigilance
+- [x] Verb-flip RE-ATTRIBUTED (2026-07-15): a real transport bug was found —
+      hook stdout used the console codepage while the host reads UTF-8, so
+      injected Cyrillic could arrive garbled; after the UTF-8 fix plus the
+      neutral packet wording, the nested probe quotes «создать» exactly.
+      Confabulation claim downgraded to "likely encoding corruption"
+      (two variables changed together; recurrence would reopen). Autonomous
+      closure (item 3) remains the durable fix for stale entries as such
 
 Done when: both hosts pass the same written checklist on the current release.
 

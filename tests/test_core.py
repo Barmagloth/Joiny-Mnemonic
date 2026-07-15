@@ -327,9 +327,13 @@ class ServiceCase(unittest.TestCase):
         second = self.service.store.set_active_block("instructions", "Always run all integrity tests.")
         self.assertEqual(second.version, 2)
         self.assertEqual(second.supersedes_id, first.id)
-        packet = self.service.prompts.assemble(token_budget=180, recent_event_count=0)
+        # 240 guards the packet's fixed framing overhead (~222 tokens for a
+        # minimal packet after the 2026-07-15 neutral wording + restatement
+        # skip). Growth past 240 means the frame got fatter - trim it,
+        # don't bump this guard.
+        packet = self.service.prompts.assemble(token_budget=240, recent_event_count=0)
         self.assertIn("Always run all integrity tests.", packet.text)
-        self.assertLessEqual(packet.estimated_tokens, 180)
+        self.assertLessEqual(packet.estimated_tokens, 240)
         with self.assertRaises(BudgetExceededError):
             self.service.prompts.assemble(token_budget=3)
         with self.assertRaises(ValueError):

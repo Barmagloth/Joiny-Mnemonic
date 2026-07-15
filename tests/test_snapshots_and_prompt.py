@@ -262,7 +262,7 @@ class SnapshotAndPromptTest(unittest.TestCase):
         )
         packet = self.service.resume(token_budget=1500)
         text = packet.text
-        self.assertIn("ACTIVE MEMORY is correct", text)
+        self.assertIn("prefer ACTIVE MEMORY as the better-preserved record", text)
         restated = text.rindex("[ACTIVE MEMORY RESTATED")
         self.assertGreater(restated, text.index("[RECENT TRANSCRIPT"))
         self.assertIn("создать файл delme2.md", text[restated:])
