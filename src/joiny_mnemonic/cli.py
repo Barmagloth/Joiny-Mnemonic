@@ -293,6 +293,10 @@ def build_parser() -> argparse.ArgumentParser:
         "undo", help="lossless revert of an applied closure"
     )
     candidates_undo.add_argument("candidate_id")
+    candidates_undo.add_argument(
+        "--reason", default="operator undo",
+        help="operator reason recorded in the settlement request",
+    )
     candidates_undo.add_argument("--branch", default="main")
 
     stale = commands.add_parser("stale")
@@ -727,8 +731,12 @@ def run(args: argparse.Namespace) -> int:
                 )
             elif args.candidates_command == "undo":
                 _print(
-                    service.reconciler.undo_closure(
-                        args.candidate_id, branch_id=args.branch
+                    service.settlement.settle(
+                        args.candidate_id,
+                        "reverted",
+                        reason=args.reason,
+                        requested_by="operator",
+                        branch_id=args.branch,
                     )
                 )
         elif args.command == "stale":

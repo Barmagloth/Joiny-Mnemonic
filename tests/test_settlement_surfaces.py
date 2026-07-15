@@ -405,6 +405,26 @@ class SurfaceRoundTripCase(_SettlementFixture):
             self.assertEqual(
                 check.settlement.show(candidate_id)["status"], "applied"
             )
+        undone = self._run_cli(
+            database, "candidates", "undo", candidate_id,
+            "--reason", "operator verified closure was wrong",
+        )
+        self.assertEqual(undone["transition"], "reverted")
+        self.assertFalse(undone["already_settled"])
+
+        with MemoryService(database, project_root=RUNTIME_ROOT) as check:
+            shown_after_undo = check.settlement.show(candidate_id)
+            self.assertEqual(shown_after_undo["status"], "reverted")
+            last = shown_after_undo["transitions"][-1]
+            self.assertEqual(last["actor"], "operator")
+            request = check.store.get_event(last["source_event_id"])
+            self.assertEqual(request.payload["operation"], "settlement_requested")
+            self.assertEqual(
+                request.payload["reason"], "operator verified closure was wrong"
+            )
+            self.assertIn(
+                "make lint", check.store.get_active_blocks()["open_tasks"].content
+            )
 
     def _handshake(self, service: MemoryService) -> MCPServer:
         server = MCPServer(service)

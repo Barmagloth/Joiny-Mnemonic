@@ -108,9 +108,9 @@ have closed itself.
 - [x] Consume-once settlement transitions, fail-closed policy, first-class
       `undo`; a reverted/contested closure never re-applies from the same
       evidence (`tests/test_settlement.py`)
-- [ ] 6C: `candidates show/settle` + MCP `memory_candidates` /
+- [x] 6C: `candidates show/settle` + MCP `memory_candidates` /
       `memory_settle_candidate` with trusted-origin checks for manual actors
-      (interim `candidates list/undo` CLI shipped with 6B)
+      (`tests/test_settlement_surfaces.py`)
 - [ ] Acceptance on a live host: a fresh GPTShared-style scenario closes the
       task with zero user actions; re-adding the marker contests it with
       zero user actions; `undo` restores the entry losslessly (unit-level

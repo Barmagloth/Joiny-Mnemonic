@@ -68,6 +68,11 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
   - Тесты: tests/test_settlement_surfaces.py (16). Docs обновлены:
     architecture.md (Settlement surfaces), security.md (Manual settlement
     surfaces), requirements-traceability.md (6C-таблица).
+  - Пост-фикс (нашёл пользователь): `candidates undo` обходил
+    SettlementSurface (revert шёл actor=system без settlement_requested);
+    теперь undo = settle(reverted, operator), `--reason` с дефолтом
+    «operator undo» — рекламируемая в systemMessage/дайджесте команда
+    без аргументов по-прежнему валидна. Regression в CLI round-trip.
 
 ### Состояние инсталляций
 
@@ -106,11 +111,15 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
 - Inline `python -c` с фигурными скобками/пайпами PS манглит — писать
   скрипты в scratchpad или bash heredoc. Кириллица в cmd `>`-redirect
   ломается — пинить `PYTHONIOENCODING=utf-8`.
-- Тесты: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/r/Projects/Joiny-Mnemonic/src
-  python -m unittest discover -s tests` (bash; ~9 мин, 265 тестов).
+- Тесты: `HF_HUB_OFFLINE=1 PYTHONDONTWRITEBYTECODE=1
+  PYTHONPATH=/r/Projects/Joiny-Mnemonic/src python -m unittest discover -s
+  tests` (bash; ~9 мин, 265 тестов).
   **PYTHONPATH только абсолютный**: относительный `src` утекает в
   git-hook-сабпроцесс test_precheck (cwd = temp-репо) и роняет его
-  «No module named joiny_mnemonic».
+  «No module named joiny_mnemonic». **HF_HUB_OFFLINE=1 обязателен при
+  флаky-сети**: без него semantic plugin делает HEAD-ретраи к HuggingFace
+  (settlement-пара: 43s offline vs ~587s с ретраями). Отдельный долг:
+  изоляция тестов от installed plugins/сети.
 - Тайминги: `python -m joiny_mnemonic.hook_timing --assert-gates`
   (обновляет benchmarks/results/hook-timing-latest.json — коммитить).
 - Коммиты: английский текст, футер
