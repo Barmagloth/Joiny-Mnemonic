@@ -12,7 +12,7 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
 никогда не канал команд; действия идут через детерминированную машинерию
 (reconciler, settlement), не через послушание агента.
 
-## Где мы (последний коммит: a043226)
+## Где мы (последний коммит: см. git log — task6C доставлен)
 
 ### Закрытые вехи
 
@@ -45,6 +45,29 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
   - 249/249 тестов, все 10 timing-гейтов зелёные (reconcile p95 ≤ 8ms).
   - **Живой acceptance пройден:** delme2 на GPTShared закрылся сам
     (cand_39db443d…, task_closure:strong, applied).
+- **task6C: settlement-поверхности — доставлен.**
+  - Новый модуль `settlement.py` (`SettlementSurface`): show/settle поверх
+    ledger 6B; per-kind семантика реиспользует 6B-машинерию
+    (`apply_closure_candidate`, `undo_closure`; block_change apply/revert
+    через `set_active_block` + consolidator merge).
+  - CLI: `candidates show <id>`, `candidates settle <id> --transition
+    applied|contested|reverted --reason …` (reason обязателен).
+  - MCP: `memory_candidates` (read, list или detail с историей переходов),
+    `memory_settle_candidate` (write) — через реальный handshake.
+  - Trust-hardening в `storage.settle_candidate`: non-system актор требует
+    derived origin из `_SETTLEMENT_TRUSTED_ORIGINS`; `local_operator` /
+    `delegated_agent` деривируются ТОЛЬКО из internal
+    `settlement_requested`-событий (public/MCP текст не может их
+    сминтить). Агентский settle — только при
+    `agent_settlement_delegation_enabled` в policy ledger (по умолчанию
+    OFF; параметр `initialize_project`). Транзишен пишет derived origin.
+  - Resume: `[PENDING CONFIRMATIONS]` стал bounded-индексом всех активных
+    кандидатов (cap 5 + overflow; для не-closure kinds — index-only,
+    контент НЕ инжектится, A4); исчезает после settle. Digest AUTO-CLOSED
+    фильтрует actor==system — ручные закрытия не рекламируются.
+  - Тесты: tests/test_settlement_surfaces.py (16). Docs обновлены:
+    architecture.md (Settlement surfaces), security.md (Manual settlement
+    surfaces), requirements-traceability.md (6C-таблица).
 
 ### Состояние инсталляций
 
@@ -56,20 +79,15 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
 
 ## Очередь (в порядке приоритета)
 
-1. **task6C — settlement-поверхности** (спека в task6.md): CLI
-   `candidates show <id>` + `candidates settle <id> --transition --reason`;
-   MCP `memory_candidates` (read) + `memory_settle_candidate` (write) через
-   реальный server handshake; trust-hardening для ручных акторов — manual
-   settle/undo только от trusted origins (local operator CLI,
-   host-verified user event, policy-делегация); untrusted public-API текст
-   не может ничего settle (H1-дисциплина). Resume: обобщённая bounded
-   index-строка для активных кандидатов, исчезает после settle.
-2. **Packet assembly 354ms** — 92% resume-пути (отчёт 6A).
-3. **Distill A/B**: `--ingest distill` vs raw; baseline для битья 88.0 ± 0.7.
-4. Разбор ошибок: preference (60%) и temporal-хвост (84.2%).
-5. Storage split: candidate/finding/extraction секции из ~4.4k-строчного
+1. **Packet assembly 354ms** — 92% resume-пути (отчёт 6A).
+2. **Distill A/B**: `--ingest distill` vs raw; baseline для битья 88.0 ± 0.7.
+3. Разбор ошибок: preference (60%) и temporal-хвост (84.2%).
+4. Storage split: candidate/finding/extraction секции из ~4.7k-строчного
    storage.py в фокусные модули (остаток 6A, zero behavior change).
-6. Extraction eval corpus (TODO#6); task7 (native memory channels).
+5. Extraction eval corpus (TODO#6); task7 (native memory channels).
+6. Включение agent_settlement_delegation_enabled на существующем сторе:
+   пока только bootstrap-параметр; путь request→trusted activation есть
+   (policy request + activate_policy), удобной CLI-обёртки нет.
 
 ## Заблокировано на пользователе
 
@@ -88,8 +106,11 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
 - Inline `python -c` с фигурными скобками/пайпами PS манглит — писать
   скрипты в scratchpad или bash heredoc. Кириллица в cmd `>`-redirect
   ломается — пинить `PYTHONIOENCODING=utf-8`.
-- Тесты: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python -m unittest
-  discover -s tests` (bash-синтаксис; ~9 мин, 249 тестов).
+- Тесты: `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/r/Projects/Joiny-Mnemonic/src
+  python -m unittest discover -s tests` (bash; ~9 мин, 265 тестов).
+  **PYTHONPATH только абсолютный**: относительный `src` утекает в
+  git-hook-сабпроцесс test_precheck (cwd = temp-репо) и роняет его
+  «No module named joiny_mnemonic».
 - Тайминги: `python -m joiny_mnemonic.hook_timing --assert-gates`
   (обновляет benchmarks/results/hook-timing-latest.json — коммитить).
 - Коммиты: английский текст, футер

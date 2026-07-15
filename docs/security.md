@@ -152,7 +152,27 @@ same evidence (no flapping). The system also reconciles in reverse: a user
 marker re-adding a closed entry contests the closure, and an applied
 closure whose evidence file disappears inside the hygiene window
 auto-reverts (`closure_evidence_invalidated`). Untrusted public-API text
-can never settle anything — the same H1 discipline as completion evidence;
-manual settlement surfaces arrive in 6C with trusted-origin checks. Every
-applied/reverted receipt records `enforcement_level: recorded_only`:
+can never settle anything — the same H1 discipline as completion evidence.
+Every applied/reverted receipt records `enforcement_level: recorded_only`:
 settlement is audit evidence, never a claim of OS enforcement.
+
+### Manual settlement surfaces (task6C)
+
+Manual settlement (`candidates show/settle` on the CLI, `memory_candidates`
++ `memory_settle_candidate` over MCP) is trust-hardened at the storage
+layer, not at the surface: `settle_candidate` for any non-`system` actor
+derives the origin of the cited source event from immutable canonical
+provenance and fails closed unless it is trusted. The accepted origins are
+the local operator CLI (`local_operator`), a host-verified user event
+(`host_logical_user` and the other established trusted origins), or a
+policy-delegated agent (`delegated_agent`, valid only while the active
+policy ledger sets `agent_settlement_delegation_enabled`, which is OFF by
+default). The `local_operator`/`delegated_agent` origins derive exclusively
+from internal `settlement_requested` events, which no public-API, HTTP or
+MCP text can mint — surfaces hardcode the origin channel and
+`service.append_event` strips caller-supplied origin fields. Every manual
+settlement cites one canonical `settlement_requested` event carrying the
+requestor, the transition and a mandatory reason, so the ledger records the
+full round trip. The resume packet surfaces active candidates only as a
+bounded index line; full candidate content is quoted through tools, never
+injected (A4 citation-over-recall).

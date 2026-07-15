@@ -4215,6 +4215,14 @@ class MemoryStore:
         "reverted": set(),
         "contested": set(),
     }
+    # task6.md 6C trust hardening: non-system settlement requires the cited
+    # source event to carry one of these derived origins. "local_operator"
+    # and "delegated_agent" derive only from internal settlement_requested
+    # events, which no public-API or MCP text can mint (H1 discipline).
+    _SETTLEMENT_TRUSTED_ORIGINS = {
+        "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
+        "external_trusted_ui", "local_operator",
+    }
 
     @integrity_checked
     def create_settlement_candidate(
@@ -4299,8 +4307,10 @@ class MemoryStore:
         rule_id: str,
     ) -> str | None:
         """Consume-once settlement transition. Idempotent on repeats (returns
-        None), fail-closed on conflicts (ValueError). Manual trust hardening
-        for non-system actors arrives with the 6C surfaces."""
+        None), fail-closed on conflicts (ValueError). Non-system actors are
+        trust-hardened (task6.md 6C): the cited source event must derive a
+        trusted origin, and a delegated agent additionally needs the active
+        policy to enable agent settlement."""
         if to_status not in self._SETTLEMENT_STATUSES:
             raise ValueError(f"unsupported settlement status: {to_status}")
         with self._transaction() as conn:
@@ -4314,6 +4324,38 @@ class MemoryStore:
                 raise ValueError(
                     "extraction candidates settle through transition_candidate"
                 )
+            recorded_origin = "internal"
+            if actor != "system":
+                source_row = conn.execute(
+                    "SELECT * FROM events WHERE id=?", (source_event_id,)
+                ).fetchone()
+                if source_row is None:
+                    raise KeyError(f"unknown source event: {source_event_id}")
+                derived_origin = self._event_origin_evidence(source_row)
+                recorded_origin = derived_origin
+                if derived_origin == "delegated_agent":
+                    policy_row = conn.execute(
+                        "SELECT policy_json FROM policy_ledger "
+                        "ORDER BY version DESC LIMIT 1"
+                    ).fetchone()
+                    delegated = bool(
+                        policy_row is not None
+                        and json.loads(policy_row["policy_json"]).get(
+                            "agent_settlement_delegation_enabled", False
+                        )
+                    )
+                    if not delegated:
+                        raise PermissionError(
+                            "agent settlement requires explicit policy delegation "
+                            "(agent_settlement_delegation_enabled); use the local "
+                            "operator CLI or ask the user"
+                        )
+                elif derived_origin not in self._SETTLEMENT_TRUSTED_ORIGINS:
+                    raise PermissionError(
+                        "manual settlement requires a trusted origin "
+                        "(local operator CLI, host-verified user event, or "
+                        "policy-delegated agent)"
+                    )
             current = self._candidate_status_locked(conn, candidate_id) or "pending"
             if current == to_status:
                 return None  # idempotent repeat
@@ -4330,7 +4372,7 @@ class MemoryStore:
                 "VALUES(?,?,?,?,?,?,?,?,NULL,NULL,NULL,?)",
                 (
                     transition_id, candidate_id, current, to_status,
-                    source_event_id, actor, rule_id, "internal", _now(),
+                    source_event_id, actor, rule_id, recorded_origin, _now(),
                 ),
             )
         return transition_id
@@ -4363,6 +4405,35 @@ class MemoryStore:
                 continue
             results.append(item)
         return results
+
+    @integrity_checked
+    def get_settlement_candidate(self, candidate_id: str) -> dict[str, Any]:
+        """One candidate plus its full transition history — the audit view
+        behind `candidates show` and the MCP read tool (task6.md 6C)."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT c.*, r.event_id AS source_event_id "
+                "FROM extraction_candidates c "
+                "JOIN extraction_runs r ON r.id = c.run_id "
+                "WHERE c.id=? AND c.candidate_kind != 'extraction'",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown settlement candidate: {candidate_id}")
+            transition_rows = self._conn.execute(
+                "SELECT * FROM candidate_transitions WHERE candidate_id=? "
+                "ORDER BY rowid",
+                (candidate_id,),
+            ).fetchall()
+        candidate = {key: row[key] for key in row.keys()}
+        transitions = [
+            {key: item[key] for key in item.keys()} for item in transition_rows
+        ]
+        candidate["status"] = (
+            transitions[-1]["to_status"] if transitions else "pending"
+        )
+        candidate["transitions"] = transitions
+        return candidate
 
     @integrity_checked
     def recent_settlement_transitions(

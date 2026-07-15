@@ -269,12 +269,26 @@ def build_parser() -> argparse.ArgumentParser:
     reduction_report.add_argument("--branch", default="main")
 
     candidates = commands.add_parser(
-        "candidates", help="settlement candidates (task6B; full surfaces in 6C)"
+        "candidates", help="settlement candidates (task6.md 6B/6C)"
     )
     candidates_commands = candidates.add_subparsers(dest="candidates_command", required=True)
     candidates_list = candidates_commands.add_parser("list")
     candidates_list.add_argument("--kind", default=None)
     candidates_list.add_argument("--status", default=None)
+    candidates_show = candidates_commands.add_parser(
+        "show", help="one candidate with its full transition history"
+    )
+    candidates_show.add_argument("candidate_id")
+    candidates_settle = candidates_commands.add_parser(
+        "settle", help="settle one candidate as the local operator (audited)"
+    )
+    candidates_settle.add_argument("candidate_id")
+    candidates_settle.add_argument(
+        "--transition", required=True,
+        choices=["applied", "contested", "reverted"],
+    )
+    candidates_settle.add_argument("--reason", required=True)
+    candidates_settle.add_argument("--branch", default="main")
     candidates_undo = candidates_commands.add_parser(
         "undo", help="lossless revert of an applied closure"
     )
@@ -697,6 +711,18 @@ def run(args: argparse.Namespace) -> int:
                 _print(
                     service.store.list_settlement_candidates(
                         kind=args.kind, status=args.status
+                    )
+                )
+            elif args.candidates_command == "show":
+                _print(service.settlement.show(args.candidate_id))
+            elif args.candidates_command == "settle":
+                _print(
+                    service.settlement.settle(
+                        args.candidate_id,
+                        args.transition,
+                        reason=args.reason,
+                        requested_by="operator",
+                        branch_id=args.branch,
                     )
                 )
             elif args.candidates_command == "undo":

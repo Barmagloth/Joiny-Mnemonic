@@ -168,3 +168,14 @@ joiny-mnemonic verify
 | Evidence invalidation auto-reverts inside project root | `invalidated_closures` sweep in `reconcile()` (write path); `hygiene_findings` reports read-only | `test_missing_evidence_file_auto_reverts_inside_project_root` |
 | Human-visible notification | hook `systemMessage` on claude-code with ready undo command; resume `[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` digest; capability reports channel | `test_hook_delivery_surfaces_auto_closure_as_system_message`, `test_resume_packet_reports_recent_auto_closures_with_undo` |
 | No OS-enforcement claims | `enforcement_level: recorded_only` in applied/reverted receipts and capabilities | receipt payload asserts in settlement tests |
+
+## Settlement surfaces (task6.md, 6C)
+
+| Requirement | Implementation | Verification |
+|---|---|---|
+| CLI round-trip list/show/settle | `candidates show/settle` (cli.py) → `SettlementSurface` (settlement.py); `show` returns full transition history | `test_cli_list_show_settle_round_trip`, `test_show_returns_candidate_with_transition_history` |
+| MCP read + explicit write through the real handshake | `memory_candidates`, `memory_settle_candidate` (mcp.py); descriptions state audit/policy gating, never OS isolation | `test_mcp_read_and_gated_write_through_real_handshake`, `test_mcp_write_settles_once_policy_delegates` |
+| Manual settle/undo only from trusted origins | `settle_candidate` hardening: non-`system` actors require derived origin in `_SETTLEMENT_TRUSTED_ORIGINS` or policy-delegated agent; `local_operator`/`delegated_agent` derive only from internal `settlement_requested` events | `test_public_api_event_cannot_anchor_a_settlement`, `test_host_verified_user_event_is_a_trusted_origin` |
+| Agent settlement off by default, policy-delegated | `agent_settlement_delegation_enabled` in the policy ledger (bootstrap default false); checked in `SettlementSurface.settle` and again inside `settle_candidate` | `test_agent_settlement_requires_policy_delegation`, `test_delegated_agent_settles_with_recorded_provenance` |
+| Manual apply/revert reuse 6B write paths and cite the candidate | `apply_closure_candidate` (reconciler), `undo_closure` with operator actor; `block_change` applied/reverted via `set_active_block` citing request + applied events | `test_operator_applies_pending_closure`, `test_operator_contests_and_reverts`, `test_block_change_round_trip` |
+| Resume shows a bounded index; content never injected; clears on settle | generalized `[STATE MAINTENANCE - PENDING CONFIRMATIONS]` (cap 5 + overflow, index-only lines for non-closure kinds) | `ResumeIndexCase` (3 tests) |

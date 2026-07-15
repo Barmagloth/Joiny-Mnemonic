@@ -324,6 +324,8 @@ class StateReconciler:
         detection_event: Event,
         branch_id: str,
         rule_id: str,
+        actor: str = "system",
+        settle_source_event_id: str | None = None,
     ) -> bool:
         block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
         if block is None:
@@ -386,14 +388,44 @@ class StateReconciler:
                 )
         self.store.settle_candidate(
             candidate_id, "applied",
-            source_event_id=applied_events[0].id,
-            actor="system", rule_id=rule_id,
+            source_event_id=settle_source_event_id or applied_events[0].id,
+            actor=actor, rule_id=rule_id,
         )
         return True
+
+    def apply_closure_candidate(
+        self, candidate: dict[str, Any], *, branch_id: str = "main",
+        actor: str, rule_id: str, settle_source_event_id: str,
+    ) -> bool:
+        """Manual apply of a pending task_closure candidate (task6.md 6C):
+        reconstruct the detection from its canonical event and write through
+        the same closure path as auto-apply."""
+        detection_event = self.store.get_event(str(candidate["source_event_id"]))
+        payload = detection_event.payload
+        detection = CompletionDetection(
+            entry=str(payload.get("entry") or candidate["normalized_content"]),
+            anchor_event_id=payload.get("anchor_event_id"),
+            evidence_event_id=str(
+                payload.get("evidence_event_id") or candidate["evidence_quote"]
+            ),
+            evidence_kind=str(payload.get("evidence_kind", "")),
+            evidence_detail=str(payload.get("evidence_detail", "")),
+        )
+        return self._apply_closure(
+            detection,
+            payload.get("task_memory_id"),
+            str(candidate["id"]),
+            detection_event=detection_event,
+            branch_id=branch_id,
+            rule_id=rule_id,
+            actor=actor,
+            settle_source_event_id=settle_source_event_id,
+        )
 
     def undo_closure(
         self, candidate_id: str, *, branch_id: str = "main",
         rule_id: str = "operator_undo", detail: dict[str, Any] | None = None,
+        actor: str = "system", settle_source_event_id: str | None = None,
     ) -> dict[str, Any]:
         """Lossless revert of an applied closure: the entry line returns to
         open_tasks, the task memory gets a superseding 'reopened' version,
@@ -429,8 +461,8 @@ class StateReconciler:
         )
         transition = self.store.settle_candidate(
             candidate_id, "reverted",
-            source_event_id=revert_events[0].id,
-            actor="system", rule_id=rule_id,
+            source_event_id=settle_source_event_id or revert_events[0].id,
+            actor=actor, rule_id=rule_id,
         )
         block = self.store.get_active_blocks(branch_id=branch_id).get("open_tasks")
         lines = block.content.splitlines() if block else []

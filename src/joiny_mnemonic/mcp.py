@@ -275,6 +275,45 @@ TOOLS: tuple[dict[str, Any], ...] = (
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
     },
     {
+        "name": "memory_candidates",
+        "description": (
+            "List settlement candidates (task_closure, block_change) with status and "
+            "provenance, or pass candidate_id for one candidate's full transition history."
+        ),
+        "inputSchema": _schema(
+            {
+                "kind": {"type": ["string", "null"]},
+                "status": {"type": ["string", "null"]},
+                "candidate_id": {"type": ["string", "null"]},
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
+        "name": "memory_settle_candidate",
+        "description": (
+            "Explicitly settle one candidate (applied, contested, or reverted) citing a "
+            "reason. Settlement is auditable, provenance-bound and gated by policy: it "
+            "requires the policy ledger to delegate settlement to the agent "
+            "(agent_settlement_delegation_enabled); otherwise only the local operator CLI "
+            "can settle. Records recorded_only enforcement — an audit trail, never OS "
+            "isolation."
+        ),
+        "inputSchema": _schema(
+            {
+                "candidate_id": {"type": "string"},
+                "transition": {
+                    "type": "string",
+                    "enum": ["applied", "contested", "reverted"],
+                },
+                "reason": {"type": "string"},
+                "branch_id": {"type": "string", "default": "main"},
+            },
+            ["candidate_id", "transition", "reason"],
+        ),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
         "name": "memory_capabilities",
         "description": "Inspect core/plugins plus detected hook configuration and runtime activity.",
         "inputSchema": _schema({"agent": {"type": ["string", "null"]}}),
@@ -494,6 +533,21 @@ class MCPServer:
             return self.service.extraction.process_backlog(**arguments)
         if name == "memory_candidate_request":
             return self.service.request_candidate_transition(**arguments)
+        if name == "memory_candidates":
+            candidate_id = arguments.get("candidate_id")
+            if candidate_id is not None:
+                return self.service.settlement.show(candidate_id)
+            return self.service.store.list_settlement_candidates(
+                kind=arguments.get("kind"), status=arguments.get("status")
+            )
+        if name == "memory_settle_candidate":
+            return self.service.settlement.settle(
+                arguments["candidate_id"],
+                arguments["transition"],
+                reason=arguments["reason"],
+                requested_by="agent",
+                branch_id=arguments.get("branch_id", "main"),
+            )
         if name == "memory_capabilities":
             return self.service.capabilities(arguments.get("agent"))
         if name == "memory_output_views":

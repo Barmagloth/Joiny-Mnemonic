@@ -29,240 +29,173 @@
           "sections": {
             "capture_only": {
               "total": {
-                "p50_ms": 25.422,
-                "p95_ms": 28.284,
-                "p99_ms": 32.21,
-                "max_ms": 34.485,
+                "p50_ms": 26.72,
+                "p95_ms": 32.819,
+                "p99_ms": 35.804,
+                "max_ms": 36.236,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 1.059,
-                  "p95_ms": 1.273,
-                  "p99_ms": 1.424,
-                  "max_ms": 1.533,
+                  "p50_ms": 1.057,
+                  "p95_ms": 1.28,
+                  "p99_ms": 1.373,
+                  "max_ms": 1.374,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.391,
-                  "p95_ms": 1.6,
-                  "p99_ms": 6.359,
-                  "max_ms": 10.766,
+                  "p50_ms": 1.36,
+                  "p95_ms": 1.572,
+                  "p99_ms": 1.623,
+                  "max_ms": 1.64,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 20.14,
-                  "p95_ms": 22.071,
-                  "p99_ms": 23.619,
-                  "max_ms": 23.811,
+                  "p50_ms": 21.538,
+                  "p95_ms": 27.796,
+                  "p99_ms": 30.796,
+                  "max_ms": 31.362,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 0.841,
-                  "p95_ms": 1.126,
-                  "p99_ms": 1.177,
-                  "max_ms": 1.186,
+                  "p50_ms": 0.792,
+                  "p95_ms": 1.065,
+                  "p99_ms": 1.169,
+                  "max_ms": 1.24,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 0.692,
-                  "p95_ms": 0.896,
-                  "p99_ms": 2.017,
-                  "max_ms": 3.043,
+                  "p50_ms": 0.716,
+                  "p95_ms": 0.845,
+                  "p99_ms": 1.769,
+                  "max_ms": 2.64,
                   "samples": 50
                 },
                 "session_resolution": {
                   "p50_ms": 0.061,
-                  "p95_ms": 0.094,
-                  "p99_ms": 0.111,
-                  "max_ms": 0.113,
+                  "p95_ms": 0.12,
+                  "p99_ms": 0.187,
+                  "max_ms": 0.2,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 0.98,
-                  "p95_ms": 1.375,
-                  "p99_ms": 1.461,
-                  "max_ms": 1.508,
+                  "p50_ms": 0.988,
+                  "p95_ms": 1.209,
+                  "p99_ms": 1.357,
+                  "max_ms": 1.436,
                   "samples": 50
                 }
               }
             },
             "capture_with_reducer": {
               "total": {
-                "p50_ms": 63.298,
-                "p95_ms": 417.962,
-                "p99_ms": 552.697,
-                "max_ms": 656.072,
+                "p50_ms": 62.754,
+                "p95_ms": 398.713,
+                "p99_ms": 526.129,
+                "max_ms": 633.723,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 14.526,
-                  "p95_ms": 19.045,
-                  "p99_ms": 21.429,
-                  "max_ms": 22.814,
+                  "p50_ms": 14.012,
+                  "p95_ms": 18.718,
+                  "p99_ms": 23.852,
+                  "max_ms": 24.018,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.417,
-                  "p95_ms": 1.751,
-                  "p99_ms": 1.883,
-                  "max_ms": 1.993,
+                  "p50_ms": 1.373,
+                  "p95_ms": 1.507,
+                  "p99_ms": 1.647,
+                  "max_ms": 1.708,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 24.744,
-                  "p95_ms": 340.952,
-                  "p99_ms": 377.152,
-                  "max_ms": 387.629,
+                  "p50_ms": 25.39,
+                  "p95_ms": 331.982,
+                  "p99_ms": 368.654,
+                  "max_ms": 375.05,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 321.305,
-                  "p95_ms": 349.762,
-                  "p99_ms": 353.507,
-                  "max_ms": 354.443,
+                  "p50_ms": 324.485,
+                  "p95_ms": 331.116,
+                  "p99_ms": 331.316,
+                  "max_ms": 331.366,
                   "samples": 7
                 },
                 "reconcile": {
-                  "p50_ms": 3.189,
-                  "p95_ms": 5.408,
-                  "p99_ms": 5.897,
-                  "max_ms": 5.897,
+                  "p50_ms": 3.085,
+                  "p95_ms": 4.941,
+                  "p99_ms": 5.627,
+                  "max_ms": 6.054,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 13.095,
-                  "p95_ms": 17.625,
-                  "p99_ms": 23.898,
-                  "max_ms": 27.856,
+                  "p50_ms": 12.598,
+                  "p95_ms": 19.405,
+                  "p99_ms": 21.521,
+                  "max_ms": 21.68,
                   "samples": 50
                 },
                 "session_resolution": {
                   "p50_ms": 0.063,
-                  "p95_ms": 0.125,
-                  "p99_ms": 0.163,
-                  "max_ms": 0.18,
+                  "p95_ms": 0.108,
+                  "p99_ms": 0.133,
+                  "max_ms": 0.153,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 3.318,
-                  "p95_ms": 5.785,
-                  "p99_ms": 10.239,
-                  "max_ms": 14.35,
+                  "p50_ms": 3.022,
+                  "p95_ms": 5.451,
+                  "p99_ms": 8.867,
+                  "max_ms": 11.99,
                   "samples": 50
                 }
               }
             },
             "prompt_submit_resume": {
               "total": {
-                "p50_ms": 359.45,
-                "p95_ms": 374.098,
-                "p99_ms": 378.258,
-                "max_ms": 379.487,
+                "p50_ms": 358.607,
+                "p95_ms": 382.209,
+                "p99_ms": 389.805,
+                "max_ms": 389.961,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 0.063,
-                  "p95_ms": 0.115,
-                  "p99_ms": 0.582,
-                  "max_ms": 1.029,
+                  "p50_ms": 0.062,
+                  "p95_ms": 0.078,
+                  "p99_ms": 0.519,
+                  "max_ms": 0.894,
                   "samples": 50
                 },
                 "consolidation": {
                   "p50_ms": 0.046,
-                  "p95_ms": 0.096,
-                  "p99_ms": 0.562,
-                  "max_ms": 1.006,
+                  "p95_ms": 0.069,
+                  "p99_ms": 0.41,
+                  "max_ms": 0.716,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 24.274,
-                  "p95_ms": 27.466,
-                  "p99_ms": 31.089,
-                  "max_ms": 33.557,
+                  "p50_ms": 25.125,
+                  "p95_ms": 30.61,
+                  "p99_ms": 37.135,
+                  "max_ms": 38.276,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 324.437,
-                  "p95_ms": 339.766,
-                  "p99_ms": 344.011,
-                  "max_ms": 344.322,
+                  "p50_ms": 323.778,
+                  "p95_ms": 347.295,
+                  "p99_ms": 352.198,
+                  "max_ms": 355.832,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 5.257,
-                  "p95_ms": 6.237,
-                  "p99_ms": 6.905,
-                  "max_ms": 7.375,
-                  "samples": 50
-                },
-                "reduction": {
-                  "p50_ms": 0.002,
-                  "p95_ms": 0.003,
-                  "p99_ms": 0.004,
-                  "max_ms": 0.004,
-                  "samples": 50
-                },
-                "session_resolution": {
-                  "p50_ms": 0.065,
-                  "p95_ms": 0.13,
-                  "p99_ms": 0.144,
-                  "max_ms": 0.152,
-                  "samples": 50
-                },
-                "usage_telemetry": {
-                  "p50_ms": 3.616,
-                  "p95_ms": 4.358,
-                  "p99_ms": 4.922,
-                  "max_ms": 5.271,
-                  "samples": 50
-                }
-              }
-            },
-            "compact_path": {
-              "total": {
-                "p50_ms": 390.16,
-                "p95_ms": 415.781,
-                "p99_ms": 426.469,
-                "max_ms": 434.421,
-                "samples": 50
-              },
-              "stages": {
-                "capture_append": {
-                  "p50_ms": 0.122,
-                  "p95_ms": 0.169,
-                  "p99_ms": 0.596,
-                  "max_ms": 0.996,
-                  "samples": 50
-                },
-                "compact_work": {
-                  "p50_ms": 356.025,
-                  "p95_ms": 385.535,
-                  "p99_ms": 386.355,
-                  "max_ms": 386.794,
-                  "samples": 50
-                },
-                "consolidation": {
-                  "p50_ms": 0.055,
-                  "p95_ms": 0.063,
-                  "p99_ms": 0.415,
-                  "max_ms": 0.74,
-                  "samples": 50
-                },
-                "maintenance": {
-                  "p50_ms": 24.7,
-                  "p95_ms": 29.807,
-                  "p99_ms": 35.314,
-                  "max_ms": 39.966,
-                  "samples": 50
-                },
-                "reconcile": {
-                  "p50_ms": 5.439,
-                  "p95_ms": 8.146,
-                  "p99_ms": 9.355,
-                  "max_ms": 9.892,
+                  "p50_ms": 5.094,
+                  "p95_ms": 5.45,
+                  "p99_ms": 6.672,
+                  "max_ms": 7.498,
                   "samples": 50
                 },
                 "reduction": {
@@ -273,341 +206,408 @@
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.07,
-                  "p95_ms": 0.084,
-                  "p99_ms": 0.133,
-                  "max_ms": 0.177,
-                  "samples": 50
-                },
-                "usage_telemetry": {
-                  "p50_ms": 0.464,
-                  "p95_ms": 0.571,
-                  "p99_ms": 0.607,
-                  "max_ms": 0.61,
-                  "samples": 50
-                }
-              }
-            },
-            "reconcile_idle": {
-              "total": {
-                "p50_ms": 4.692,
-                "p95_ms": 5.632,
-                "p99_ms": 6.422,
-                "max_ms": 6.738,
-                "samples": 50
-              },
-              "stages": {}
-            },
-            "reconcile_pending": {
-              "total": {
-                "p50_ms": 0.461,
-                "p95_ms": 0.686,
-                "p99_ms": 13.818,
-                "max_ms": 14.383,
-                "samples": 50
-              },
-              "stages": {}
-            }
-          },
-          "db_size_seeded_bytes": 561152,
-          "db_size_final_bytes": 10506240,
-          "event_count": 249
-        },
-        "grown": {
-          "sections": {
-            "capture_only": {
-              "total": {
-                "p50_ms": 25.509,
-                "p95_ms": 28.792,
-                "p99_ms": 31.575,
-                "max_ms": 33.162,
-                "samples": 50
-              },
-              "stages": {
-                "capture_append": {
-                  "p50_ms": 1.12,
-                  "p95_ms": 1.589,
-                  "p99_ms": 5.392,
-                  "max_ms": 5.474,
-                  "samples": 50
-                },
-                "consolidation": {
-                  "p50_ms": 1.344,
-                  "p95_ms": 1.468,
-                  "p99_ms": 1.569,
-                  "max_ms": 1.635,
-                  "samples": 50
-                },
-                "maintenance": {
-                  "p50_ms": 20.293,
-                  "p95_ms": 22.436,
-                  "p99_ms": 23.63,
-                  "max_ms": 24.154,
-                  "samples": 50
-                },
-                "reconcile": {
-                  "p50_ms": 0.813,
-                  "p95_ms": 1.19,
-                  "p99_ms": 1.38,
-                  "max_ms": 1.461,
-                  "samples": 50
-                },
-                "reduction": {
-                  "p50_ms": 0.712,
-                  "p95_ms": 0.868,
-                  "p99_ms": 1.195,
-                  "max_ms": 1.276,
-                  "samples": 50
-                },
-                "session_resolution": {
-                  "p50_ms": 0.061,
-                  "p95_ms": 0.098,
-                  "p99_ms": 0.124,
-                  "max_ms": 0.128,
-                  "samples": 50
-                },
-                "usage_telemetry": {
-                  "p50_ms": 0.964,
-                  "p95_ms": 1.109,
-                  "p99_ms": 1.194,
-                  "max_ms": 1.248,
-                  "samples": 50
-                }
-              }
-            },
-            "capture_with_reducer": {
-              "total": {
-                "p50_ms": 61.087,
-                "p95_ms": 448.246,
-                "p99_ms": 849.569,
-                "max_ms": 953.183,
-                "samples": 50
-              },
-              "stages": {
-                "capture_append": {
-                  "p50_ms": 14.526,
-                  "p95_ms": 18.671,
-                  "p99_ms": 22.277,
-                  "max_ms": 23.654,
-                  "samples": 50
-                },
-                "consolidation": {
-                  "p50_ms": 1.455,
-                  "p95_ms": 1.789,
-                  "p99_ms": 2.181,
-                  "max_ms": 2.494,
-                  "samples": 50
-                },
-                "maintenance": {
-                  "p50_ms": 23.273,
-                  "p95_ms": 386.92,
-                  "p99_ms": 667.813,
-                  "max_ms": 917.191,
-                  "samples": 50
-                },
-                "packet_assembly": {
-                  "p50_ms": 334.724,
-                  "p95_ms": 354.089,
-                  "p99_ms": 355.731,
-                  "max_ms": 356.142,
-                  "samples": 7
-                },
-                "reconcile": {
-                  "p50_ms": 3.05,
-                  "p95_ms": 4.755,
-                  "p99_ms": 4.987,
-                  "max_ms": 5.128,
-                  "samples": 50
-                },
-                "reduction": {
-                  "p50_ms": 13.312,
-                  "p95_ms": 15.801,
-                  "p99_ms": 24.13,
-                  "max_ms": 24.959,
-                  "samples": 50
-                },
-                "session_resolution": {
-                  "p50_ms": 0.065,
-                  "p95_ms": 0.113,
-                  "p99_ms": 0.142,
-                  "max_ms": 0.168,
-                  "samples": 50
-                },
-                "usage_telemetry": {
-                  "p50_ms": 3.357,
-                  "p95_ms": 10.035,
-                  "p99_ms": 28.514,
-                  "max_ms": 43.607,
-                  "samples": 50
-                }
-              }
-            },
-            "prompt_submit_resume": {
-              "total": {
-                "p50_ms": 376.384,
-                "p95_ms": 399.071,
-                "p99_ms": 410.414,
-                "max_ms": 410.547,
-                "samples": 50
-              },
-              "stages": {
-                "capture_append": {
-                  "p50_ms": 0.084,
-                  "p95_ms": 0.194,
-                  "p99_ms": 0.707,
-                  "max_ms": 1.155,
-                  "samples": 50
-                },
-                "consolidation": {
                   "p50_ms": 0.066,
-                  "p95_ms": 0.101,
-                  "p99_ms": 0.43,
-                  "max_ms": 0.716,
-                  "samples": 50
-                },
-                "maintenance": {
-                  "p50_ms": 24.114,
-                  "p95_ms": 25.921,
-                  "p99_ms": 28.014,
-                  "max_ms": 29.755,
-                  "samples": 50
-                },
-                "packet_assembly": {
-                  "p50_ms": 342.727,
-                  "p95_ms": 363.297,
-                  "p99_ms": 377.674,
-                  "max_ms": 378.897,
-                  "samples": 50
-                },
-                "reconcile": {
-                  "p50_ms": 4.903,
-                  "p95_ms": 5.529,
-                  "p99_ms": 6.548,
-                  "max_ms": 7.121,
-                  "samples": 50
-                },
-                "reduction": {
-                  "p50_ms": 0.002,
-                  "p95_ms": 0.004,
-                  "p99_ms": 0.004,
-                  "max_ms": 0.004,
-                  "samples": 50
-                },
-                "session_resolution": {
-                  "p50_ms": 0.084,
-                  "p95_ms": 0.163,
-                  "p99_ms": 0.277,
-                  "max_ms": 0.331,
+                  "p95_ms": 0.086,
+                  "p99_ms": 0.125,
+                  "max_ms": 0.153,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 3.722,
-                  "p95_ms": 4.562,
-                  "p99_ms": 5.821,
-                  "max_ms": 5.988,
+                  "p50_ms": 3.561,
+                  "p95_ms": 3.993,
+                  "p99_ms": 5.12,
+                  "max_ms": 6.057,
                   "samples": 50
                 }
               }
             },
             "compact_path": {
               "total": {
-                "p50_ms": 496.461,
-                "p95_ms": 519.867,
-                "p99_ms": 554.372,
-                "max_ms": 580.399,
+                "p50_ms": 395.58,
+                "p95_ms": 413.163,
+                "p99_ms": 435.16,
+                "max_ms": 447.336,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 0.137,
-                  "p95_ms": 0.203,
-                  "p99_ms": 0.626,
-                  "max_ms": 1.012,
+                  "p50_ms": 0.12,
+                  "p95_ms": 0.17,
+                  "p99_ms": 0.6,
+                  "max_ms": 0.988,
                   "samples": 50
                 },
                 "compact_work": {
-                  "p50_ms": 463.435,
-                  "p95_ms": 486.568,
-                  "p99_ms": 512.706,
-                  "max_ms": 535.531,
+                  "p50_ms": 363.088,
+                  "p95_ms": 380.046,
+                  "p99_ms": 398.455,
+                  "max_ms": 411.741,
                   "samples": 50
                 },
                 "consolidation": {
                   "p50_ms": 0.055,
-                  "p95_ms": 0.072,
-                  "p99_ms": 0.519,
-                  "max_ms": 0.943,
+                  "p95_ms": 0.077,
+                  "p99_ms": 0.452,
+                  "max_ms": 0.685,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 26.568,
-                  "p95_ms": 34.573,
-                  "p99_ms": 35.693,
-                  "max_ms": 35.913,
+                  "p50_ms": 25.219,
+                  "p95_ms": 31.795,
+                  "p99_ms": 36.416,
+                  "max_ms": 39.178,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 5.334,
-                  "p95_ms": 5.976,
-                  "p99_ms": 7.248,
-                  "max_ms": 8.375,
+                  "p50_ms": 5.295,
+                  "p95_ms": 6.045,
+                  "p99_ms": 6.805,
+                  "max_ms": 6.968,
                   "samples": 50
                 },
                 "reduction": {
                   "p50_ms": 0.002,
                   "p95_ms": 0.003,
-                  "p99_ms": 0.004,
-                  "max_ms": 0.004,
+                  "p99_ms": 0.003,
+                  "max_ms": 0.003,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.074,
-                  "p95_ms": 0.116,
-                  "p99_ms": 0.143,
-                  "max_ms": 0.156,
+                  "p50_ms": 0.071,
+                  "p95_ms": 0.079,
+                  "p99_ms": 0.097,
+                  "max_ms": 0.111,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 0.462,
-                  "p95_ms": 0.566,
-                  "p99_ms": 0.639,
-                  "max_ms": 0.675,
+                  "p50_ms": 0.458,
+                  "p95_ms": 0.514,
+                  "p99_ms": 0.593,
+                  "max_ms": 0.627,
                   "samples": 50
                 }
               }
             },
             "reconcile_idle": {
               "total": {
-                "p50_ms": 4.5,
-                "p95_ms": 5.314,
-                "p99_ms": 5.458,
-                "max_ms": 5.505,
+                "p50_ms": 4.29,
+                "p95_ms": 5.064,
+                "p99_ms": 5.326,
+                "max_ms": 5.425,
                 "samples": 50
               },
               "stages": {}
             },
             "reconcile_pending": {
               "total": {
-                "p50_ms": 0.454,
-                "p95_ms": 0.6,
-                "p99_ms": 8.446,
-                "max_ms": 10.612,
+                "p50_ms": 0.431,
+                "p95_ms": 0.503,
+                "p99_ms": 11.892,
+                "max_ms": 13.468,
                 "samples": 50
               },
               "stages": {}
             }
           },
-          "db_size_seeded_bytes": 1781760,
-          "db_size_final_bytes": 13713408,
+          "db_size_seeded_bytes": 561152,
+          "db_size_final_bytes": 10502144,
+          "event_count": 249
+        },
+        "grown": {
+          "sections": {
+            "capture_only": {
+              "total": {
+                "p50_ms": 26.558,
+                "p95_ms": 35.149,
+                "p99_ms": 36.294,
+                "max_ms": 37.046,
+                "samples": 50
+              },
+              "stages": {
+                "capture_append": {
+                  "p50_ms": 1.115,
+                  "p95_ms": 1.338,
+                  "p99_ms": 1.347,
+                  "max_ms": 1.35,
+                  "samples": 50
+                },
+                "consolidation": {
+                  "p50_ms": 1.327,
+                  "p95_ms": 1.448,
+                  "p99_ms": 1.659,
+                  "max_ms": 1.842,
+                  "samples": 50
+                },
+                "maintenance": {
+                  "p50_ms": 21.357,
+                  "p95_ms": 30.067,
+                  "p99_ms": 31.27,
+                  "max_ms": 31.974,
+                  "samples": 50
+                },
+                "reconcile": {
+                  "p50_ms": 0.793,
+                  "p95_ms": 1.103,
+                  "p99_ms": 1.196,
+                  "max_ms": 1.25,
+                  "samples": 50
+                },
+                "reduction": {
+                  "p50_ms": 0.716,
+                  "p95_ms": 0.888,
+                  "p99_ms": 3.011,
+                  "max_ms": 5.013,
+                  "samples": 50
+                },
+                "session_resolution": {
+                  "p50_ms": 0.06,
+                  "p95_ms": 0.073,
+                  "p99_ms": 0.098,
+                  "max_ms": 0.108,
+                  "samples": 50
+                },
+                "usage_telemetry": {
+                  "p50_ms": 0.967,
+                  "p95_ms": 1.221,
+                  "p99_ms": 3.762,
+                  "max_ms": 5.946,
+                  "samples": 50
+                }
+              }
+            },
+            "capture_with_reducer": {
+              "total": {
+                "p50_ms": 63.253,
+                "p95_ms": 434.454,
+                "p99_ms": 864.719,
+                "max_ms": 980.241,
+                "samples": 50
+              },
+              "stages": {
+                "capture_append": {
+                  "p50_ms": 13.882,
+                  "p95_ms": 20.964,
+                  "p99_ms": 23.371,
+                  "max_ms": 25.105,
+                  "samples": 50
+                },
+                "consolidation": {
+                  "p50_ms": 1.425,
+                  "p95_ms": 1.619,
+                  "p99_ms": 6.252,
+                  "max_ms": 10.501,
+                  "samples": 50
+                },
+                "maintenance": {
+                  "p50_ms": 24.252,
+                  "p95_ms": 384.771,
+                  "p99_ms": 680.144,
+                  "max_ms": 946.566,
+                  "samples": 50
+                },
+                "packet_assembly": {
+                  "p50_ms": 332.709,
+                  "p95_ms": 346.463,
+                  "p99_ms": 347.468,
+                  "max_ms": 347.719,
+                  "samples": 7
+                },
+                "reconcile": {
+                  "p50_ms": 2.941,
+                  "p95_ms": 4.387,
+                  "p99_ms": 4.762,
+                  "max_ms": 5.071,
+                  "samples": 50
+                },
+                "reduction": {
+                  "p50_ms": 12.822,
+                  "p95_ms": 15.513,
+                  "p99_ms": 17.839,
+                  "max_ms": 18.262,
+                  "samples": 50
+                },
+                "session_resolution": {
+                  "p50_ms": 0.061,
+                  "p95_ms": 0.09,
+                  "p99_ms": 0.1,
+                  "max_ms": 0.102,
+                  "samples": 50
+                },
+                "usage_telemetry": {
+                  "p50_ms": 3.055,
+                  "p95_ms": 5.457,
+                  "p99_ms": 26.977,
+                  "max_ms": 47.42,
+                  "samples": 50
+                }
+              }
+            },
+            "prompt_submit_resume": {
+              "total": {
+                "p50_ms": 376.664,
+                "p95_ms": 405.415,
+                "p99_ms": 416.659,
+                "max_ms": 417.167,
+                "samples": 50
+              },
+              "stages": {
+                "capture_append": {
+                  "p50_ms": 0.08,
+                  "p95_ms": 0.128,
+                  "p99_ms": 0.632,
+                  "max_ms": 1.087,
+                  "samples": 50
+                },
+                "consolidation": {
+                  "p50_ms": 0.068,
+                  "p95_ms": 0.109,
+                  "p99_ms": 0.483,
+                  "max_ms": 0.823,
+                  "samples": 50
+                },
+                "maintenance": {
+                  "p50_ms": 25.125,
+                  "p95_ms": 28.333,
+                  "p99_ms": 32.375,
+                  "max_ms": 33.265,
+                  "samples": 50
+                },
+                "packet_assembly": {
+                  "p50_ms": 341.184,
+                  "p95_ms": 369.78,
+                  "p99_ms": 381.851,
+                  "max_ms": 382.29,
+                  "samples": 50
+                },
+                "reconcile": {
+                  "p50_ms": 4.924,
+                  "p95_ms": 6.016,
+                  "p99_ms": 6.409,
+                  "max_ms": 6.594,
+                  "samples": 50
+                },
+                "reduction": {
+                  "p50_ms": 0.002,
+                  "p95_ms": 0.002,
+                  "p99_ms": 0.004,
+                  "max_ms": 0.004,
+                  "samples": 50
+                },
+                "session_resolution": {
+                  "p50_ms": 0.079,
+                  "p95_ms": 0.115,
+                  "p99_ms": 0.157,
+                  "max_ms": 0.175,
+                  "samples": 50
+                },
+                "usage_telemetry": {
+                  "p50_ms": 3.712,
+                  "p95_ms": 4.577,
+                  "p99_ms": 5.44,
+                  "max_ms": 6.213,
+                  "samples": 50
+                }
+              }
+            },
+            "compact_path": {
+              "total": {
+                "p50_ms": 491.066,
+                "p95_ms": 525.942,
+                "p99_ms": 541.654,
+                "max_ms": 549.035,
+                "samples": 50
+              },
+              "stages": {
+                "capture_append": {
+                  "p50_ms": 0.131,
+                  "p95_ms": 0.174,
+                  "p99_ms": 0.591,
+                  "max_ms": 0.991,
+                  "samples": 50
+                },
+                "compact_work": {
+                  "p50_ms": 457.771,
+                  "p95_ms": 489.909,
+                  "p99_ms": 507.102,
+                  "max_ms": 517.444,
+                  "samples": 50
+                },
+                "consolidation": {
+                  "p50_ms": 0.056,
+                  "p95_ms": 0.075,
+                  "p99_ms": 0.411,
+                  "max_ms": 0.729,
+                  "samples": 50
+                },
+                "maintenance": {
+                  "p50_ms": 27.096,
+                  "p95_ms": 32.318,
+                  "p99_ms": 34.334,
+                  "max_ms": 35.679,
+                  "samples": 50
+                },
+                "reconcile": {
+                  "p50_ms": 5.291,
+                  "p95_ms": 6.216,
+                  "p99_ms": 8.35,
+                  "max_ms": 8.415,
+                  "samples": 50
+                },
+                "reduction": {
+                  "p50_ms": 0.002,
+                  "p95_ms": 0.003,
+                  "p99_ms": 0.003,
+                  "max_ms": 0.003,
+                  "samples": 50
+                },
+                "session_resolution": {
+                  "p50_ms": 0.071,
+                  "p95_ms": 0.08,
+                  "p99_ms": 0.082,
+                  "max_ms": 0.083,
+                  "samples": 50
+                },
+                "usage_telemetry": {
+                  "p50_ms": 0.461,
+                  "p95_ms": 0.564,
+                  "p99_ms": 0.615,
+                  "max_ms": 0.634,
+                  "samples": 50
+                }
+              }
+            },
+            "reconcile_idle": {
+              "total": {
+                "p50_ms": 4.43,
+                "p95_ms": 5.475,
+                "p99_ms": 5.736,
+                "max_ms": 5.91,
+                "samples": 50
+              },
+              "stages": {}
+            },
+            "reconcile_pending": {
+              "total": {
+                "p50_ms": 0.437,
+                "p95_ms": 0.68,
+                "p99_ms": 8.297,
+                "max_ms": 10.954,
+                "samples": 50
+              },
+              "stages": {}
+            }
+          },
+          "db_size_seeded_bytes": 1777664,
+          "db_size_final_bytes": 14241792,
           "event_count": 1417
         }
       },
       "plugins": [],
       "cold_start": {
-        "import_ms": 129.4,
-        "service_open_ms": 165.0,
-        "first_capture_ms": 27.5,
-        "first_resume_ms": 45.0
+        "import_ms": 180.5,
+        "service_open_ms": 169.8,
+        "first_capture_ms": 28.3,
+        "first_resume_ms": 48.2
       }
     },
     "installed_plugins": {
@@ -616,173 +616,240 @@
           "sections": {
             "capture_only": {
               "total": {
-                "p50_ms": 26.957,
-                "p95_ms": 34.552,
-                "p99_ms": 37.874,
-                "max_ms": 38.618,
+                "p50_ms": 26.678,
+                "p95_ms": 33.1,
+                "p99_ms": 33.887,
+                "max_ms": 33.93,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 1.095,
-                  "p95_ms": 1.503,
-                  "p99_ms": 1.83,
-                  "max_ms": 2.063,
+                  "p50_ms": 1.094,
+                  "p95_ms": 1.422,
+                  "p99_ms": 1.692,
+                  "max_ms": 1.738,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.368,
-                  "p95_ms": 1.89,
-                  "p99_ms": 1.945,
-                  "max_ms": 1.948,
+                  "p50_ms": 1.359,
+                  "p95_ms": 1.533,
+                  "p99_ms": 1.606,
+                  "max_ms": 1.661,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 21.643,
-                  "p95_ms": 28.396,
-                  "p99_ms": 31.143,
-                  "max_ms": 33.133,
+                  "p50_ms": 21.412,
+                  "p95_ms": 26.872,
+                  "p99_ms": 28.18,
+                  "max_ms": 28.778,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 0.87,
-                  "p95_ms": 1.3,
-                  "p99_ms": 1.483,
-                  "max_ms": 1.555,
+                  "p50_ms": 0.824,
+                  "p95_ms": 1.084,
+                  "p99_ms": 1.45,
+                  "max_ms": 1.774,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 0.705,
-                  "p95_ms": 0.933,
-                  "p99_ms": 0.98,
-                  "max_ms": 0.995,
+                  "p50_ms": 0.703,
+                  "p95_ms": 0.858,
+                  "p99_ms": 1.97,
+                  "max_ms": 2.852,
                   "samples": 50
                 },
                 "session_resolution": {
                   "p50_ms": 0.062,
-                  "p95_ms": 0.119,
-                  "p99_ms": 0.276,
-                  "max_ms": 0.417,
+                  "p95_ms": 0.112,
+                  "p99_ms": 0.116,
+                  "max_ms": 0.118,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 1.004,
-                  "p95_ms": 1.421,
-                  "p99_ms": 2.462,
-                  "max_ms": 3.332,
+                  "p50_ms": 0.974,
+                  "p95_ms": 1.272,
+                  "p99_ms": 1.419,
+                  "max_ms": 1.48,
                   "samples": 50
                 }
               }
             },
             "capture_with_reducer": {
               "total": {
-                "p50_ms": 62.618,
-                "p95_ms": 417.191,
-                "p99_ms": 536.667,
-                "max_ms": 636.004,
+                "p50_ms": 63.112,
+                "p95_ms": 387.794,
+                "p99_ms": 541.223,
+                "max_ms": 674.171,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 13.901,
-                  "p95_ms": 21.074,
-                  "p99_ms": 24.455,
-                  "max_ms": 26.038,
+                  "p50_ms": 13.93,
+                  "p95_ms": 22.459,
+                  "p99_ms": 24.784,
+                  "max_ms": 25.421,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.383,
-                  "p95_ms": 1.594,
-                  "p99_ms": 1.653,
-                  "max_ms": 1.654,
+                  "p50_ms": 1.354,
+                  "p95_ms": 1.544,
+                  "p99_ms": 1.614,
+                  "max_ms": 1.66,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 23.896,
-                  "p95_ms": 335.85,
-                  "p99_ms": 384.148,
-                  "max_ms": 387.549,
+                  "p50_ms": 24.217,
+                  "p95_ms": 325.307,
+                  "p99_ms": 349.53,
+                  "max_ms": 355.32,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 329.454,
-                  "p95_ms": 347.507,
-                  "p99_ms": 348.17,
-                  "max_ms": 348.335,
+                  "p50_ms": 310.239,
+                  "p95_ms": 317.144,
+                  "p99_ms": 318.508,
+                  "max_ms": 318.849,
                   "samples": 7
                 },
                 "reconcile": {
-                  "p50_ms": 2.797,
-                  "p95_ms": 4.592,
-                  "p99_ms": 4.686,
-                  "max_ms": 4.704,
+                  "p50_ms": 2.834,
+                  "p95_ms": 4.436,
+                  "p99_ms": 5.729,
+                  "max_ms": 6.766,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 13.3,
-                  "p95_ms": 19.651,
-                  "p99_ms": 21.578,
-                  "max_ms": 21.63,
+                  "p50_ms": 12.847,
+                  "p95_ms": 14.892,
+                  "p99_ms": 17.375,
+                  "max_ms": 18.98,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.064,
-                  "p95_ms": 0.108,
-                  "p99_ms": 0.139,
-                  "max_ms": 0.15,
+                  "p50_ms": 0.065,
+                  "p95_ms": 0.101,
+                  "p99_ms": 0.124,
+                  "max_ms": 0.132,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 3.028,
-                  "p95_ms": 5.371,
-                  "p99_ms": 9.408,
-                  "max_ms": 12.806,
+                  "p50_ms": 3.031,
+                  "p95_ms": 5.59,
+                  "p99_ms": 9.621,
+                  "max_ms": 12.07,
                   "samples": 50
                 }
               }
             },
             "prompt_submit_resume": {
               "total": {
-                "p50_ms": 357.578,
-                "p95_ms": 378.044,
-                "p99_ms": 385.538,
-                "max_ms": 391.201,
+                "p50_ms": 355.767,
+                "p95_ms": 388.501,
+                "p99_ms": 396.171,
+                "max_ms": 400.655,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 0.065,
-                  "p95_ms": 0.114,
-                  "p99_ms": 0.525,
-                  "max_ms": 0.912,
+                  "p50_ms": 0.062,
+                  "p95_ms": 0.075,
+                  "p99_ms": 0.522,
+                  "max_ms": 0.926,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 0.048,
-                  "p95_ms": 0.086,
-                  "p99_ms": 0.444,
-                  "max_ms": 0.744,
+                  "p50_ms": 0.047,
+                  "p95_ms": 0.073,
+                  "p99_ms": 0.445,
+                  "max_ms": 0.784,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 23.567,
-                  "p95_ms": 26.121,
-                  "p99_ms": 27.4,
-                  "max_ms": 28.258,
+                  "p50_ms": 24.535,
+                  "p95_ms": 28.982,
+                  "p99_ms": 31.298,
+                  "max_ms": 31.51,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 325.344,
-                  "p95_ms": 344.814,
-                  "p99_ms": 353.485,
-                  "max_ms": 359.339,
+                  "p50_ms": 322.703,
+                  "p95_ms": 354.501,
+                  "p99_ms": 359.938,
+                  "max_ms": 360.996,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 4.448,
-                  "p95_ms": 5.337,
-                  "p99_ms": 5.513,
-                  "max_ms": 5.587,
+                  "p50_ms": 4.389,
+                  "p95_ms": 4.932,
+                  "p99_ms": 5.168,
+                  "max_ms": 5.205,
+                  "samples": 50
+                },
+                "reduction": {
+                  "p50_ms": 0.002,
+                  "p95_ms": 0.003,
+                  "p99_ms": 0.005,
+                  "max_ms": 0.007,
+                  "samples": 50
+                },
+                "session_resolution": {
+                  "p50_ms": 0.061,
+                  "p95_ms": 0.073,
+                  "p99_ms": 0.113,
+                  "max_ms": 0.134,
+                  "samples": 50
+                },
+                "usage_telemetry": {
+                  "p50_ms": 3.299,
+                  "p95_ms": 3.517,
+                  "p99_ms": 3.835,
+                  "max_ms": 4.087,
+                  "samples": 50
+                }
+              }
+            },
+            "compact_path": {
+              "total": {
+                "p50_ms": 383.503,
+                "p95_ms": 414.345,
+                "p99_ms": 459.069,
+                "max_ms": 474.784,
+                "samples": 50
+              },
+              "stages": {
+                "capture_append": {
+                  "p50_ms": 0.12,
+                  "p95_ms": 0.157,
+                  "p99_ms": 5.205,
+                  "max_ms": 10.023,
+                  "samples": 50
+                },
+                "compact_work": {
+                  "p50_ms": 352.252,
+                  "p95_ms": 374.024,
+                  "p99_ms": 402.816,
+                  "max_ms": 410.914,
+                  "samples": 50
+                },
+                "consolidation": {
+                  "p50_ms": 0.055,
+                  "p95_ms": 0.09,
+                  "p99_ms": 0.455,
+                  "max_ms": 0.751,
+                  "samples": 50
+                },
+                "maintenance": {
+                  "p50_ms": 25.075,
+                  "p95_ms": 31.479,
+                  "p99_ms": 75.924,
+                  "max_ms": 117.137,
+                  "samples": 50
+                },
+                "reconcile": {
+                  "p50_ms": 4.794,
+                  "p95_ms": 5.316,
+                  "p99_ms": 5.425,
+                  "max_ms": 5.436,
                   "samples": 50
                 },
                 "reduction": {
@@ -793,93 +860,26 @@
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.063,
-                  "p95_ms": 0.13,
-                  "p99_ms": 0.178,
-                  "max_ms": 0.213,
-                  "samples": 50
-                },
-                "usage_telemetry": {
-                  "p50_ms": 3.32,
-                  "p95_ms": 3.761,
-                  "p99_ms": 4.036,
-                  "max_ms": 4.07,
-                  "samples": 50
-                }
-              }
-            },
-            "compact_path": {
-              "total": {
-                "p50_ms": 388.09,
-                "p95_ms": 410.673,
-                "p99_ms": 476.399,
-                "max_ms": 496.059,
-                "samples": 50
-              },
-              "stages": {
-                "capture_append": {
-                  "p50_ms": 0.127,
-                  "p95_ms": 0.236,
-                  "p99_ms": 0.731,
-                  "max_ms": 1.044,
-                  "samples": 50
-                },
-                "compact_work": {
-                  "p50_ms": 358.023,
-                  "p95_ms": 380.799,
-                  "p99_ms": 441.593,
-                  "max_ms": 463.725,
-                  "samples": 50
-                },
-                "consolidation": {
-                  "p50_ms": 0.057,
-                  "p95_ms": 0.08,
-                  "p99_ms": 0.446,
-                  "max_ms": 0.78,
-                  "samples": 50
-                },
-                "maintenance": {
-                  "p50_ms": 24.221,
-                  "p95_ms": 30.498,
-                  "p99_ms": 32.015,
-                  "max_ms": 32.16,
-                  "samples": 50
-                },
-                "reconcile": {
-                  "p50_ms": 4.614,
-                  "p95_ms": 5.176,
-                  "p99_ms": 6.363,
-                  "max_ms": 7.194,
-                  "samples": 50
-                },
-                "reduction": {
-                  "p50_ms": 0.002,
-                  "p95_ms": 0.004,
-                  "p99_ms": 0.005,
-                  "max_ms": 0.005,
-                  "samples": 50
-                },
-                "session_resolution": {
                   "p50_ms": 0.073,
-                  "p95_ms": 0.084,
-                  "p99_ms": 0.121,
-                  "max_ms": 0.13,
+                  "p95_ms": 0.082,
+                  "p99_ms": 0.107,
+                  "max_ms": 0.124,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 0.461,
-                  "p95_ms": 0.646,
-                  "p99_ms": 0.896,
-                  "max_ms": 1.118,
+                  "p50_ms": 0.459,
+                  "p95_ms": 0.537,
+                  "p99_ms": 0.617,
+                  "max_ms": 0.628,
                   "samples": 50
                 }
               }
             },
             "reconcile_idle": {
               "total": {
-                "p50_ms": 4.575,
-                "p95_ms": 5.031,
-                "p99_ms": 5.113,
+                "p50_ms": 4.467,
+                "p95_ms": 4.812,
+                "p99_ms": 5.008,
                 "max_ms": 5.116,
                 "samples": 50
               },
@@ -887,10 +887,10 @@
             },
             "reconcile_pending": {
               "total": {
-                "p50_ms": 0.454,
-                "p95_ms": 0.657,
-                "p99_ms": 12.706,
-                "max_ms": 20.502,
+                "p50_ms": 0.434,
+                "p95_ms": 0.541,
+                "p99_ms": 11.924,
+                "max_ms": 13.487,
                 "samples": 50
               },
               "stages": {}
@@ -904,288 +904,288 @@
           "sections": {
             "capture_only": {
               "total": {
-                "p50_ms": 26.94,
-                "p95_ms": 31.627,
-                "p99_ms": 32.749,
-                "max_ms": 33.416,
+                "p50_ms": 27.264,
+                "p95_ms": 34.711,
+                "p99_ms": 36.013,
+                "max_ms": 36.333,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 1.106,
-                  "p95_ms": 1.371,
-                  "p99_ms": 3.462,
-                  "max_ms": 5.346,
+                  "p50_ms": 1.134,
+                  "p95_ms": 1.499,
+                  "p99_ms": 5.11,
+                  "max_ms": 5.969,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.374,
-                  "p95_ms": 1.691,
-                  "p99_ms": 2.037,
-                  "max_ms": 2.324,
+                  "p50_ms": 1.385,
+                  "p95_ms": 1.563,
+                  "p99_ms": 6.088,
+                  "max_ms": 10.42,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 21.404,
-                  "p95_ms": 24.633,
-                  "p99_ms": 27.69,
-                  "max_ms": 27.704,
+                  "p50_ms": 21.884,
+                  "p95_ms": 28.366,
+                  "p99_ms": 29.967,
+                  "max_ms": 30.573,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 0.866,
-                  "p95_ms": 1.257,
-                  "p99_ms": 1.651,
-                  "max_ms": 1.766,
+                  "p50_ms": 0.846,
+                  "p95_ms": 1.157,
+                  "p99_ms": 1.323,
+                  "max_ms": 1.419,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 0.709,
-                  "p95_ms": 1.011,
-                  "p99_ms": 2.824,
-                  "max_ms": 4.248,
+                  "p50_ms": 0.723,
+                  "p95_ms": 0.883,
+                  "p99_ms": 1.239,
+                  "max_ms": 1.314,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.061,
-                  "p95_ms": 0.083,
-                  "p99_ms": 0.116,
-                  "max_ms": 0.124,
+                  "p50_ms": 0.064,
+                  "p95_ms": 0.093,
+                  "p99_ms": 0.122,
+                  "max_ms": 0.132,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 0.955,
-                  "p95_ms": 1.243,
-                  "p99_ms": 1.501,
-                  "max_ms": 1.53,
+                  "p50_ms": 0.998,
+                  "p95_ms": 1.176,
+                  "p99_ms": 1.302,
+                  "max_ms": 1.327,
                   "samples": 50
                 }
               }
             },
             "capture_with_reducer": {
               "total": {
-                "p50_ms": 61.009,
-                "p95_ms": 482.057,
-                "p99_ms": 912.205,
-                "max_ms": 1069.964,
+                "p50_ms": 60.775,
+                "p95_ms": 487.819,
+                "p99_ms": 891.056,
+                "max_ms": 1026.521,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 14.362,
-                  "p95_ms": 20.469,
-                  "p99_ms": 27.377,
-                  "max_ms": 31.797,
+                  "p50_ms": 13.588,
+                  "p95_ms": 23.283,
+                  "p99_ms": 26.635,
+                  "max_ms": 28.442,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 1.431,
-                  "p95_ms": 1.754,
-                  "p99_ms": 1.896,
-                  "max_ms": 1.954,
+                  "p50_ms": 1.386,
+                  "p95_ms": 1.59,
+                  "p99_ms": 6.361,
+                  "max_ms": 10.887,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 24.208,
-                  "p95_ms": 399.394,
-                  "p99_ms": 723.698,
-                  "max_ms": 1025.818,
+                  "p50_ms": 24.532,
+                  "p95_ms": 380.585,
+                  "p99_ms": 752.739,
+                  "max_ms": 992.818,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 341.233,
-                  "p95_ms": 415.653,
-                  "p99_ms": 436.533,
-                  "max_ms": 441.753,
+                  "p50_ms": 329.119,
+                  "p95_ms": 343.421,
+                  "p99_ms": 345.459,
+                  "max_ms": 345.968,
                   "samples": 7
                 },
                 "reconcile": {
-                  "p50_ms": 3.021,
-                  "p95_ms": 4.448,
-                  "p99_ms": 4.738,
-                  "max_ms": 4.834,
+                  "p50_ms": 3.014,
+                  "p95_ms": 4.733,
+                  "p99_ms": 4.935,
+                  "max_ms": 5.049,
                   "samples": 50
                 },
                 "reduction": {
-                  "p50_ms": 13.123,
-                  "p95_ms": 18.03,
-                  "p99_ms": 20.744,
-                  "max_ms": 21.234,
+                  "p50_ms": 12.85,
+                  "p95_ms": 17.053,
+                  "p99_ms": 24.366,
+                  "max_ms": 27.281,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.071,
-                  "p95_ms": 0.116,
-                  "p99_ms": 0.139,
-                  "max_ms": 0.147,
+                  "p50_ms": 0.065,
+                  "p95_ms": 0.106,
+                  "p99_ms": 0.184,
+                  "max_ms": 0.189,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 3.018,
-                  "p95_ms": 5.47,
-                  "p99_ms": 25.651,
-                  "max_ms": 44.667,
+                  "p50_ms": 3.107,
+                  "p95_ms": 6.076,
+                  "p99_ms": 25.851,
+                  "max_ms": 44.148,
                   "samples": 50
                 }
               }
             },
             "prompt_submit_resume": {
               "total": {
-                "p50_ms": 375.795,
-                "p95_ms": 398.55,
-                "p99_ms": 445.684,
-                "max_ms": 471.151,
+                "p50_ms": 372.294,
+                "p95_ms": 399.684,
+                "p99_ms": 451.553,
+                "max_ms": 498.65,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 0.08,
-                  "p95_ms": 0.136,
-                  "p99_ms": 0.556,
-                  "max_ms": 0.932,
+                  "p50_ms": 0.083,
+                  "p95_ms": 0.104,
+                  "p99_ms": 0.586,
+                  "max_ms": 1.033,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 0.056,
-                  "p95_ms": 0.123,
-                  "p99_ms": 0.443,
-                  "max_ms": 0.736,
+                  "p50_ms": 0.061,
+                  "p95_ms": 0.082,
+                  "p99_ms": 0.592,
+                  "max_ms": 1.073,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 24.484,
-                  "p95_ms": 29.001,
-                  "p99_ms": 74.953,
-                  "max_ms": 118.173,
+                  "p50_ms": 24.903,
+                  "p95_ms": 27.267,
+                  "p99_ms": 29.661,
+                  "max_ms": 29.803,
                   "samples": 50
                 },
                 "packet_assembly": {
-                  "p50_ms": 341.583,
-                  "p95_ms": 361.579,
-                  "p99_ms": 374.699,
-                  "max_ms": 381.678,
+                  "p50_ms": 339.108,
+                  "p95_ms": 361.419,
+                  "p99_ms": 416.326,
+                  "max_ms": 461.779,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 4.775,
-                  "p95_ms": 5.618,
-                  "p99_ms": 6.026,
-                  "max_ms": 6.404,
+                  "p50_ms": 4.698,
+                  "p95_ms": 5.288,
+                  "p99_ms": 5.508,
+                  "max_ms": 5.561,
                   "samples": 50
                 },
                 "reduction": {
                   "p50_ms": 0.002,
-                  "p95_ms": 0.003,
+                  "p95_ms": 0.002,
                   "p99_ms": 0.003,
                   "max_ms": 0.003,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.08,
-                  "p95_ms": 0.115,
-                  "p99_ms": 0.14,
-                  "max_ms": 0.155,
+                  "p50_ms": 0.082,
+                  "p95_ms": 0.107,
+                  "p99_ms": 0.112,
+                  "max_ms": 0.113,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 3.612,
-                  "p95_ms": 3.995,
-                  "p99_ms": 4.331,
-                  "max_ms": 4.584,
+                  "p50_ms": 3.561,
+                  "p95_ms": 3.845,
+                  "p99_ms": 5.291,
+                  "max_ms": 6.598,
                   "samples": 50
                 }
               }
             },
             "compact_path": {
               "total": {
-                "p50_ms": 487.158,
-                "p95_ms": 551.176,
-                "p99_ms": 592.456,
-                "max_ms": 599.543,
+                "p50_ms": 492.784,
+                "p95_ms": 541.38,
+                "p99_ms": 587.168,
+                "max_ms": 597.362,
                 "samples": 50
               },
               "stages": {
                 "capture_append": {
-                  "p50_ms": 0.136,
-                  "p95_ms": 0.229,
-                  "p99_ms": 0.615,
-                  "max_ms": 0.967,
+                  "p50_ms": 0.129,
+                  "p95_ms": 0.205,
+                  "p99_ms": 0.63,
+                  "max_ms": 1.028,
                   "samples": 50
                 },
                 "compact_work": {
-                  "p50_ms": 455.964,
-                  "p95_ms": 521.838,
-                  "p99_ms": 560.185,
-                  "max_ms": 567.097,
+                  "p50_ms": 459.818,
+                  "p95_ms": 496.747,
+                  "p99_ms": 555.807,
+                  "max_ms": 565.496,
                   "samples": 50
                 },
                 "consolidation": {
-                  "p50_ms": 0.07,
-                  "p95_ms": 0.108,
-                  "p99_ms": 0.416,
-                  "max_ms": 0.697,
+                  "p50_ms": 0.056,
+                  "p95_ms": 0.098,
+                  "p99_ms": 0.452,
+                  "max_ms": 0.79,
                   "samples": 50
                 },
                 "maintenance": {
-                  "p50_ms": 24.958,
-                  "p95_ms": 30.763,
-                  "p99_ms": 34.431,
-                  "max_ms": 35.557,
+                  "p50_ms": 26.084,
+                  "p95_ms": 32.774,
+                  "p99_ms": 40.897,
+                  "max_ms": 44.652,
                   "samples": 50
                 },
                 "reconcile": {
-                  "p50_ms": 4.668,
-                  "p95_ms": 4.973,
-                  "p99_ms": 5.257,
-                  "max_ms": 5.259,
+                  "p50_ms": 4.812,
+                  "p95_ms": 5.945,
+                  "p99_ms": 8.332,
+                  "max_ms": 9.312,
                   "samples": 50
                 },
                 "reduction": {
                   "p50_ms": 0.002,
-                  "p95_ms": 0.004,
-                  "p99_ms": 0.005,
-                  "max_ms": 0.005,
+                  "p95_ms": 0.003,
+                  "p99_ms": 0.004,
+                  "max_ms": 0.004,
                   "samples": 50
                 },
                 "session_resolution": {
-                  "p50_ms": 0.076,
-                  "p95_ms": 0.133,
-                  "p99_ms": 0.305,
-                  "max_ms": 0.396,
+                  "p50_ms": 0.075,
+                  "p95_ms": 0.099,
+                  "p99_ms": 0.119,
+                  "max_ms": 0.131,
                   "samples": 50
                 },
                 "usage_telemetry": {
-                  "p50_ms": 0.481,
-                  "p95_ms": 0.618,
-                  "p99_ms": 0.733,
-                  "max_ms": 0.827,
+                  "p50_ms": 0.462,
+                  "p95_ms": 0.576,
+                  "p99_ms": 0.689,
+                  "max_ms": 0.742,
                   "samples": 50
                 }
               }
             },
             "reconcile_idle": {
               "total": {
-                "p50_ms": 4.543,
-                "p95_ms": 5.13,
-                "p99_ms": 5.773,
-                "max_ms": 6.237,
+                "p50_ms": 4.68,
+                "p95_ms": 5.083,
+                "p99_ms": 5.558,
+                "max_ms": 5.786,
                 "samples": 50
               },
               "stages": {}
             },
             "reconcile_pending": {
               "total": {
-                "p50_ms": 0.453,
-                "p95_ms": 0.589,
-                "p99_ms": 8.696,
-                "max_ms": 11.057,
+                "p50_ms": 0.447,
+                "p95_ms": 0.532,
+                "p99_ms": 8.171,
+                "max_ms": 10.133,
                 "samples": 50
               },
               "stages": {}
             }
           },
-          "db_size_seeded_bytes": 1785856,
-          "db_size_final_bytes": 14245888,
+          "db_size_seeded_bytes": 1773568,
+          "db_size_final_bytes": 13840384,
           "event_count": 1417
         }
       },
@@ -1194,10 +1194,10 @@
         "local-cross-encoder"
       ],
       "cold_start": {
-        "import_ms": 128.0,
-        "service_open_ms": 596.7,
-        "first_capture_ms": 26.3,
-        "first_resume_ms": 45.5
+        "import_ms": 184.7,
+        "service_open_ms": 643.2,
+        "first_capture_ms": 27.3,
+        "first_resume_ms": 48.2
       }
     }
   },
@@ -1216,8 +1216,8 @@
   "passed": true,
   "provenance": {
     "signing_version": "report-signing-v1",
-    "generated_at": "2026-07-15T15:17:58.517216+00:00",
-    "git_commit": "c10d33b26e31b244991f9079236b07742095f225",
+    "generated_at": "2026-07-15T18:15:31.849883+00:00",
+    "git_commit": "4cdb1491fd637293311e90332e925c93b7637e4d",
     "git_dirty": true,
     "package_version": "0.8.0",
     "schema_version": 9,
@@ -1227,5 +1227,5 @@
     "platform": "win32",
     "artifact_sha256": {}
   },
-  "report_sha256": "3d7c95271c0d1e8c45a892b66efda2259363eb5dda333bbe69fbb83330f3d3e2"
+  "report_sha256": "12efacf6b488529afca8a512830a2221bdc92e0b0d99c2d124bb364ce6a0ce21"
 }

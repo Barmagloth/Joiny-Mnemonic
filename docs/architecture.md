@@ -334,6 +334,26 @@ the user via the hook `systemMessage` on claude-code (with a ready
 `[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` elsewhere; capabilities report
 the per-kind settlement policy and the notification channel.
 
+### Settlement surfaces (task6C)
+
+Manual verbs live in `settlement.py` (`SettlementSurface`), a thin
+semantics layer over the same ledger. CLI: `candidates list|show|settle|undo`
+(`settle` requires `--transition applied|contested|reverted` and a
+`--reason`). MCP: `memory_candidates` (read: list or one candidate with its
+full transition history) and `memory_settle_candidate` (write, gated — see
+docs/security.md). Every manual settlement rides one canonical internal
+`settlement_requested` event; per-kind semantics reuse the 6B machinery:
+`task_closure` applied reconstructs the detection from its canonical event
+and writes through the same closure path as auto-apply, `reverted` routes
+through `undo_closure`, `block_change` applied merges the proposed line
+into the target block via the consolidator merge rules (replace-mode for
+`goal`/`instructions`) and reverted restores losslessly (line removal for
+list blocks, recorded previous content for replace-mode blocks). The resume
+packet's `[STATE MAINTENANCE - PENDING CONFIRMATIONS]` section is the
+bounded index of all active candidates (cap 5 + overflow count): closure
+detections keep their provenance sentence, other kinds appear index-only
+with the candidate id; the section disappears once candidates settle.
+
 
 ### v1 authority and ledger vocabulary
 

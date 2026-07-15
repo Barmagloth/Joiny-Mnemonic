@@ -8,6 +8,12 @@ HOST_HOOK = "host_hook"
 INTERNAL = "internal"
 LEGACY_UNTRUSTED = "legacy_untrusted"
 
+# task6.md 6C: manual settlement rides one canonical request event. The
+# internal channel cannot be minted by public-API or MCP text (surfaces
+# hardcode origin_channel), so the payload below is process-authored fact,
+# not a caller claim.
+SETTLEMENT_REQUEST_OPERATION = "settlement_requested"
+
 
 class EventProvenance(Protocol):
     role: str | None
@@ -24,6 +30,15 @@ def origin_evidence_type(event: EventProvenance) -> str:
         and event.payload.get("operation") == "policy_bootstrapped"
     ):
         return "bootstrap_tofu"
+    if (
+        event.origin_channel == INTERNAL
+        and event.payload.get("operation") == SETTLEMENT_REQUEST_OPERATION
+    ):
+        requested_by = event.payload.get("requested_by")
+        if requested_by == "operator":
+            return "local_operator"
+        if requested_by == "agent":
+            return "delegated_agent"
     return "external_untrusted"
 
 

@@ -25,6 +25,7 @@ from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
 from . import temporal
 from .reconciler import StateReconciler
+from .settlement import SettlementSurface
 from .snapshots import SnapshotManager
 from .staleness import MemoryStaleness, StalenessService
 from .storage import CURRENT_SCHEMA_VERSION, MemoryStore
@@ -134,6 +135,7 @@ class MemoryService:
         self.tasks = TaskManager(self)
         self.governor = BudgetGovernor(self)
         self.reconciler = StateReconciler(self)
+        self.settlement = SettlementSurface(self)
         self.plugin_errors = self.plugins.errors
 
     def _sync_extraction_policy(self) -> bool:
@@ -173,11 +175,17 @@ class MemoryService:
         *,
         automatic_extraction_enabled: bool = False,
         automatic_task_closure_enabled: bool = False,
+        agent_settlement_delegation_enabled: bool = False,
     ) -> dict[str, Any]:
         policy = {
             "version": 1,
             "automatic_extraction_enabled": bool(automatic_extraction_enabled),
             "automatic_task_closure_enabled": bool(automatic_task_closure_enabled),
+            # task6.md 6C: OFF by default — untrusted text reaching the agent
+            # must never gain settle authority without an explicit user opt-in.
+            "agent_settlement_delegation_enabled": bool(
+                agent_settlement_delegation_enabled
+            ),
             "auto_threshold": (
                 self.extraction.config.auto_threshold
                 if self.extraction.config is not None else 0.85
@@ -751,22 +759,51 @@ class MemoryService:
             pending = self.reconciler.pending_completions(branch_id=branch_id)
         except Exception:
             pending = []
-        if pending:
+        try:
+            other_pending = [
+                item
+                for item in self.store.list_settlement_candidates(status="pending")
+                if item["candidate_kind"] != "task_closure"
+            ]
+        except Exception:
+            other_pending = []
+        if pending or other_pending:
             # task5.md A1 flag-off contract (review M11): detections surface
             # as one line in the packet, not only in capabilities. Phrased as
             # provenance, not as a bare TODO next to open_tasks (review
             # 2026-07-15): the same entry appearing in open_tasks AND as a
             # naked pending line reads as internal contradiction, and an
             # imperative "confirm to close" reads as an injected command.
-            lines = "\n".join(
+            # task6.md 6C: this section is the bounded index of ALL active
+            # settlement candidates. Non-closure kinds appear as index-only
+            # lines — full candidate content is never injected by default;
+            # agents quote it through candidate tools (A4 discipline).
+            lines = [
                 f"- prior user task «{item['entry']}» still appears in open_tasks; "
                 f"captured evidence ({item['evidence_event_id']}) suggests it is "
                 "already done — ask the user before treating it as closed"
+                + (
+                    f" (candidate {item['candidate_id']})"
+                    if item.get("candidate_id")
+                    else ""
+                )
                 for item in pending[:5]
+            ]
+            lines.extend(
+                f"- a {item['candidate_kind']} candidate awaits settlement "
+                f"({item['id']}); inspect: joiny-mnemonic candidates show "
+                f"{item['id']}"
+                for item in other_pending[: max(0, 5 - len(lines))]
             )
+            overflow = len(pending) + len(other_pending) - len(lines)
+            if overflow > 0:
+                lines.append(
+                    f"- …and {overflow} more pending candidate(s): "
+                    "joiny-mnemonic candidates list --status pending"
+                )
             instructions = (
                 *instructions,
-                "[STATE MAINTENANCE - PENDING CONFIRMATIONS]\n" + lines,
+                "[STATE MAINTENANCE - PENDING CONFIRMATIONS]\n" + "\n".join(lines),
             )
         # Session-start digest of recent autonomous actions (task6.md 6B):
         # a returning user sees the delta even if the moment-of-action
@@ -949,6 +986,16 @@ class MemoryService:
                             "strong": "auto", "medium": "flag", "weak": "manual",
                         },
                         "block_change": {"any": "manual"},
+                    },
+                    # task6.md 6C: manual settlement surfaces and their trust
+                    # gate. Agent (MCP) settlement stays off until the policy
+                    # ledger explicitly delegates it.
+                    "settlement_surfaces": {
+                        "cli": ["list", "show", "settle", "undo"],
+                        "mcp": ["memory_candidates", "memory_settle_candidate"],
+                        "agent_settlement_delegation_enabled": (
+                            self.settlement.agent_delegation_enabled()
+                        ),
                     },
                     # claude-code renders hook systemMessage to the user;
                     # other hosts see auto-actions in the resume digest only.
