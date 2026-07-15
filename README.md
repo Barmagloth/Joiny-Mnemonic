@@ -357,10 +357,14 @@ LongMemEval results and are stated here explicitly:
   barely moves the headline). Evidence:
   `benchmarks/results/gpt-rejudge-codex-20260714-225820/` and
   `benchmarks/results/rejudge-opus.json`, both offline-verifiable.
-- **The runner's answer prompt is benchmark-tuned**: it instructs dated
-  enumeration for aggregation questions and grounded synthesis for
-  preference questions. A production agent without such prompting would
-  score lower; the prompt is in `benchmarks/runner_claude_code.py`.
+- **The runner's answer prompt is benchmark-tuned**, and its contribution
+  is measured: on a stratified 60-question subset under the identical
+  product stack, a plain answering prompt scores 70.0% vs 86.7% with the
+  tuned prompt — roughly 17pp. The biggest losses without it: preference
+  (3/10 vs 7/10) and knowledge-update/aggregation phrasing. The prompt is
+  in `benchmarks/runner_claude_code.py` (`LME_PLAIN_PROMPT=1` reproduces
+  the ablation); read the headline as "retrieval stack + a well-prompted
+  reader", not the stack alone.
 - **Single run, no variance estimate.** LLM answering and judging are
   stochastic; treat the figure as a point estimate.
 - **The verbatim Appendix-A.4 judge is lenient in places** — e.g. an answer

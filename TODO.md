@@ -53,8 +53,12 @@ preference questions into abstention.
       leniency instance found and documented; wrong-lead-right-string
       archetype exists, adjudicated split; preference carries 7/12 flips;
       zero multi-session flips under any judge
-- [ ] Methodology hardening, remaining: prompt ablation (running) and
-      small stratified repeat runs for a variance band
+- [x] Prompt ablation done (2026-07-15): plain prompt 70.0% vs tuned 86.7%
+      on the same stratified 60 under the identical product stack — the
+      benchmark-tuned prompt contributes ~17pp; README states it and how to
+      reproduce (LME_PLAIN_PROMPT=1)
+- [ ] Methodology hardening, remaining: small stratified repeat runs for
+      a variance band
 
 Done when: (achieved for the headline; error-analysis items continue)
 
