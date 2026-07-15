@@ -67,6 +67,11 @@ Zero behavior change. Ships first because 6B must be provably cold.
 - The timing report is provenance-stamped and checked into
   `benchmarks/results/` (report stamping itself shipped with task 5:
   `report_signing.py`).
+- Hardened acceptance (review 2026-07-15): the report must carry per-stage
+  breakdown, fixture sizes, cold/warm split, SQLite size at multiple
+  scales, p50/p95/p99 and regression gates — not a single "hook took X"
+  number. Standing rule: no new always-on feature before the hot path it
+  touches is observable in this report. DELIVERED (hook-timing schema v2).
 
 ## Task 6B — general candidate settlement
 

@@ -7,9 +7,30 @@ import re
 import shlex
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+# Stage observability (task6A acceptance): hook_timing installs a dict here
+# to collect per-stage wall time for one delivery. Default None keeps the
+# hot path at a single falsy check per stage - zero behavior change.
+_STAGE_SINK: dict[str, float] | None = None
+
+
+@contextmanager
+def _stage(name: str):
+    if _STAGE_SINK is None:
+        yield
+        return
+    started = time.perf_counter_ns()
+    try:
+        yield
+    finally:
+        _STAGE_SINK[name] = _STAGE_SINK.get(name, 0.0) + (
+            time.perf_counter_ns() - started
+        ) / 1_000_000
 
 from .adapters import adapter_capabilities
 from .context_limits import ContextLimitConfig
@@ -330,96 +351,105 @@ def process_hook(
     external_session = _native_session(value)
     task_key = _task_key(value)
     task = None
-    if task_key is not None:
-        task = service.tasks.ensure(
-            task_key,
-            title=str(value.get("task_title", value.get("taskTitle", task_key))),
-            parent_branch=branch_id,
-            metadata={"agent": agent, "external_session": external_session},
-        )
-    else:
-        task = service.store.task_for_hook_session(agent, external_session)
-    if task is not None:
-        branch_id = task.branch_id
+    with _stage("session_resolution"):
+        if task_key is not None:
+            task = service.tasks.ensure(
+                task_key,
+                title=str(value.get("task_title", value.get("taskTitle", task_key))),
+                parent_branch=branch_id,
+                metadata={"agent": agent, "external_session": external_session},
+            )
+        else:
+            task = service.store.task_for_hook_session(agent, external_session)
+        if task is not None:
+            branch_id = task.branch_id
 
-    session_id = service.store.hook_session(
-        agent,
-        external_session,
-        branch_id=branch_id,
-        capabilities=adapter_capabilities(agent),
-    )
-    if task is not None:
-        service.store.bind_task_session(session_id, task.task_key)
+        session_id = service.store.hook_session(
+            agent,
+            external_session,
+            branch_id=branch_id,
+            capabilities=adapter_capabilities(agent),
+        )
+        if task is not None:
+            service.store.bind_task_session(session_id, task.task_key)
 
     if event_name in {"PreCompact", "PostCompact"}:
-        service.consolidator.consolidate_pending(service, branch_id=branch_id)
-        service.consolidator.compact(service, branch_id=branch_id)
-        service.create_snapshot(branch_id=branch_id)
+        with _stage("compact_work"):
+            service.consolidator.consolidate_pending(service, branch_id=branch_id)
+            service.consolidator.compact(service, branch_id=branch_id)
+            service.create_snapshot(branch_id=branch_id)
 
     precheck_report = None
     capture_value = value
     if event_name == "PreToolUse":
-        precheck_report = service.precheck(
-            files=_tool_files(value),
-            command=_tool_command(value),
-            branch_id=branch_id,
-        )
-        capture_value = {
-            **value,
-            "_joiny_precheck": asdict(precheck_report),
-        }
+        with _stage("precheck"):
+            precheck_report = service.precheck(
+                files=_tool_files(value),
+                command=_tool_command(value),
+                branch_id=branch_id,
+            )
+            capture_value = {
+                **value,
+                "_joiny_precheck": asdict(precheck_report),
+            }
 
     receipt_key = _receipt_key(agent, external_session, value)
-    events, _created = service.store.append_host_events_once(
-        receipt_key,
-        _hook_events(capture_value),
-        adapter=agent,
-        branch_id=branch_id,
-        session_id=session_id,
-    )
-    service.reduce_tool_outputs(events)
-    if event_name == "PostToolUseFailure":
-        _derive_native_failure(service, value, events)
-    service.usage.capture_native(
-        value,
-        source=agent,
-        branch_id=branch_id,
-        session_id=session_id,
-        event_id=events[-1].id,
-        receipt_key=f"usage:{receipt_key}",
-    )
-    policy = service.budget_policy(branch_id=branch_id, agent=agent)
-    counter = service.usage.record_hook_context(
-        events,
-        event_name=event_name,
-        branch_id=branch_id,
-        session_id=session_id,
-        receipt_key=receipt_key,
-        context_window_tokens=policy.context_window_tokens,
-        threshold_tokens=service.governor.thresholds(policy)["snapshot"],
-    )
-    warning = (
-        service.governor.register_context_checkpoint(
-            counter,
+    with _stage("capture_append"):
+        events, _created = service.store.append_host_events_once(
+            receipt_key,
+            _hook_events(capture_value),
+            adapter=agent,
+            branch_id=branch_id,
+            session_id=session_id,
+        )
+    with _stage("reduction"):
+        service.reduce_tool_outputs(events)
+        if event_name == "PostToolUseFailure":
+            _derive_native_failure(service, value, events)
+    with _stage("usage_telemetry"):
+        service.usage.capture_native(
+            value,
+            source=agent,
+            branch_id=branch_id,
+            session_id=session_id,
+            event_id=events[-1].id,
+            receipt_key=f"usage:{receipt_key}",
+        )
+        policy = service.budget_policy(branch_id=branch_id, agent=agent)
+        counter = service.usage.record_hook_context(
+            events,
+            event_name=event_name,
+            branch_id=branch_id,
+            session_id=session_id,
+            receipt_key=receipt_key,
+            context_window_tokens=policy.context_window_tokens,
+            threshold_tokens=service.governor.thresholds(policy)["snapshot"],
+        )
+        warning = (
+            service.governor.register_context_checkpoint(
+                counter,
+                branch_id=branch_id,
+                session_id=session_id,
+                source_event=events[-1],
+                agent=agent,
+            )
+            if counter is not None else False
+        )
+    # A retry may follow a crash after capture but before consolidation; receipts make
+    # capture idempotent and every derived subsystem has its own idempotent receipt.
+    with _stage("consolidation"):
+        service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
+    with _stage("reconcile"):
+        service.reconciler.reconcile(branch_id=branch_id)
+    with _stage("maintenance"):
+        service.extraction.notify(detached=True)
+        service.checkpoint_witness()
+        decision = service.governor.evaluate_and_apply(
             branch_id=branch_id,
             session_id=session_id,
             source_event=events[-1],
             agent=agent,
         )
-        if counter is not None else False
-    )
-    # A retry may follow a crash after capture but before consolidation; receipts make
-    # capture idempotent and every derived subsystem has its own idempotent receipt.
-    service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
-    service.reconciler.reconcile(branch_id=branch_id)
-    service.extraction.notify(detached=True)
-    service.checkpoint_witness()
-    decision = service.governor.evaluate_and_apply(
-        branch_id=branch_id,
-        session_id=session_id,
-        source_event=events[-1],
-        agent=agent,
-    )
 
     if event_name == "PreToolUse":
         stored = events[-1].payload.get("_joiny_precheck")
@@ -442,14 +472,15 @@ def process_hook(
         inject_context = True
     if inject_context:
         query = str(value.get("prompt", "resume current goal constraints decisions and open tasks"))
-        packet = service.resume(
-            branch_id=branch_id,
-            token_budget=token_budget,
-            query=query,
-            session_id=session_id,
-            task_key=task.task_key if task is not None else None,
-            telemetry_receipt=f"prompt-injection:{receipt_key}",
-        )
+        with _stage("packet_assembly"):
+            packet = service.resume(
+                branch_id=branch_id,
+                token_budget=token_budget,
+                query=query,
+                session_id=session_id,
+                task_key=task.task_key if task is not None else None,
+                telemetry_receipt=f"prompt-injection:{receipt_key}",
+            )
         context = packet.text
         thresholds = service.governor.thresholds(policy)
         if warning and counter is not None:

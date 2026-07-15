@@ -69,12 +69,15 @@ Done when: (achieved for the headline; error-analysis items continue)
 
 We shipped hot-path fixes (M5/M6) without measurements; that is debt.
 
-- [x] Timing benchmark shipped (`joiny-mnemonic-hook-timing`): all six
-      scenarios, two plugin modes. Measured 2026-07-15: capture ~20ms,
-      reducer p50 52ms (tail ~390ms), resume ~330ms, compact ~390ms,
-      reconciler 3-5ms — the M5/M6 hot-path work is vindicated by numbers;
-      warm plugins cost ~20ms at p95
-- [x] p95 budgets asserted as gates (`--assert-gates`)
+- [x] Timing benchmark shipped and hardened to the strict acceptance
+      (schema v2): per-stage breakdown, fixture sizes, cold/warm, two
+      store scales, p50/p95/p99. Key numbers 2026-07-15: capture ~22ms;
+      resume ~360-390ms of which packet assembly ~354ms (92% — the named
+      next optimization target); reconciler 3-8ms; latencies flat from
+      243 to 1411 events; cold service open 190ms core / 630ms plugins
+- [x] p95 + cold budgets asserted as gates (`--assert-gates`); standing
+      rule recorded: no new always-on feature before its hot path is
+      observable in this report
 - [x] Cold-feature invariant test: capture-path hook delivery imports no
       torch/sentence-transformers even with plugins installed
 - [x] Stamped report in `benchmarks/results/hook-timing-latest.json`

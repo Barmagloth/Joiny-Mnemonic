@@ -104,19 +104,26 @@ durable candidate/memory effects for an event and configuration hash.
 
 ## Hook-path timing (task6A)
 
-`joiny-mnemonic-hook-timing` measures what a host pays per hook delivery,
-per scenario, in two modes (core only / installed plugins), and asserts
-loose p95 budgets as gates — order-of-magnitude tripwires against silent
-hot-path regressions, not micro-benchmarks:
+`joiny-mnemonic-hook-timing` measures what a host pays per hook delivery
+under the hardened acceptance: per-stage breakdown inside each delivery
+(session resolution, capture append, reduction, telemetry, consolidation,
+reconcile, maintenance, packet assembly), fixture sizes, cold vs warm,
+SQLite store size at two scales, p50/p95/p99, and regression gates:
 
-    joiny-mnemonic-hook-timing --project-root . --repetitions 30 --assert-gates
+    joiny-mnemonic-hook-timing --project-root . --repetitions 50 --assert-gates
 
-Reference points (2026-07-15, development machine, warm process): capture
-~20ms p50; reducer path p50 ~52ms with a variance-prone tail (~390ms p95);
-resume injection ~330ms; compact path ~390ms; reconciler passes 3-5ms.
-Installed plugins (semantic + reranker) cost ~20ms extra at p95 on warm
-paths; the first semantic search of a process additionally pays one-time
-model load. The capture path is guarded by a cold-feature invariant test:
-hook delivery must never import heavyweight optional dependencies
-(torch/sentence-transformers stay lazy until a retrieval surface runs).
-The stamped report lands in `benchmarks/results/hook-timing-latest.json`.
+Reference points (2026-07-15, development machine): warm capture ~22ms
+p50; resume delivery ~360-390ms of which **packet assembly is ~354ms —
+92% of the path and the standing optimization target**; reconciler
+3-8ms; every other stage under 0.1ms. Latencies are flat between a
+243-event/548KB store and a 1411-event/1.8MB store. Cold start: imports
+~130ms, service open ~190ms core / ~630ms with plugins (entry-point
+loading); heavyweight models stay lazy — the embedder loads on the first
+semantic query against a non-empty index, not at delivery time. The
+capture path is guarded by a cold-feature invariant test (no
+torch/sentence-transformers imports on delivery).
+
+Standing rule (task6A acceptance): **no new always-on feature lands
+without extending this report first** — the hot path stays observable
+before it grows. The stamped report lives in
+`benchmarks/results/hook-timing-latest.json`.
