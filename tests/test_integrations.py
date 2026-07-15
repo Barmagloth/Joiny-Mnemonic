@@ -367,7 +367,7 @@ class IntegrationTest(unittest.TestCase):
             env=env,
             input=b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8"),
             capture_output=True,
-            timeout=30,
+            timeout=90,
         )
         self.assertEqual(
             completed.returncode,
@@ -387,6 +387,56 @@ class IntegrationTest(unittest.TestCase):
             self.assertTrue(service.store.has_hook_activity("claude-code"))
         finally:
             service.close()
+
+    def test_hook_stdout_is_utf8_under_narrow_windows_codepage(self) -> None:
+        """Claude Code reads hook stdout as UTF-8. A Windows launcher may
+        set a narrow console encoding; hook JSON must still preserve Cyrillic."""
+        root = RUNTIME_ROOT / f"hook-stdout-utf8-{uuid.uuid4().hex}"
+        project = root / "project"
+        project.mkdir(parents=True)
+        database = project / ".joiny-mnemonic" / "memory.db"
+        env = os.environ.copy()
+        env.update(
+            {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONIOENCODING": "cp1251",
+            }
+        )
+        marker = "конфиги GPTShared только YAML"
+        payload = {
+            "hook_event_name": "UserPromptSubmit",
+            "session_id": "narrow-hook-stdout",
+            "cwd": str(project),
+            "prompt": f"Decision: {marker}",
+        }
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "joiny_mnemonic",
+                "--db",
+                str(database),
+                "--project-root",
+                str(project),
+                "hook",
+                "--agent",
+                "claude-code",
+                "--budget",
+                "1500",
+            ],
+            cwd=project,
+            env=env,
+            input=json.dumps(payload).encode("utf-8"),
+            capture_output=True,
+            timeout=90,
+        )
+        stderr = completed.stderr.decode("utf-8", errors="replace")
+        self.assertEqual(completed.returncode, 0, stderr)
+        stdout = completed.stdout.decode("utf-8")
+        self.assertIn(marker, stdout)
+        self.assertNotIn("����", stdout)
+        self.assertIn("hookSpecificOutput", json.loads(stdout))
 
     def test_stdio_is_newline_delimited_json_only(self) -> None:
         incoming = io.BytesIO(

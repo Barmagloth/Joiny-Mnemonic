@@ -897,21 +897,30 @@ def run(args: argparse.Namespace) -> int:
         service.close()
 
 
-def main() -> None:
+def _configure_output_encoding(*, utf8: bool = False) -> None:
     # Windows consoles often use narrow codepages (cp1251/cp866); captured
-    # memory legitimately contains characters they cannot encode (e.g. "↔"
+    # memory legitimately contains characters they cannot encode (e.g. an arrow symbol
     # from a real project file crashed `resume` during the first live run).
-    # Keep the console's own encoding so Cyrillic still renders, but replace
-    # unencodable characters instead of dying.
+    # Interactive CLI output keeps the console's own encoding so Cyrillic still
+    # renders there, but native hook stdout is a host protocol and must be
+    # UTF-8 JSON regardless of the launcher codepage.
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
             try:
-                reconfigure(errors="replace")
+                if utf8:
+                    reconfigure(encoding="utf-8", errors="replace")
+                else:
+                    reconfigure(errors="replace")
             except (OSError, ValueError):
                 pass
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    _configure_output_encoding(utf8=args.command == "hook")
     try:
-        raise SystemExit(run(build_parser().parse_args()))
+        raise SystemExit(run(args))
     except (ValueError, KeyError, OSError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
