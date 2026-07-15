@@ -81,6 +81,11 @@ class ConsolidationAndHooksTest(unittest.TestCase):
             query="verified build codename",
             required_evidence=("ORBITAL741",),
         )
+        # 768 is a fixture repair, not a product-budget statement: the old
+        # 700 sat on a packing knife-edge and started catching frame-size
+        # shifts instead of the semantic contract (promoted fact beats
+        # distractors). The boundary moved to ~730 after the 2026-07-15
+        # frame diet; 768 clears it with margin while staying tight.
         report = evaluate_policies(
             self.service,
             [task],
