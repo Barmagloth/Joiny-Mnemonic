@@ -83,8 +83,11 @@ def _git_head(root: Path) -> str | None:
 class FileHashCache:
     """Store-backed (size, mtime_ns) -> sha256 projection so repeated
     fingerprints re-hash only files whose stat changed — the same freshness
-    assumption git's index makes. Rebuildable; wrong entries only ever cost
-    a re-hash, never a wrong staleness verdict on changed content."""
+    assumption git's index makes, with the same known limitation: content
+    rewritten while preserving both size and mtime_ns is reported unchanged
+    until any stat change forces a re-hash. Acceptable for a rebuildable
+    staleness-hint projection (drop the table to force full re-hash);
+    nothing security-relevant keys off these hashes."""
 
     def __init__(self, store: MemoryStore, root: str | Path) -> None:
         self._store = store
