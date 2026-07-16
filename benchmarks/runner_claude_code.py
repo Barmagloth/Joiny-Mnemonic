@@ -56,15 +56,48 @@ DISTILL_PROMPT = (
     "Session date: {date}\n\nTranscript:\n{transcript}"
 )
 
+# Keyed variant (LME_DISTILL_KEYED=1): the SCD/Graphiti-style shape — every
+# stateful fact carries a (subject, attribute) key so a later fact with the
+# same key can close the earlier one deterministically, no similarity
+# guessing. Event-like facts carry key null.
+DISTILL_KEYED_PROMPT = (
+    "Extract 2-5 comprehensive, self-contained narrative facts from this "
+    "conversation session. Each fact covers a whole exchange, names all "
+    "participants explicitly - never 'the user said' without what/when - "
+    "and preserves concrete details: dates, quantities, names, decisions, "
+    "preferences. Every fact must embed the session date. If the session "
+    "updates or contradicts a previously plausible state (a number changed, "
+    "someone moved, a schedule changed), state the NEW value explicitly.\n\n"
+    "Output ONLY a JSON array of objects, no prose. Each object:\n"
+    '  {{"fact": "<the narrative fact>", "key": "<subject>|<attribute>" or null}}\n'
+    "The key identifies WHAT STATE the fact asserts, so that a later fact "
+    "about the same state can replace it. Use a stable, generic subject and "
+    "attribute in lowercase English: the speaking user is always subject "
+    "'user'; other people by first name. Examples: 'user|5k-personal-best', "
+    "'rachel|residence', 'user|therapy-frequency', 'user|job-title'. Facts "
+    "that describe one-off events, activities or requests (not a persistent "
+    "state) get key null.\n\n"
+    "Session date: {date}\n\nTranscript:\n{transcript}"
+)
+
+
+def _distill_prompt(payload: dict) -> str:
+    template = (
+        DISTILL_KEYED_PROMPT
+        if os.environ.get("LME_DISTILL_KEYED")
+        else DISTILL_PROMPT
+    )
+    return template.format(
+        date=payload.get("session_date", "unknown"),
+        transcript=payload.get("transcript", ""),
+    )
+
 
 def build_prompt(payload: dict) -> str:
     if payload.get("mode") == "judge":
         return payload["prompt"]
     if payload.get("mode") == "distill":
-        return DISTILL_PROMPT.format(
-            date=payload.get("session_date", "unknown"),
-            transcript=payload.get("transcript", ""),
-        )
+        return _distill_prompt(payload)
     preamble = (
         PLAIN_PREAMBLE if os.environ.get("LME_PLAIN_PROMPT") else ANSWER_PREAMBLE
     )

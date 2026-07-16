@@ -65,6 +65,35 @@ def _containment(a: frozenset[str], b: frozenset[str]) -> float:
     return len(a & b) / min(len(a), len(b))
 
 
+def _normalize_facts(parsed: Any) -> list[dict[str, Any]]:
+    """Distillations as dicts {fact, key}; legacy caches hold plain strings
+    (key None). Keyed caches hold objects from the keyed distill prompt."""
+    facts: list[dict[str, Any]] = []
+    if not isinstance(parsed, list):
+        return facts
+    for item in parsed:
+        if isinstance(item, dict):
+            fact = str(item.get("fact", "")).strip()
+            key = item.get("key")
+            key = str(key).strip() if key else None
+        else:
+            fact, key = str(item).strip(), None
+        if fact:
+            facts.append({"fact": fact, "key": key or None})
+    return facts
+
+
+def _normalize_state_key(key: str) -> str:
+    """Stable form for LLM-emitted (subject|attribute) keys: lowercase,
+    separators collapsed per segment, so 'User | 5K Personal Best' ==
+    'user|5k-personal-best'."""
+    segments = [
+        re.sub(r"[\s_-]+", "-", segment.strip().casefold()).strip("-")
+        for segment in key.split("|")
+    ]
+    return "|".join(segment for segment in segments if segment)
+
+
 _JUDGE_COMMON = (
     "I will give you a question, a correct answer, and a response from a model. "
     "Please answer yes if the response contains the correct answer. Otherwise, "
@@ -278,10 +307,16 @@ class LMEHarness:
     # an earlier one (content-token containment >= threshold, dates differ)
     # supersedes it through the product ledger, so the stale value drops
     # out of retrieval (the KU stale-fact-poisoning fix, value-update class).
+    # "distill-keyed": facts carry LLM-emitted (subject|attribute) keys and
+    # a later fact with the same key supersedes the earlier one (SCD /
+    # Graphiti shape: LLM structures once at write time, closure is
+    # deterministic by key). Needs the keyed distill prompt
+    # (LME_DISTILL_KEYED=1 for the claude-code runner) and its own cache.
     ingest_mode: str = "raw"
     supersede_containment: float = 0.30
     distill_cache_dir: Path | None = None
     _fact_index: list = field(default_factory=list, repr=False)
+    _state_index: dict = field(default_factory=dict, repr=False)
     _cross_encoder: Any = field(default=None, repr=False)
     active_semantic_plugins: list[str] = field(default_factory=list)
     active_reranker_plugins: list[str] = field(default_factory=list)
@@ -302,7 +337,9 @@ class LMEHarness:
             if self.distill_cache_dir else None
         )
         if cache_file is not None and cache_file.exists():
-            return json.loads(cache_file.read_text(encoding="utf-8"))
+            return _normalize_facts(
+                json.loads(cache_file.read_text(encoding="utf-8"))
+            )
         output = self.runner.call(
             {
                 "mode": "distill",
@@ -311,12 +348,11 @@ class LMEHarness:
                 "session_id": session["session_id"],
             }
         )
-        facts: list[str] = []
+        facts: list[dict[str, Any]] = []
         try:
             start = output.index("[")
             end = output.rindex("]") + 1
-            parsed = json.loads(output[start:end])
-            facts = [str(item) for item in parsed if str(item).strip()]
+            facts = _normalize_facts(json.loads(output[start:end]))
         except (ValueError, json.JSONDecodeError):
             facts = []
         if cache_file is not None:
@@ -358,6 +394,7 @@ class LMEHarness:
         stale assertion leaves the retrieval view while history keeps it."""
         count = 0
         self._fact_index = []
+        self._state_index = {}
         for session in item.sessions:
             date = session["date"]
             event_ids: list[str] = []
@@ -377,14 +414,25 @@ class LMEHarness:
                 )
                 event_ids.append(event.id)
                 count += 1
-            if self.ingest_mode in ("distill", "distill-aware") and event_ids:
+            if (
+                self.ingest_mode in ("distill", "distill-aware", "distill-keyed")
+                and event_ids
+            ):
                 iso_date = date[:10].replace("/", "-") if date else ""
-                for fact in self._distill_session(session):
-                    supersedes = (
-                        self._superseded_fact(fact, iso_date)
-                        if self.ingest_mode == "distill-aware"
-                        else None
-                    )
+                for item in self._distill_session(session):
+                    fact = item["fact"]
+                    supersedes = None
+                    state_key = None
+                    if self.ingest_mode == "distill-aware":
+                        supersedes = self._superseded_fact(fact, iso_date)
+                    elif self.ingest_mode == "distill-keyed" and item["key"]:
+                        # SCD-style closure: a later fact with the same
+                        # (subject|attribute) key replaces the earlier one —
+                        # deterministic, no similarity guessing.
+                        state_key = _normalize_state_key(item["key"])
+                        live = self._state_index.get(state_key)
+                        if live is not None and iso_date and live[1] < iso_date:
+                            supersedes = live[0]
                     record = service.store.derive_memory(
                         memory_type="fact",
                         content=fact,
@@ -399,6 +447,10 @@ class LMEHarness:
                         self._fact_index.append(
                             (record.id, iso_date, _fact_tokens(fact))
                         )
+                    elif state_key is not None:
+                        live = self._state_index.get(state_key)
+                        if live is None or not live[1] or live[1] <= iso_date:
+                            self._state_index[state_key] = (record.id, iso_date)
         return count
 
     def _superseded_fact(self, fact: str, iso_date: str) -> str | None:
@@ -680,11 +732,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         "(requires sentence-transformers)",
     )
     parser.add_argument(
-        "--ingest", choices=["raw", "distill", "distill-aware"], default="raw",
+        "--ingest",
+        choices=["raw", "distill", "distill-aware", "distill-keyed"],
+        default="raw",
         help="raw: verbatim turns only; distill: LLM-extracted facts "
         "derived alongside the turns (A/B for the Phase B shape); "
-        "distill-aware: distill plus deterministic update-supersession "
-        "(a later near-duplicate fact supersedes the stale one)",
+        "distill-aware: distill plus token-overlap update-supersession "
+        "(measured dead end); distill-keyed: facts carry (subject|attribute) "
+        "keys from the keyed distill prompt and a later fact supersedes the "
+        "earlier one with the same key (SCD shape; set LME_DISTILL_KEYED=1 "
+        "and a dedicated --distill-cache)",
     )
     parser.add_argument(
         "--distill-cache", default="benchmarks/distill-cache",
