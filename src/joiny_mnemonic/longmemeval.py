@@ -36,6 +36,35 @@ from .prompt import conservative_token_estimate
 from .service import MemoryService
 
 
+# Update-supersession normalization (distill-aware mode). Stopwords and
+# date-shaped tokens are excluded so two facts about the same subject that
+# differ only in the value slot score high; calibration 2026-07-16 on the
+# distill cache: the 5K value-update pair scores 0.333 while the p99 of
+# 2,788 cross-session background pairs is 0.143 (max 0.219) — threshold
+# 0.30 separates cleanly with zero sampled false positives.
+_FACT_STOPWORDS = frozenset(
+    "the a an of to in on at for with and or by from was were is are their "
+    "they user assistant claude that this his her its as had have has been".split()
+)
+_FACT_DATEISH = re.compile(r"^\d{4}$|^\d{1,2}$|^\d{4}[-/]\d{2}[-/]\d{2}")
+
+
+def _fact_tokens(fact: str) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in re.findall(r"[a-z0-9:+\-]+", fact.lower())
+        if token not in _FACT_STOPWORDS
+        and not _FACT_DATEISH.match(token)
+        and len(token) > 2
+    )
+
+
+def _containment(a: frozenset[str], b: frozenset[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
 _JUDGE_COMMON = (
     "I will give you a question, a correct answer, and a response from a model. "
     "Please answer yes if the response contains the correct answer. Otherwise, "
@@ -244,8 +273,15 @@ class LMEHarness:
     retrieval_limit: int = 24
     packing: str = "rank"  # "rank" (greedy fused order) | "breadth" (see below)
     rerank: bool = False  # cross-encoder rerank of the candidate pool
-    ingest_mode: str = "raw"  # "raw" turns | "distill" facts alongside turns
+    # "raw" turns | "distill" facts alongside turns | "distill-aware" adds
+    # deterministic update-supersession: a later fact that near-duplicates
+    # an earlier one (content-token containment >= threshold, dates differ)
+    # supersedes it through the product ledger, so the stale value drops
+    # out of retrieval (the KU stale-fact-poisoning fix, value-update class).
+    ingest_mode: str = "raw"
+    supersede_containment: float = 0.30
     distill_cache_dir: Path | None = None
+    _fact_index: list = field(default_factory=list, repr=False)
     _cross_encoder: Any = field(default=None, repr=False)
     active_semantic_plugins: list[str] = field(default_factory=list)
     active_reranker_plugins: list[str] = field(default_factory=list)
@@ -316,8 +352,12 @@ class LMEHarness:
         In "distill" mode LLM-extracted facts are ADDED alongside the
         verbatim turns through the product derive path (provenance to the
         session's events) — the A/B tests our Phase B shape, facts next to
-        verbatim, never a lossy replacement."""
+        verbatim, never a lossy replacement. "distill-aware" additionally
+        supersedes an earlier near-duplicate fact (same subject, different
+        value, strictly older session date) through the ledger, so the
+        stale assertion leaves the retrieval view while history keeps it."""
         count = 0
+        self._fact_index = []
         for session in item.sessions:
             date = session["date"]
             event_ids: list[str] = []
@@ -337,18 +377,46 @@ class LMEHarness:
                 )
                 event_ids.append(event.id)
                 count += 1
-            if self.ingest_mode == "distill" and event_ids:
+            if self.ingest_mode in ("distill", "distill-aware") and event_ids:
+                iso_date = date[:10].replace("/", "-") if date else ""
                 for fact in self._distill_session(session):
-                    service.store.derive_memory(
+                    supersedes = (
+                        self._superseded_fact(fact, iso_date)
+                        if self.ingest_mode == "distill-aware"
+                        else None
+                    )
+                    record = service.store.derive_memory(
                         memory_type="fact",
                         content=fact,
                         source_event_ids=tuple(event_ids),
                         # Dataset dates read "2023/05/20 (Sat) 02:21";
                         # valid_from wants ISO dashes.
-                        valid_from=date[:10].replace("/", "-") if date else None,
+                        valid_from=iso_date or None,
+                        supersedes_id=supersedes,
                         metadata={"session_id": session["session_id"]},
                     )
+                    if self.ingest_mode == "distill-aware":
+                        self._fact_index.append(
+                            (record.id, iso_date, _fact_tokens(fact))
+                        )
         return count
+
+    def _superseded_fact(self, fact: str, iso_date: str) -> str | None:
+        """Best near-duplicate among facts from strictly older sessions;
+        one supersession per new fact, and the superseded entry leaves the
+        index so chains (A <- B <- C) stay linear."""
+        tokens = _fact_tokens(fact)
+        best_index, best_score = -1, 0.0
+        for position, (_, other_date, other_tokens) in enumerate(self._fact_index):
+            if not other_date or not iso_date or other_date >= iso_date:
+                continue
+            score = _containment(tokens, other_tokens)
+            if score > best_score:
+                best_index, best_score = position, score
+        if best_score < self.supersede_containment:
+            return None
+        memory_id, _, _ = self._fact_index.pop(best_index)
+        return memory_id
 
     def build_context(
         self, service: MemoryService, item: LMEQuestion
@@ -529,6 +597,10 @@ class LMEHarness:
                 "packing": self.packing,
                 "rerank": self.rerank,
                 "ingest_mode": self.ingest_mode,
+                "supersede_containment": (
+                    self.supersede_containment
+                    if self.ingest_mode == "distill-aware" else None
+                ),
                 "semantic_plugins": self.active_semantic_plugins,
                 "reranker_plugins": self.active_reranker_plugins,
                 "runner_command": list(self.runner.command),
@@ -608,9 +680,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "(requires sentence-transformers)",
     )
     parser.add_argument(
-        "--ingest", choices=["raw", "distill"], default="raw",
+        "--ingest", choices=["raw", "distill", "distill-aware"], default="raw",
         help="raw: verbatim turns only; distill: LLM-extracted facts "
-        "derived alongside the turns (A/B for the Phase B shape)",
+        "derived alongside the turns (A/B for the Phase B shape); "
+        "distill-aware: distill plus deterministic update-supersession "
+        "(a later near-duplicate fact supersedes the stale one)",
     )
     parser.add_argument(
         "--distill-cache", default="benchmarks/distill-cache",

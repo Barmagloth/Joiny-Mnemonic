@@ -87,3 +87,56 @@ knowledge-update regression until supersession-aware distillation lands.
 Artifacts: three signed reports + per-question JSONL in the directories
 above; verify with
 `python -m joiny_mnemonic.report_signing verify <dir>/longmemeval-latest.json`.
+
+---
+
+# Stage: update-aware supersession (`--ingest distill-aware`, 2026-07-16)
+
+**Mechanism.** Deterministic, no ingest LLM: a later fact that
+near-duplicates an earlier one (content-token containment ≥ 0.30, dates
+strictly ordered) supersedes it through the product ledger, dropping the
+stale assertion from retrieval while history keeps it. Threshold
+calibrated on the distill cache: the 5K value-update pair scores 0.333
+vs background p99 0.143 / max 0.219 over 2,788 random cross-session
+pairs.
+
+**Pre-registered prediction** (from the failure census below): +1..2 of
+the 5 KU losses; the rest is out of mechanism reach.
+
+**Failure census of the 5 flat-distill KU losses** (verified against the
+cache and raw transcripts): 1 clean value-update (5K — catchable), 1
+update present but in a low-overlap fact (Rachel, containment 0.207 —
+inseparable from background noise by tokens), 1 update never distilled
+(therapist frequency — distiller recall), 1 requiring enumeration
+(coins 37+1 — supersession would *hide* the base count), 1 poisoned
+abstention (contradictory confident facts).
+
+**Result: 69/78 = 88.5% vs flat 70/78 — net −1, within run-to-run noise.**
+Paired flips vs flat: +2 (the predicted 5K fix and one more value-update,
+01493427), −3, of which one question had *zero* supersessions fired
+(618f13b2 — identical store, pure sampling noise; the frozen-config
+variance band is ±2.5pp) and one is a verified false supersession
+(59524333: a sports-schedule fact hidden behind a topically-similar
+later fact at 0.38).
+
+**In-vivo false-fire scale:** 170 supersessions across the 78 KU
+questions (2.2/question, 1.2% of facts) against ~2 true updates. The
+random-pair calibration did not transfer: real session streams have
+recurring-topic structure (productivity apps re-asked scores 0.61), and
+token containment cannot distinguish "same subject, updated value" from
+"same topic, revisited" — the exact discrimination an update detector
+needs.
+
+**Conclusion.** Ingest-side deterministic supersession is insufficient
+for the update-aware cell: it fixes the pure value-update class (2/78)
+and pays comparable collateral. Combined with the census (2/5 of the
+original KU damage is not update-shaped at all), the KU regression of
+distilled facts is dominated by (a) distiller recall on updates and
+(b) confident summaries suppressing enumeration/abstention at answer
+time. Viable next shapes, in rising cost: answer-time recency/validity
+discipline over near-duplicate facts (retrieval/packing side); write-time
+LLM reconciliation (the Letta/Mem0 shape — one contradiction check per
+colliding fact, costs ingest calls); entity-slot keying. None ships by
+default without beating this measured bar. Artifacts:
+`distill-aware-knowledge-update/` (signed), mechanism in
+`longmemeval.py::_superseded_fact` behind `--ingest distill-aware`.

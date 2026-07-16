@@ -54,6 +54,18 @@ preference questions into abstention.
       item 6 inherits the sharpened target: update-aware distillation
       (supersede or validity-bound contradicted facts), not just extractor
       precision/recall
+- [x] Update-aware cell measured (2026-07-16, --ingest distill-aware,
+      deterministic token-containment supersession, signed:
+      distill-aware-knowledge-update/): fixes the pure value-update class
+      (+2/78 KU) at comparable collateral — 170 supersessions vs ~2 true
+      updates in vivo (recurring topics are indistinguishable from updates
+      by tokens); net −1, within the ±2.5pp run noise. Census of the 5
+      flat-distill KU losses: 1 value-update, 1 low-overlap update, 1
+      distiller-recall miss, 1 needs enumeration, 1 poisoned abstention —
+      deterministic ingest-side supersession is ruled out as the fix.
+      Next candidate shapes (rising cost): answer-time recency discipline
+      over near-dup facts, write-time LLM reconciliation, entity-slot
+      keying (distill-ab.md stage 2)
 - [x] Cross-family re-judge done (2026-07-14, GPT-5.4 over all 500
       persisted answers, byte-pinned rows and dataset, verified by recount
       from raw batches, report signed): **87.6%** vs 88.0%, agreement
