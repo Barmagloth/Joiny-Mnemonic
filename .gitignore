@@ -24,3 +24,6 @@ benchmarks/runtime/
 benchmarks/results/*.log
 
 benchmarks/distill-cache/
+
+# Keyed distill cache: content-addressed, rebuildable, never a trust artifact
+benchmarks/distill-cache-keyed/

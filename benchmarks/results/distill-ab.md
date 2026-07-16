@@ -127,7 +127,7 @@ token containment cannot distinguish "same subject, updated value" from
 "same topic, revisited" — the exact discrimination an update detector
 needs.
 
-**Conclusion.** Ingest-side deterministic supersession is insufficient
+**Conclusion (superseded by stage 3 below).** Ingest-side deterministic supersession by token overlap is insufficient
 for the update-aware cell: it fixes the pure value-update class (2/78)
 and pays comparable collateral. Combined with the census (2/5 of the
 original KU damage is not update-shaped at all), the KU regression of
@@ -140,3 +140,50 @@ colliding fact, costs ingest calls); entity-slot keying. None ships by
 default without beating this measured bar. Artifacts:
 `distill-aware-knowledge-update/` (signed), mechanism in
 `longmemeval.py::_superseded_fact` behind `--ingest distill-aware`.
+
+---
+
+# Stage 3: keyed distillation (`--ingest distill-keyed`, 2026-07-16)
+
+**Shape.** The classic pre-AI answer (SCD Type 2 / bitemporal tables;
+the same shape Zep/Graphiti uses for agent memory): closure is
+deterministic BY KEY, and the only genuinely hard step — turning free
+text into keys — is done by the already-paid distillation call. The
+keyed distill prompt (`LME_DISTILL_KEYED=1`, dedicated cache) emits
+`{fact, key}` where key is `subject|attribute` for stateful facts
+(`user|5k-personal-best`, `rachel|residence`) and null for one-off
+events; at ingest a later fact with the same normalized key supersedes
+the earlier one through the ledger. Live smoke: both 5K sessions,
+distilled independently, emitted the byte-identical key. The keyed
+prompt also instructs the distiller to state updated values explicitly
+(a recall fix), so the arm changes two variables; a control isolates
+them.
+
+**Results, all 78 knowledge-update questions, paired (signed reports):**
+
+| arm | KU accuracy | dirs |
+|---|---|---|
+| raw (baseline) | 75/78 = 96.2% | `longmemeval-latest.jsonl` |
+| flat distill | 70/78 = 89.7% | `distill-ab-knowledge-update/` |
+| token-overlap supersession | 69/78 = 88.5% | `distill-aware-knowledge-update/` |
+| keyed facts, no closure (control) | 72/78 = 92.3% | `distill-keyedfacts-noclosure-ku/` |
+| keyed facts + SCD closure | **73/78 = 93.6%** | `distill-keyed-knowledge-update/` |
+
+**Decomposition.** The update-recall prompt alone fixes 3 of the 5
+census losses (Rachel, therapist, coins — the update now exists as an
+explicit fact and the reader prefers it unaided). Closure adds the pure
+value-update class (5K — the stale fact must actually leave the view)
+plus one poisoned-abstention case (f685340e_abs: removing contradictory
+stale facts restored abstention), at one cost case (01493427). Known
+mechanism pitfall, verified on the gym question (59524333): closure can
+hide a *specific* fact ("gym at 7:00 PM Mon/Wed/Fri") behind a *vaguer*
+later fact with the same key ("recurring gym commitments Mon/Wed/Fri")
+— LLM facts do not guarantee the new version carries the full state.
+Product implication: prefer validity-bounding (`valid_to`, record stays
+retrievable for historical queries) over hard supersession, and/or
+require the superseding fact to assert a value.
+
+**Remaining gap to raw** (−2.6pp ≈ 2 questions): the
+contradictory-confident-facts abstention case (031748ae_abs, out of
+scope for any update mechanism) and run noise. Preference-side check of
+the keyed prompt not yet run (keyed cache covers KU sessions only).
