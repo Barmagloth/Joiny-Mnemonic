@@ -81,6 +81,15 @@ zero-dependency Python/SQLite, hash-chained append-only event log, evidence-boun
   `& "$env:USERPROFILE\.joiny-mnemonic\runtime\venv\Scripts\python.exe" -m pip install --no-cache-dir --quiet R:\Projects\Joiny-Mnemonic`
 - GPTShared — живой полигон: store `R:\Projects\GPTShared\.joiny-mnemonic\memory.db`,
   hooks в `.claude/settings.json`. open_tasks чист, delme2-кандидат applied.
+- **Плагины в runtime venv (2026-07-16):** semantic-local + reranker-local
+  установлены — живая инсталляция теперь = конфигурация опубликованных
+  88.0%. Цена измерена на месте: полная свежепроцессная доставка
+  205ms → 275ms (+70ms на entry-points; страшные ~800ms из 6A cold-probe
+  не воспроизводятся на тёплой машине). Первый семантический запрос по
+  непустому индексу разово грузит модель (секунды; в бюджете
+  cold_first_resume). После обновлений core не забывать, что плагины
+  ставятся отдельно: `pip install R:\Projects\Joiny-Mnemonic\plugins\semantic-local
+  R:\Projects\Joiny-Mnemonic\plugins\reranker-local`.
 
 ### Packet assembly 354ms — РЕШЕНО (2026-07-15)
 
@@ -138,6 +147,10 @@ TODO#6 наследует заострённую цель — update-aware disti
    storage.py в фокусные модули (остаток 6A, zero behavior change).
 4. Extraction eval corpus (TODO#6, цель заострена A/B-вердиктом);
    task7 (native memory channels).
+4b. Option matrix (TODO#1): таблица «качество × цена» по вариантам
+   retrieval-опций — lexical-only / +semantic / +reranker / +both — на
+   stratified-60, парно против raw-строк; hook-timing уже даёт цену
+   per-mode. ~4 bench-рана по ~1.3ч.
 5. Включение agent_settlement_delegation_enabled на существующем сторе:
    пока только bootstrap-параметр; путь request→trusted activation есть
    (policy request + activate_policy), удобной CLI-обёртки нет.

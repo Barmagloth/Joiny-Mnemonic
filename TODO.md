@@ -36,6 +36,14 @@ preference questions into abstention.
 - [ ] Remaining error-analysis target: preference (60%) — cross-encoder
       optimizes question-relevance while preference answers need breadth of
       taste evidence; and the temporal tail (84.2%)
+- [ ] Option matrix (2026-07-16): one table of accuracy × cost per
+      retrieval option set, stratified-60 frozen protocol, paired against
+      the raw-run rows: lexical-only / +semantic / +reranker / +both
+      (published config = +both). Each cell also cites its hook-timing
+      mode (core_only vs installed_plugins already measured per scale).
+      Measured on the live install 2026-07-16: plugins cost ~+70ms per
+      fresh-process delivery (205ms -> 275ms on GPTShared), not the ~640ms
+      the cold probe suggested
 - [x] A/B with LLM extraction done (2026-07-16, staged paired probes,
       signed: benchmarks/results/distill-ab.md). Verdict per the decision
       rule: INSIDE the band (expected full-500 ≈ 87.4) with a typed
