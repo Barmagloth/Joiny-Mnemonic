@@ -37,6 +37,7 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--sample-per-type", type=int, default=0)
     parser.add_argument("--limit-questions", type=int, default=0)
+    parser.add_argument("--only-type", default="")
     parser.add_argument("--cache-dir", default="benchmarks/distill-cache")
     parser.add_argument(
         "--runner-command",
@@ -48,6 +49,8 @@ def main() -> int:
 
     command = json.loads(args.runner_command)
     items = load_dataset(args.dataset)
+    if args.only_type:
+        items = [item for item in items if item.question_type == args.only_type]
     if args.sample_per_type:
         taken: dict[str, int] = {}
         sampled = []

@@ -1,0 +1,89 @@
+# Distill A/B — LLM-extracted facts alongside verbatim turns (2026-07-16)
+
+**Question.** Does the Phase-B ingestion shape — LLM-distilled narrative
+facts derived *alongside* verbatim turns through the product derive path
+(`--ingest distill`) — improve LongMemEval-S accuracy over the published
+raw baseline **88.0 ± 0.7** (three-judge triangulation band)?
+
+**Verdict: inside the band, with a typed redistribution.** Distillation
+buys preference accuracy and pays for it in knowledge-update accuracy,
+net ≈ 0. The shape does NOT earn default-on in its naive (flat-facts)
+form; the knowledge-update failure mode is specific and actionable:
+**stale-fact poisoning** — a confidently dated fact atom asserting the
+*old* state outweighs the later update at answer time. Fixing it requires
+update-aware distillation (supersession semantics the product ledger
+already has, which the flat A/B derive path deliberately did not use).
+
+## Protocol
+
+Config identical to the published run (12288-token packets, retrieval
+limit 64, rank packing, semantic-local + reranker-local, Sonnet runner and
+verbatim Appendix-A.4 judge via local Claude Code). Distiller: Haiku, 2-5
+self-contained dated narrative facts per session (prompt in
+`benchmarks/runner_claude_code.py`), content-addressed disk cache warmed
+in parallel by `benchmarks/prewarm_distill.py` (6,573 sessions distilled
+across the three stages, 0 failures, 26 empty fact lists = 0.4%).
+Comparisons are **paired per question** against the persisted rows of the
+signed 500-question raw run (same question ids, same judge protocol).
+
+Cost note: the full-500 distill arm was deliberately not run. Staged
+probes below bound the expected full-run delta at ≈ −0.6pp
+(+6.7pp × 30/500 preference − 6.4pp × 78/500 knowledge-update, other
+types flat on the stratified 60) — an expected ≈ 87.4%, inside the band;
+~20 GPU-free but ~day-long subscription hours would not change the
+decision.
+
+## Stage 1 — stratified 60 (10 per type)
+
+`benchmarks/results/distill-ab-60/` (signed). Overall **52/60 = 86.7%**,
+identical to the paired raw score on the same 60 questions (52/60) and to
+the raw tuned-prompt ablation reference (86.7%). Tokens/question 11,546
+vs 11,668 raw — the packet budget binds either way. Per type
+(distill vs paired raw): preference 8/10 vs 7/10, knowledge-update 7/10
+vs 9/10, ssu 10/10 vs 9/10, everything else identical. Flips: 3 up
+(2 preference, 1 ssu), 3 down (2 knowledge-update, 1 preference).
+
+## Probe A — all 30 preference questions
+
+`benchmarks/results/distill-ab-preference/` (signed). **20/30 = 66.7% vs
+raw 18/30 = 60.0%** — paired flips 3 up / 1 down, net +2. Direction
+consistent with stage 1: distilled facts give the reader synthesized
+taste evidence that turn fragments scatter. Caveats: n=30, CI95 ±16.9pp,
+and preference is the judge-sensitive type (60.0–76.7% across the three
+judges on the raw run) — treat as a directional signal, not a headline.
+
+## Probe B — all 78 knowledge-update questions
+
+`benchmarks/results/distill-ab-knowledge-update/` (signed).
+**70/78 = 89.7% vs raw 75/78 = 96.2%** — paired flips 0 up / 5 down.
+Every one of the five is the same failure shape, verified against the
+answers:
+
+| qid | gold (updated) | distill answer (stale) |
+|---|---|---|
+| 6a1eabeb | 5K best 25:50 | 27:12 (earlier session's value) |
+| 830ce83f | Rachel → suburbs | Chicago (pre-update move) |
+| 2698e78f | therapist weekly | "every two weeks" (old cadence) |
+| 69fee5aa | 38 coins | 37 (count before the update) |
+| 031748ae_abs | (abstain) | answers from a stale role fact |
+
+Several answers even *flag* the later contradicting session and still
+lead with the stale value — the dated fact atom reads as more
+authoritative than the raw update turn. This is the mechanism, not
+retrieval noise: gold-session coverage stayed ~100%.
+
+## Decision (per TODO item 1 rule)
+
+Inside the band → the distill shape **stays opt-in**; the question moves
+to extraction quality (TODO item 6) with a sharper target than "close the
+gap": **distillation must be update-aware**. Concretely, a fact derived
+from session N that a session N+k contradicts must be superseded or
+validity-bounded (`valid_to`), not left competing — the product ledger's
+supersession machinery exists precisely for this; the naive flat derive
+path is what poisons knowledge-update. Preference upside (+6.7pp on its
+type) is real but small in headline terms (+0.4pp), and is not worth the
+knowledge-update regression until supersession-aware distillation lands.
+
+Artifacts: three signed reports + per-question JSONL in the directories
+above; verify with
+`python -m joiny_mnemonic.report_signing verify <dir>/longmemeval-latest.json`.

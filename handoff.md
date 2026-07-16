@@ -105,13 +105,39 @@ docs/performance.md):
 Бюджеты 6A не трогал (loose tripwires). Полный сьют стал быстрее на ~4
 минуты (322s против 560s) — тот же witness-фикс.
 
+### Distill A/B — РЕШЕНО (2026-07-16, benchmarks/results/distill-ab.md)
+
+Вердикт: **внутри band** (ожидаемые полные 500 ≈ 87.4), с типовым
+перераспределением. Парные пробы против строк подписанного raw-рана:
+- stratified 60: 52/60 у обоих плеч (одинаково);
+- preference (все 30): 60.0 → 66.7 (+3/−1) — дистиллированные факты дают
+  синтез вкусовой эвиденции; n=30, judge-sensitive, сигнал направления;
+- knowledge-update (все 78): 96.2 → 89.7 (0/−5) — **stale-fact poisoning**:
+  уверенный датированный факт-атом со СТАРЫМ значением перевешивает
+  поздний апдейт (все 5 провалов — ровно эта форма, покрытие gold ~100%,
+  т.е. не retrieval).
+Решение: flat-дистилляция без supersession не получает default-on;
+TODO#6 наследует заострённую цель — update-aware distillation
+(супersede/valid_to для противоречащих фактов; машинерия в ledger уже
+есть). Полный 500-ран сознательно НЕ гонялся (~сутки квоты, решение не
+меняет). Инфраструктура: benchmarks/prewarm_distill.py — параллельный
+прогрев контентно-адресуемого distill-кеша (6573 сессии, 0 фейлов);
+кеш в benchmarks/distill-cache/ (gitignored) — переиспользуется, если
+полный ран всё же понадобится (останется ~12.7k сессий догреть).
+
 ## Очередь (в порядке приоритета)
 
-1. **Distill A/B**: `--ingest distill` vs raw; baseline для битья 88.0 ± 0.7.
-2. Разбор ошибок: preference (60%) и temporal-хвост (84.2%).
+1. **Update-aware distillation** (главный вынос A/B): факт из сессии N,
+   противоречащий сессии N+k, должен supersede-иться или получать
+   valid_to, а не конкурировать с апдейтом. Ledger-машинерия есть; нужен
+   детектор противоречий на derive-пути + повтор KU-пробы (78 вопросов,
+   кеш тёплый) как acceptance.
+2. Разбор ошибок: preference (60%) и temporal-хвост (84.2%) — с учётом
+   distill-находок (preference частично закрывается фактами).
 3. Storage split: candidate/finding/extraction секции из ~4.7k-строчного
    storage.py в фокусные модули (остаток 6A, zero behavior change).
-4. Extraction eval corpus (TODO#6); task7 (native memory channels).
+4. Extraction eval corpus (TODO#6, цель заострена A/B-вердиктом);
+   task7 (native memory channels).
 5. Включение agent_settlement_delegation_enabled на существующем сторе:
    пока только bootstrap-параметр; путь request→trusted activation есть
    (policy request + activate_policy), удобной CLI-обёртки нет.

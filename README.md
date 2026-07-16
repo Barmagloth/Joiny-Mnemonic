@@ -375,6 +375,15 @@ LongMemEval results and are stated here explicitly:
   opening with a wrong lead can pass when the correct fact also appears.
   We did not tighten the prompts (comparability), but the leniency cuts
   both ways across systems judged under the same protocol.
+- **LLM distillation A/B (2026-07-16): no free lunch from flat facts.**
+  Deriving Haiku-distilled dated facts alongside the verbatim turns
+  (`--ingest distill`) scores identically on a paired stratified 60
+  (52/60 both arms) and redistributes accuracy across types: preference
+  60.0% → 66.7% (all 30 questions, paired +3/−1), knowledge-update
+  96.2% → 89.7% (all 78, paired 0/−5 — every regression is a stale fact
+  atom outvoting the later update; answers preserved in the signed
+  reports). Flat distillation without supersession poisons updates;
+  the shape stays opt-in. Analysis: `benchmarks/results/distill-ab.md`.
 
 We publish our own numbers only; the report states the full configuration
 and the literature is one search away. The report is provenance-stamped

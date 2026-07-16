@@ -36,14 +36,16 @@ preference questions into abstention.
 - [ ] Remaining error-analysis target: preference (60%) — cross-encoder
       optimizes question-relevance while preference answers need breadth of
       taste evidence; and the temporal tail (84.2%)
-- [ ] A/B with LLM extraction (--ingest distill, facts alongside verbatim
-      through the derive path) — mechanism shipped, run started 2026-07-15.
-      Decision rule against the triangulated band 88.0 ± 0.7: above →
-      distill shape earns default; inside → stays opt-in, question moves to
-      extractor quality (item 6); below → extraction destroys signal, fix
-      before task7. Note: the A/B distiller is the runner LLM, not the
-      shipped extractor plugin — it validates the *shape*, item 6 measures
-      the shipped extractor
+- [x] A/B with LLM extraction done (2026-07-16, staged paired probes,
+      signed: benchmarks/results/distill-ab.md). Verdict per the decision
+      rule: INSIDE the band (expected full-500 ≈ 87.4) with a typed
+      redistribution — preference 60.0→66.7 (+3/−1 paired on all 30),
+      knowledge-update 96.2→89.7 (0/−5 paired on all 78, every regression
+      a stale-fact atom outvoting the later update). Flat distillation
+      without supersession poisons knowledge updates → shape stays opt-in;
+      item 6 inherits the sharpened target: update-aware distillation
+      (supersede or validity-bound contradicted facts), not just extractor
+      precision/recall
 - [x] Cross-family re-judge done (2026-07-14, GPT-5.4 over all 500
       persisted answers, byte-pinned rows and dataset, verified by recount
       from raw batches, report signed): **87.6%** vs 88.0%, agreement
