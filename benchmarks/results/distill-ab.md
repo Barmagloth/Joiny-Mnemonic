@@ -187,3 +187,16 @@ require the superseding fact to assert a value.
 contradictory-confident-facts abstention case (031748ae_abs, out of
 scope for any update mechanism) and run noise. Preference-side check of
 the keyed prompt not yet run (keyed cache covers KU sessions only).
+
+**Preference check of the keyed arm** (`distill-keyed-preference/`,
+signed): **21/30 = 70.0%** vs flat 20/30 (66.7%) vs raw 18/30 (60.0%) —
+paired vs flat +4/−3. The keyed prompt and closure preserve the
+preference upside (churn is judge-noise-scale; preference remains the
+volatile, judge-sensitive type). The keyed cell is complete: KU
+89.7 → 93.6 and preference 66.7 → 70.0 relative to flat distillation.
+Naive per-type extrapolation of the keyed arm to the full 500 lands at
+≈ 88.2 — parity with the raw baseline (inside the ±0.7 band), i.e. the
+distilled-facts shape no longer pays for its update weakness. Shipping
+decision still requires the extraction-corpus gate (TODO item 6) and a
+product design that prefers validity-bounding over hard supersession
+(the vague-successor pitfall above).
