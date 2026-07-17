@@ -532,10 +532,19 @@ class LMEHarness:
         annotated = [(hit, *_hit_session(hit)) for hit in hits]
         chosen: list[tuple[Any, str, str]] = []
         used = 0
-        # CHECK MATERIAL reserves its bounded slice up front so the section
-        # displaces evidence measurably instead of overflowing the budget.
+        # CHECK MATERIAL is built from the candidate pool BEFORE packing and
+        # reserves only its ACTUAL size — an empty section must cost zero
+        # evidence (audit finding 2026-07-17: a fixed 600-token reserve
+        # displaced preference evidence in questions where the section never
+        # fired, the whole measured regression).
+        cm_section = ""
+        check_material_metrics: dict[str, Any] = {}
+        if self.check_material:
+            cm_section, check_material_metrics = self._check_material_section(
+                annotated
+            )
         packing_budget = self.context_budget_tokens - (
-            self.check_material_budget_tokens if self.check_material else 0
+            check_material_metrics.get("check_material_tokens", 0)
         )
         if self.packing == "breadth":
             # Breadth-first (ceiling measurement 2026-07-14: the pool holds
@@ -581,14 +590,9 @@ class LMEHarness:
         for (date, _), blocks in sorted(groups.items()):
             header = f"## Session {date}" if date else "## Session (undated)"
             parts.append(header + "\n" + "\n".join(blocks))
-        check_material_metrics: dict[str, Any] = {}
-        if self.check_material:
-            section, check_material_metrics = self._check_material_section(
-                annotated, chosen
-            )
-            if section:
-                parts.append(section)
-                used += check_material_metrics["check_material_tokens"]
+        if cm_section:
+            parts.append(cm_section)
+            used += check_material_metrics["check_material_tokens"]
         included = [hit.id for hit, _, _ in chosen]
         retrieved_sessions = {sid for _, sid, _ in chosen if sid}
         haystack_tokens = sum(
@@ -611,16 +615,16 @@ class LMEHarness:
         return "\n\n".join(parts), included, metrics
 
     def _check_material_section(
-        self, annotated: list, chosen: list
+        self, annotated: list
     ) -> tuple[str, dict[str, Any]]:
         """Bounded [CHECK MATERIAL] section: (a) earlier superseded
-        versions of packed facts (from the ingest supersession chains),
+        versions of pool facts (from the ingest supersession chains),
         (b) still-live near-duplicate fact conflicts in the candidate pool.
         Mistakes are soft by construction — a wrong flag costs packet
         lines, never hides evidence."""
         started = time.perf_counter()
         prior_lines: list[str] = []
-        for hit, _, _ in chosen:
+        for hit, _, _ in annotated:
             chain_id = hit.id
             depth = 0
             while depth < 2 and len(prior_lines) < 4:
@@ -629,8 +633,8 @@ class LMEHarness:
                     break
                 old_fact, old_date, old_id = entry
                 prior_lines.append(
-                    f"- ({old_date or 'undated'}) earlier version, replaced "
-                    f"by a later fact above: {old_fact}"
+                    f"- ({old_date or 'undated'}) earlier superseded "
+                    f"version: {old_fact}"
                 )
                 chain_id = old_id
                 depth += 1
@@ -670,7 +674,7 @@ class LMEHarness:
         blocks: list[str] = []
         if prior_lines:
             blocks.append(
-                "Earlier versions of facts shown above (dates are "
+                "Earlier superseded versions of related facts (dates are "
                 "authoritative; later versions may omit details the earlier "
                 "ones carry):\n" + "\n".join(prior_lines)
             )
@@ -698,7 +702,7 @@ class LMEHarness:
                 blocks = []
                 if prior_lines:
                     blocks.append(
-                        "Earlier versions of facts shown above (dates are "
+                        "Earlier superseded versions of related facts (dates are "
                         "authoritative; later versions may omit details the "
                         "earlier ones carry):\n" + "\n".join(prior_lines)
                     )
