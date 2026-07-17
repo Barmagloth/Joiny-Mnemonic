@@ -60,3 +60,44 @@ the matched string appears in a misleading context. The 26 indeterminate
 rows need LLM-assisted labelling if a finer split is ever required.
 The deep pass re-runs on current code (commit recorded in the artifact),
 not the run-day binary.
+
+---
+
+# v3 update (2026-07-17): aggregate bucket + manual audit of the 28
+
+The v2 proxy silently dumped bare-count answers into `passage:no`
+(variants shorter than 2 chars were filtered out) and matched short
+numerics as substrings into `passage:yes`. v3 gives computed answers
+their own honest bucket. Regenerated split of the 60 failures:
+
+| stage | n |
+|---|---:|
+| retrieval | 1 |
+| packing (session) | 5 |
+| passage:no (extractive answer absent from packed gold fragments) | 7 |
+| passage:yes (extractive answer demonstrably packed) | 7 |
+| passage:aggregate (computed answers — counts/sums, proxy cannot judge) | 14 |
+| passage:indeterminate (long non-extractive answers) | 26 |
+
+The manual audit (`census-manual-audit.md`) reviewed all 28 former
+no/yes cases and converges with v3: true passage misses ≈ 6-7 (of the
+automated 7, the audit confirms gpt4_8279ba03, 07741c45 and leans miss
+on most others; gpt4_85da3956 and gpt4_70e84552 the audit re-classifies
+as reader — their key dates ARE packed and the miss is arithmetic/
+ordering, illustrating the proxy's paraphrase blindness both ways).
+Confirmed reader failures from the audited set: all 7 passage:yes plus
+roughly half of the aggregates (over/under-counting with fragments
+visibly packed).
+
+**Standing conclusions after three rounds of narrowing:**
+1. Realistic packing/selector headroom ≈ 11-13 questions counting
+   session-packing + true passage misses (~2.2-2.6pp) — but a third of
+   that is temporal-typed, where the missing piece is often the
+   *anchor* passage, not ranking.
+2. The largest single addressable cluster across the audited 28 is
+   answer-time temporal comparison/arithmetic (~8 cases), followed by
+   conflicting-versions presentation (2 confirmed, one already fixed by
+   keyed distillation in its arm).
+3. Selector design remains unjustified; the last mile (temporal
+   discipline, status presentation) is where the measured failures
+   live. The 26 indeterminate stay unexamined per scope decision.

@@ -5,14 +5,15 @@
   "retrieval_limit": 64,
   "packing": "rank",
   "ingest": "raw",
-  "code_commit": "0da1d227b83a1229317c35e6d7b07ae8b34e00bf",
+  "code_commit": "7ad5fc6f85e3f153d97bfdbf357ac0d78c091f78",
   "note": "re-run on current code, not the run-day binary"
  },
  "stages": {
   "packing": 5,
+  "passage:aggregate": 14,
   "passage:indeterminate": 26,
-  "passage:no": 17,
-  "passage:yes": 11,
+  "passage:no": 7,
+  "passage:yes": 7,
   "retrieval": 1
  },
  "evidence": [
@@ -62,8 +63,8 @@
     "answer_afa9873b_3"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/02/15 (Wed) 16:19] I think I'll use some boxes I have at home to store my winter clothes. By the way, I just exchanged a pair of boots I got from Zara on 2/5, and I still need to pick up the new pair. Do you have any tips on how to keep track of items I need to pick up or return?",
     "[Date: 2023/02/15 (Wed) 16:19] Using boxes you already have at home is a great way to reduce waste and get started with seasonal storage.\n\nNow, about keeping track of items to pick up or return...\n\nHere are some tips to help you stay on top of your pickups and returns:\n\n1. **Create a \"To-Pickup\" list**: Write down the item, store, and pickup date on a sticky note or in a notes app on your phone. This will help you remember what you need to collect and when.\n2. **Set reminders**: Set reminders on your phone or calendar for the pickup date, so you don't forget to grab your new boots!\n3. **Designate a \"Returns\" spot**: Choose a specific area in your home, like a hook or a bin, where you'll place items that need to be returned. This will help keep them separate from your regular belongings and prevent them from getting lost or forgotten.\n4. **Keep receipts organized**: Store receipts for items you need to return in a designated spot, like a folder or envelope, so you can easily find them when you need to return the item.\n5. **Use a task management app**: Consider using an app like Todoist, Trello, or AnyList to keep track of your pickups and returns. You can create a \" Errands\" or \"Shopping\" list and add tasks for each item, complete with due dates and reminders.\n6. **Take a photo**: Take a photo of the item and the receipt as a backup, in case you need to refer to them later.\n\nBy implementing these strategies, you'll be more likely to remember to pick up your new boots and return any items that don't fit quite right.\n\nHow do you usually keep track of your pickups and returns? Do you have a system in place, or is this something you're looking to improve?",
@@ -103,7 +104,7 @@
     "answer_ec904b3c_4"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
+   "answer_text_packed": "aggregate",
    "stage": "packing",
    "packed_gold_fragments": [
     "[Date: 2023/05/21 (Sun) 19:38] With your background in marketing research and experience leading a data analysis team, you're off to a great start!\n\nChoosing between k-means and hierarchical clustering depends on your project's specific goals, data characteristics, and the type of insights you want to uncover. I'd be happy to help you decide.\n\n**K-Means Clustering:**\n\nK-means is a popular, widely used clustering algorithm that's great for:\n\n1. **Identifying distinct, well-separated clusters**: K-means is suitable when you expect your data to have clear, spherical clusters with similar densities.\n2. **Speed and efficiency**: K-means is computationally efficient, especially for large datasets.\n3. **Easy interpretation**: The algorithm assigns each data point to a specific cluster, making it easy to understand the results.\n\nHowever, k-means has some limitations:\n\n1. **Sensitive to initial placement of centroids**: The algorithm's performance depends on the initial placement of centroids, which can lead to suboptimal solutions.\n2. **Assumes spherical clusters**: K-means struggles with irregularly shaped clusters or clusters with varying densities.\n3. **Requires predefined number of clusters (k)**: You need to specify the number of clusters beforehand, which can be challenging if you're not sure how many clusters exist in your data.\n\n**Hierarchical Clustering:**\n\nHierarchical clustering is a more flexible approach that's suitable for:\n\n1. **Identifying nested clusters or structures**: This algorithm is useful when you expect your data to have a hierarchical or tree-like structure.\n2. **No prior knowledge of cluster number**: Hierarchical clustering doesn't require a predefined number of clusters, as it builds a dendrogram that shows the relationships between data points.\n3. **Handling varying densities and shapes**: Hierarchical clustering can handle clusters with different densities and shapes.\n\nHowever, hierarchical clustering also has some drawbacks:\n\n1. **Computationally expensive**: Hierarchical clustering can be slower than k-means, especially for large datasets.\n2. **Difficult to interpret**: The dendrogram can be challenging to interpret, especially for non-technical stakeholders.\n3. **Sensitive to distance metrics**: The choice of distance metric can significantly impact the clustering results.\n\n**Considerations for your project:**\n\nGiven your experience in marketing research, you might want to ask yourself:\n\n1. **What type of customer segments am I looking for?** If you expect distinct, well-separated segments, k-means might be a good choice. If you're looking for nested or hierarchical structures, hierarchical clustering could be more suitable.\n2. **How complex is my data?** If your data has many features or varying densities, hierarchical clustering might be a better fit.\n3. **Do I have a clear idea of the number of clusters?** If you're unsure about the number of clusters, hierarchical clustering can help you identify the optimal number.\n\nBased on your background and project goals, I recommend starting with k-means clustering, as it's a more straightforward and efficient algorithm. However, if you're unsure about the number of clusters or expect complex structures in your data, hierarchical clustering might be a better choice.\n\nFeel free to provide more details about your project, and I'll be happy to help you decide which clustering method is best suited for your needs!",
@@ -167,8 +168,8 @@
     "answer_56d02cab_4"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/30 (Tue) 23:20] Experimentation is the spirit of mixology! I'd be happy to suggest some unusual mixers and flavor combinations that might work well in a refreshing summer cocktail:\n\n**Unusual Mixers:**\n\n1. **Grapefruit soda**: Adds a tangy, bitter flavor and a beautiful pink color to cocktails.\n2. **Cucumber soda**: Yes, you read that right! Cucumber soda is a thing, and it pairs amazingly with gin, lime, and mint.\n3. **Elderflower soda**: Delicate, floral, and refreshing, elderflower soda works well with gin, vodka, or sparkling wine.\n4. **Yuzu soda**: This Japanese citrus soda adds a unique, tart flavor and aroma to cocktails.\n5. **Kombucha**: Use kombucha as a mixer for a fizzy, probiotic-rich cocktail. Works well with gin, vodka, or rum.\n\n**Flavor Combinations:**\n\n1. **Cucumber-Basil-Lime**: A classic summer combination that's refreshing and herbaceous.\n2. **Grapefruit-Rosemary-Gin**: Bitter grapefruit and herbaceous rosemary pair surprisingly well with gin.\n3. **Watermelon-Mint-Lime**: Sweet watermelon and cooling mint make for a refreshing summer cocktail.\n4. **Peach-Bourbon-Basil**: Sweet peaches, spicy bourbon, and herbaceous basil create a unique flavor profile.\n5. **Pineapple-Jalapeño-Cilantro**: Spicy pineapple and jalapeño are balanced by fresh cilantro in this tropical cocktail.\n6. **Cranberry-Lime-Ginger**: Tart cranberry, zesty lime, and spicy ginger make for a refreshing winter-turned-summer cocktail.\n7. **Blackberry-Sage-Bourbon**: Sweet blackberries, earthy sage, and spicy bourbon create a complex flavor profile.\n\n**Other Ingredients to Experiment With:**\n\n1. **Infused simple syrups**: Try infusing simple syrups with fruits, herbs, or spices to add unique flavors to your cocktails.\n2. **Fresh vegetable juices**: Carrot, beet, or celery juice can add interesting flavors and textures to your cocktails.\n3. **Spicy elements**: Add a dash of heat with ingredients like jalapeño, ginger, or cayenne pepper.\n4. **Floral liqueurs**: Experiment with floral liqueurs like rose, orange blossom, or hibiscus to add unique flavors and aromas.\n\nRemember, the key to successful experimentation is to balance flavors and find harmony in your cocktails. Don't be afraid to try new ingredients and adjust proportions to taste. Happy mixing!",
     "[Date: 2023/05/25 (Thu) 13:21] What a fantastic idea! A DIY cocktail bar is a great way to encourage creativity and interaction among your guests. Here are some mixer and garnish ideas that would complement the fresh lime juice and summer-inspired flavors:\n\n**Mixers:**\n\n1. **Ginger liqueur**: Adds a spicy, warm flavor that pairs well with lime juice and summer fruits like peaches and pineapple.\n2. **Cucumber-infused simple syrup**: A refreshing and light mixer that complements the cucumber flavor in the Cucumber Lime Refresher.\n3. **Elderflower liqueur**: A floral and slightly sweet mixer that pairs well with lime juice and fruits like strawberries and kiwi.\n4. **Peach puree**: A sweet and fruity mixer that pairs well with lime juice and bourbon or rum.\n5. **Mango puree**: A tropical and sweet mixer that pairs well with lime juice and tequila or rum.\n\n**Garnishes:**\n\n1. **Fresh fruits**: Sliced strawberries, blueberries, raspberries, kiwi, peaches, and pineapple wedges will add natural sweetness and flavor to the drinks.\n2. **Herbs**: Fresh mint leaves, basil, and cilantro will add a refreshing and fragrant flavor to the drinks.\n3. **Citrus wheels and twists**: Lime, lemon, and orange wheels and twists will add a burst of citrus flavor and aroma to the drinks.\n4. **Cucumber slices**: Thinly sliced cucumbers will add a refreshing and light flavor to the drinks.\n5. **Edible flowers**: Edible flowers like hibiscus, orchids, and pansies will add a delicate and elegant touch to the drinks.\n6. **Spicy elements**: Sliced jalapeños or serrano peppers will add a spicy kick to the drinks.\n7. **Garnish sticks and picks**: Provide garnish sticks and picks with umbrellas, olives, onions, and cherry tomatoes to add a fun and playful touch to the drinks.\n\n**Other ideas:**\n\n1. **Infused ice cubes**: Prepare infused ice cubes with fruits, herbs, or spices to add an extra layer of flavor to the drinks as they melt.\n2. **Syrup station**: Set up a syrup station with different flavored syrups like agave, honey, and orgeat, and let guests create their own signature syrups.\n3. **Garnish bar**: Set up a garnish bar with a variety of garnishes and let guests create their own unique combinations.\n4. **Cocktail recipe cards**: Provide cocktail recipe cards with suggested combinations of mixers and garnishes to inspire guests and help them get started.\n\nRemember to have fun and be creative with your DIY cocktail bar! With these mixers and garnishes, your guests will be able to create their own unique summer-inspired cocktails.",
@@ -265,8 +266,8 @@
     "answer_901a6763_4"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/03/08 (Wed) 20:12] I didn't know I could find local art events on social media. I'll definitely check that out. I was particularly drawn to the works of local artist, Rachel Lee, at the \"Women in Art\" exhibition which I attended on February 10th. It was amazing. Do you know if there are any online resources that feature local artists and their work?",
     "[Date: 2023/03/08 (Wed) 03:09] I'm thrilled to hear that you're looking for art inspiration! Unfortunately, I'm a large language model, I don't have real-time access to local information or specific events. However, I can offer some general suggestions to help you find what you're looking for:\n\n1. **Local Art Organizations and Galleries:** Research local art organizations, galleries, and museums in your area that focus on contemporary art, mixed media, or feminist art. They often feature exhibitions, events, and artist talks that might interest you.\n2. **Social Media and Online Platforms:** Follow local artists, galleries, and art organizations on social media platforms like Instagram, Facebook, or Twitter. You can also explore online platforms like Artsy, Behance, or DeviantArt to discover new artists and their work.\n3. **Art Festivals and Fairs:** Attend local art festivals, fairs, and markets to discover emerging and established artists. These events often feature a diverse range of artistic styles and mediums.\n4. **Artist Collectives and Cooperatives:** Look for local artist collectives or cooperatives that focus on mixed media or feminist art. These groups often provide a platform for artists to showcase their work, share resources, and collaborate on projects.\n5. **Local Colleges and Universities:** Many art departments at local colleges and universities feature student exhibitions, artist talks, and visiting artist lectures. These events can be a great way to discover new talent and stay updated on contemporary art trends.\n\nRegarding Rachel Lee's work, you might enjoy exploring the following artists and styles:\n\n1. **Feminist Art:** Look into the work of artists like Judy Chicago, Miriam Schapiro, and Faith Ringgold, who are known for their contributions to the feminist art movement.\n2. **Mixed Media and Assemblage:** Explore the work of artists like Louise Nevelson, Robert Rauschenberg, or Joseph Cornell, who are known for their innovative use of mixed media and assemblage techniques.\n3. **Contemporary Artists:** Research contemporary artists like Wangechi Mutu, Mickalene Thomas, or Lorna Simpson, who work with mixed media and explore themes related to identity, feminism, and social justice.\n\nRemember to stay curious, and don't be afraid to reach out to local artists, galleries, or organizations to ask about upcoming events or exhibitions. Good luck, and I hope you find the inspiration you're looking for!",
@@ -316,8 +317,8 @@
    "answer_variants": [
     "$3,750"
    ],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/03/20 (Mon) 08:00] I'm looking for some advice on finding volunteer opportunities in my area. I've been trying to attend at least one charity event per month, and it's been an incredible experience so far. By the way, I just ran 5 kilometers in the \"Run for Hunger\" charity event on March 12th and raised $250 for a local food bank.",
     "[Date: 2023/03/20 (Mon) 19:19] I'm glad you provided those tips. I've had some experience with fundraising, like I said, I helped raise over $2,000 for a local animal shelter on January 20th. I'll definitely use some of those ideas to reach my fundraising goal for this cycling event. Do you have any information on how to stay safe while cycling, especially in a charity event with many participants?",
@@ -417,8 +418,8 @@
    "answer_variants": [
     "$720"
    ],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/02/26 (Sun) 14:33] I think I need to clarify that I attended five workshops in the last three months, with the most recent one being a digital marketing workshop, and I've been trying to implement some of the techniques I learned from it. I've also been trying to attend at least one workshop a month to learn new skills and network with people in different industries.",
     "[Date: 2023/02/26 (Sun) 13:21] I'm looking for some writing tips. I've been working on a short story since a writing workshop I attended in November at a literary festival. It was a two-day workshop, and I paid $200 to attend. The instructor was a published author, and I got some great feedback on my work. Do you have any resources on character development and editing that you could recommend?",
@@ -468,8 +469,8 @@
     "answer_7726e7e9_3"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/20 (Sat) 12:42] I'm looking for some new music recommendations. I've been listening to a lot of Billie Eilish lately, especially her new album \"Happier Than Ever\" which I downloaded on Spotify. Can you suggest some similar artists or albums?",
     "[Date: 2023/05/29 (Mon) 18:21] I'm looking for some new music recommendations. I've been really into indie and folk-rock lately, especially after discovering The Whiskey Wanderers at a music festival last weekend - I bought their EP 'Midnight Sky' at the festival merchandise booth and can't get enough of it. Can you suggest some similar artists or bands I might like?",
@@ -521,8 +522,8 @@
     "answer_da3c1266_5"
    ],
    "answer_variants": [],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/07/21 (Fri) 14:52] I'm thinking of pursuing a certification in digital marketing, could you help me compare two programs I'm interested in? By the way, I just attended my best friend Rachel's master's degree graduation ceremony a couple of weeks ago, it was really inspiring.",
     "[Date: 2023/07/21 (Fri) 14:52] I'm still undecided, but I think I need to consider my budget and time commitment to each program. Rachel's graduation ceremony reminded me of how important it is to invest in my own education and growth. I'd like to know more about the job prospects and salary ranges for digital marketing professionals with these certifications.",
@@ -899,8 +900,8 @@
    "answer_variants": [
     "100"
    ],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/23 (Tue) 21:44] Congratulations on reaching 350 followers in just two weeks! That's a great start!\n\nNow, let's dive into what type of content tends to perform well on Instagram. While it's essential to understand your specific audience and their preferences, here are some general trends and tips that can help:\n\n1. **Visual content**: Instagram is a visual platform, so high-quality, engaging visuals are crucial. Use high-resolution images, and consider using graphics, illustrations, or videos to make your content stand out.\n2. **Authenticity and storytelling**: Share behind-the-scenes, sneak peeks, or personal stories that showcase your brand's personality. This helps build a connection with your audience and makes your content more relatable.\n3. **Relevant and timely content**: Post content that's relevant to current events, trends, or seasons. This can help increase engagement and attract new followers.\n4. **Captions and hashtags**: Use engaging, informative, and concise captions that include relevant hashtags. Research and use a mix of popular and niche hashtags to increase your reach.\n5. **User-generated content (UGC)**: Encourage your followers to share content related to your brand by running contests, giveaways, or featuring customer testimonials.\n6. **Consistency**: Post regularly to maintain a consistent aesthetic and keep your audience engaged. Aim for at least 3-5 posts per week, but make sure you don't sacrifice quality for quantity.\n7. **Engage with your audience**: Respond to comments, answer questions, and use Instagram Stories to interact with your followers in real-time.\n8. **Instagram Stories and IGTV**: Use Instagram Stories to share behind-the-scenes content, sneak peeks, or exclusive deals. IGTV is ideal for longer-form content, such as tutorials, interviews, or product demos.\n9. **Influencer collaborations**: Partner with influencers in your niche to reach new audiences and tap into their followers.\n10. **Experiment and analyze**: Try different content types, hashtags, and posting schedules to see what works best for your audience. Use Instagram Insights to track your performance and adjust your strategy accordingly.\n\nTo further optimize your content, consider the following:\n\n* Post when your audience is most active (use Instagram Insights to determine your peak hours).\n* Use Instagram's features like polls, quizzes, and question stickers to increase engagement.\n* Share user-friendly, informative, and entertaining content that adds value to your audience.\n* Utilize Instagram's shopping feature to tag products and enable customers to purchase from your feed.\n\nNow, about your 350 followers in two weeks - that's a great start! To continue growing your audience, focus on:\n\n* Consistently posting high-quality content that resonates with your audience.\n* Engaging with your followers and responding to comments.\n* Using relevant hashtags and collaborating with influencers in your niche.\n* Running contests or giveaways to incentivize followers to share your content and attract new followers.\n\nKeep an eye on your performance using Instagram Insights, and adjust your strategy based on your analytics. Good luck, and I hope to see your follower count continue to grow!",
     "[Date: 2023/05/23 (Tue) 21:44] I've been trying to analyze my social media performance and I was wondering if you could help me understand what kind of content tends to perform well on Instagram. By the way, I've noticed that after two weeks of posting regularly, I had around 350 followers on Instagram.",
@@ -938,8 +939,8 @@
    "answer_variants": [
     "100"
    ],
-   "answer_text_packed": "yes",
-   "stage": "passage:yes",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/29 (Mon) 08:31] Do you know if Sephora has any current promotions or discounts on the La Roche-Posay moisturizer or any other products I might want to purchase with it? By the way, I'm really close to redeeming a free skincare product from Sephora, I just need a total of 300 points and I'm all set!",
     "[Date: 2023/05/29 (Mon) 08:31] The La Roche-Posay Toleriane Ultra Fluid Face Moisturizer SPF 50 is a fantastic product for combination skin.\n\nAnd yes, you can earn points for purchasing it at Sephora! As a Beauty Insider, you'll earn 1 point for every dollar you spend at Sephora, and you can redeem those points for rewards like free products, services, and more.\n\nSince you're close to reaching 300 points, purchasing the La Roche-Posay moisturizer (priced at around $30) will bring you even closer to redeeming your free skincare product!\n\nJust make sure to sign in to your Beauty Insider account online or through the Sephora app when you make your purchase, and your points will be automatically added to your account.\n\nHappy shopping, and enjoy your new moisturizer!",
@@ -978,8 +979,8 @@
    "answer_variants": [
     "33"
    ],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2022/09/01 (Thu) 03:06] I'm looking for some advice on skincare routines for my age group. I've been noticing some fine lines and wrinkles lately, and I want to start taking better care of my skin. By the way, my friend Rachel's getting married next year, and it's got me thinking about my own life goals.",
     "[Date: 2022/09/01 (Thu) 03:06] Congratulations to Rachel on her upcoming wedding!\n\nNow, let's talk about your skincare concerns! Fine lines and wrinkles are a natural part of aging, but with a consistent and effective skincare routine, you can reduce their appearance and maintain healthy, glowing skin.\n\nSince you didn't mention your specific age, I'll provide general advice applicable to most adults in their 30s, 40s, and 50s. Please keep in mind that individual skin types and concerns may vary, so feel free to adjust these tips based on your personal needs.\n\n**Essential Steps for a Basic Skincare Routine:**\n\n1. **Cleanse**: Wash your face twice a day, morning and night, using a gentle, non-foaming cleanser suitable for your skin type (normal, dry, oily, or combination).\n2. **Exfoliate**: 1-2 times a week, use a chemical exfoliant (alpha-hydroxy acid, beta-hydroxy acid, or enzyme-based) or a physical exfoliant ( gentle scrub or brush) to remove dead skin cells and unclog pores.\n3. **Tone**: Use a toner to balance your skin's pH, tighten pores, and prepare your skin for further products.\n4. **Essence**: Apply an essence, a concentrated serum that delivers active ingredients to the skin.\n5. **Serum**: Use a serum containing active ingredients that target your specific concerns, such as fine lines, wrinkles, dark spots, or acne.\n6. **Moisturize**: Apply a moisturizer that provides hydration, protection, and anti-aging benefits.\n7. **Eye Care**: Use an eye cream or serum to address concerns specific to the delicate skin around your eyes, such as dark circles, puffiness, or fine lines.\n8. **Sunscreen**: Apply a broad-spectrum sunscreen with an SPF of at least 30 daily, even on cloudy days, to prevent further skin damage.\n\n**Additional Tips:**\n\n* **Stay hydrated**: Drink plenty of water throughout the day to plump up your skin from the inside out.\n* **Get enough sleep**: Aim for 7-8 hours of sleep to help your skin regenerate and repair itself.\n* **Eat a balanced diet**: Focus on whole, nutrient-rich foods, including fruits, vegetables, whole grains, lean proteins, and healthy fats.\n* **Manage stress**: High stress levels can lead to skin issues like acne, rosacea, and premature aging. Engage in stress-reducing activities like yoga, meditation, or deep breathing exercises.\n* **Don't smoke**: Smoking can significantly accelerate skin aging and cause wrinkles.\n\n**Product Recommendations:**\n\nFor fine lines and wrinkles, look for products containing:\n\n* Retinol (stimulates collagen production, reduces fine lines)\n* Peptides (boosts collagen, elastin, and hyaluronic acid production)\n* Hyaluronic acid (hydrates and plumps the skin)\n* Vitamin C (antioxidant, brightens and firms the skin)\n* Niacinamide (improves skin elasticity, reduces inflammation)\n\nSome popular, well-reviewed products include:\n\n* Olay Regenerist Micro-Sculpting Cream\n* Neutrogena Rapid Wrinkle Repair Night Moisturizer\n* La Roche-Posay Pigmentclar Eye Cream\n* SkinCeuticals C E Ferulic (antioxidant serum)\n\n**Remember:** Consistency is key! Stick to your routine, and give your skin time to adjust and respond. Be patient, and don't hesitate to consult with a dermatologist if you have specific concerns or questions.\n\nNow, about those life goals... What are some things you've been thinking about accomplishing in the next year or five?",
@@ -1045,8 +1046,8 @@
    "answer_variants": [
     "$50"
    ],
-   "answer_text_packed": "yes",
-   "stage": "passage:yes",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/26 (Fri) 22:35] By the way, I was told that taking a taxi from the airport to my hotel would cost around $60, which is a bit pricey for me.",
     "[Date: 2023/05/22 (Mon) 05:10] I was thinking of taking the train from the airport to my hotel, my friend told me it's only around $10.",
@@ -1091,8 +1092,8 @@
    "answer_variants": [
     "856"
    ],
-   "answer_text_packed": "no",
-   "stage": "passage:no",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/05/27 (Sat) 17:40] I'm looking for some book recommendations. I've been into fiction lately, especially novels that explore complex themes. I just finished a 416-page novel, but before that, I read \"The Power\" by Naomi Alderman in December, which had 341 pages and took me around 5 weeks to finish. I'm interested in books with similar page lengths and depth.",
     "[Date: 2023/05/22 (Mon) 13:27] I'm looking for some book recommendations. I just finished a historical fiction novel, \"The Nightingale\" by Kristin Hannah, which had 440 pages and took me around 3 weeks to complete. Do you have any suggestions for similar books or authors?",
@@ -1372,8 +1373,8 @@
    "answer_variants": [
     "15"
    ],
-   "answer_text_packed": "yes",
-   "stage": "passage:yes",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/01/19 (Thu) 10:47] I'm feeling much better now that I finally recovered from the flu today, and I was thinking about getting back into my exercise routine. Do you have any tips on how to ease into jogging again after a two-week break?",
     "[Date: 2023/01/19 (Thu) 10:47] Congratulations on recovering from the flu! It's great that you're feeling better and eager to get back to your exercise routine. Easing into jogging after a two-week break is a great approach to avoid injury or burnout. Here are some tips to help you get back on track:\n\n1. **Listen to your body**: Pay attention to how you feel. If you're still feeling fatigued or experiencing any lingering symptoms, it may be too soon to start jogging again. Wait a few more days or consult with your doctor if you're unsure.\n2. **Start with walking**: Begin with short walks (20-30 minutes) to get your body accustomed to physical activity again. This will help you regain your endurance and build up your cardiovascular system.\n3. **Gradually introduce jogging**: Once you feel comfortable walking, incorporate short jogging segments into your walks. Start with 1-2 minutes of jogging followed by 2-3 minutes of walking. Gradually increase the duration and frequency of your jogging segments over time.\n4. **Reduce your intensity and distance**: Don't try to pick up where you left off before your break. Start with shorter distances (e.g., 1-2 miles) and slower paces to allow your body to readjust.\n5. **Warm up and cool down**: Always warm up with 5-10 minutes of light stretching and walking before jogging, and cool down with static stretches after your workout.\n6. **Hydrate and fuel**: Make sure to drink plenty of water before, during, and after your workouts. Also, pay attention to your nutrition to ensure you're fueling your body with a balanced diet.\n7. **Monitor your progress**: Keep track of your workouts, including distance, time, and how you feel. This will help you identify areas for improvement and stay motivated.\n8. **Be patient**: It may take some time to regain your pre-break fitness level. Be patient and celebrate small victories along the way.\n9. **Consider a \"reverse taper\"**: If you were jogging regularly before your break, you may want to try a \"reverse taper\" approach. This means gradually increasing your jogging time and intensity over a few weeks to allow your body to adapt.\n10. **Seek professional guidance**: If you have any concerns or underlying health conditions, consult with a healthcare professional or a fitness expert to create a personalized plan for returning to jogging.\n\nRemember, it's better to err on the side of caution and ease into jogging again. By following these tips, you'll be able to safely get back into your exercise routine and enjoy the many benefits of jogging. Happy running!",
@@ -1984,8 +1985,8 @@
    "answer_variants": [
     "25"
    ],
-   "answer_text_packed": "yes",
-   "stage": "passage:yes",
+   "answer_text_packed": "aggregate",
+   "stage": "passage:aggregate",
    "packed_gold_fragments": [
     "[Date: 2023/11/30 (Thu) 18:35] I'm really excited to host this collector's gathering and share my passion with like-minded enthusiasts. Speaking of which, I just realized I've added 25 new postcards to my collection since I started collecting again. It's amazing how fast my collection has grown! By the way, do you have any recommendations for creating a simple, yet effective display for my postcard collection?",
     "[Date: 2023/08/11 (Fri) 15:58] I didn't know there were so many online communities dedicated to collecting and photography. I'll definitely check some of these out. By the way, speaking of my collection, I was wondering if you could help me generate a list of my postcards? I've added 17 new ones since I started collecting again, and I'd like to keep track of them.",

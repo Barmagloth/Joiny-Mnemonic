@@ -172,8 +172,15 @@ def deep(run_path: Path, dataset: str, output_dir: Path) -> dict:
         haystack = " ".join(" ".join(t.split()) for t in packed_gold_texts).casefold()
         variants = _answer_variants(item.answer)
         extractive = all(len(v) <= 30 for v in variants[:1])
+        # Aggregate answers (bare counts/sums) are computed, never quoted:
+        # substring containment cannot judge them (manual audit 2026-07-17
+        # found the len>=2 variant filter silently dumped every one-digit
+        # count into passage:no). They get their own honest bucket.
+        aggregate = bool(re.fullmatch(r"[\d,.$ ]{1,7}", " ".join(str(item.answer).split())))
         if not packed_gold_texts:
             answer_packed = "no_gold_fragments"
+        elif aggregate:
+            answer_packed = "aggregate"
         elif not extractive:
             answer_packed = "indeterminate"
         elif any(v.casefold() in haystack for v in variants):
