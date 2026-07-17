@@ -200,3 +200,19 @@ distilled-facts shape no longer pays for its update weakness. Shipping
 decision still requires the extraction-corpus gate (TODO item 6) and a
 product design that prefers validity-bounding over hard supersession
 (the vague-successor pitfall above).
+
+---
+
+# Judge-verification status (2026-07-17)
+
+All probe arms in this document (flat, token-overlap, keyed, keyed
+no-closure, CHECK MATERIAL, and their preference/abstention/stratified
+runs) were judged by the same-stack Sonnet judge ONLY — none has been
+re-judged by an independent model family, unlike the raw-500 baseline
+(triangulated by three judges). The paired design cancels most judge
+bias in the deltas the decisions used, and the closures (token-overlap,
+CHECK MATERIAL) rested on mechanism audits rather than headlines — but
+none of these numbers is triangulated. Rule: an independent re-judge of
+the persisted rows becomes MANDATORY at the moment any of these figures
+backs a shipping decision or a published claim; until then they are
+single-judge research numbers.
