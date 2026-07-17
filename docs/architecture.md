@@ -334,6 +334,15 @@ the user via the hook `systemMessage` on claude-code (with a ready
 `[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` elsewhere; capabilities report
 the per-kind settlement policy and the notification channel.
 
+### Packet-assembly invariant: empty sections cost zero
+
+An optional packet section must cost zero budget and zero text when it
+has nothing to say — no empty headers, no reserved space, no placeholder
+lines. Paid for empirically (2026-07-17, CHECK MATERIAL probe): a fixed
+token reserve for a section that never fired displaced real evidence and
+produced the entire measured regression of that experiment. Regression
+test: `tests/test_packet_invariants.py`.
+
 ### Settlement surfaces (task6C)
 
 Manual verbs live in `settlement.py` (`SettlementSurface`), a thin
