@@ -38,6 +38,7 @@ def main() -> int:
     parser.add_argument("--sample-per-type", type=int, default=0)
     parser.add_argument("--limit-questions", type=int, default=0)
     parser.add_argument("--only-type", default="")
+    parser.add_argument("--only-abstention", action="store_true")
     parser.add_argument("--cache-dir", default="benchmarks/distill-cache")
     parser.add_argument(
         "--runner-command",
@@ -51,6 +52,8 @@ def main() -> int:
     items = load_dataset(args.dataset)
     if args.only_type:
         items = [item for item in items if item.question_type == args.only_type]
+    if args.only_abstention:
+        items = [item for item in items if item.question_id.endswith("_abs")]
     if args.sample_per_type:
         taken: dict[str, int] = {}
         sampled = []

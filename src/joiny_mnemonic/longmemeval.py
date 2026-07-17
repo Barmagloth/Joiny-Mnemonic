@@ -315,8 +315,16 @@ class LMEHarness:
     ingest_mode: str = "raw"
     supersede_containment: float = 0.30
     distill_cache_dir: Path | None = None
+    # Experimental packing mode (opt-in, eval-only): append a bounded
+    # [CHECK MATERIAL] section — earlier superseded versions of packed
+    # facts plus still-live near-duplicate conflicts — so conflicts are
+    # surfaced to the reader instead of resolved silently. Token overhead
+    # and build latency are recorded per question (6A discipline).
+    check_material: bool = False
+    check_material_budget_tokens: int = 600
     _fact_index: list = field(default_factory=list, repr=False)
     _state_index: dict = field(default_factory=dict, repr=False)
+    _supersession_log: dict = field(default_factory=dict, repr=False)
     _cross_encoder: Any = field(default=None, repr=False)
     active_semantic_plugins: list[str] = field(default_factory=list)
     active_reranker_plugins: list[str] = field(default_factory=list)
@@ -395,6 +403,7 @@ class LMEHarness:
         count = 0
         self._fact_index = []
         self._state_index = {}
+        self._supersession_log = {}
         for session in item.sessions:
             date = session["date"]
             event_ids: list[str] = []
@@ -423,6 +432,7 @@ class LMEHarness:
                     fact = item["fact"]
                     supersedes = None
                     state_key = None
+                    superseded_entry = None
                     if self.ingest_mode == "distill-aware":
                         supersedes = self._superseded_fact(fact, iso_date)
                     elif self.ingest_mode == "distill-keyed" and item["key"]:
@@ -433,6 +443,7 @@ class LMEHarness:
                         live = self._state_index.get(state_key)
                         if live is not None and iso_date and live[1] < iso_date:
                             supersedes = live[0]
+                            superseded_entry = live
                     record = service.store.derive_memory(
                         memory_type="fact",
                         content=fact,
@@ -448,9 +459,18 @@ class LMEHarness:
                             (record.id, iso_date, _fact_tokens(fact))
                         )
                     elif state_key is not None:
+                        if superseded_entry is not None:
+                            # Version chain for the CHECK MATERIAL section:
+                            # the new record remembers what it replaced.
+                            self._supersession_log[record.id] = (
+                                superseded_entry[2], superseded_entry[1],
+                                superseded_entry[0],
+                            )
                         live = self._state_index.get(state_key)
                         if live is None or not live[1] or live[1] <= iso_date:
-                            self._state_index[state_key] = (record.id, iso_date)
+                            self._state_index[state_key] = (
+                                record.id, iso_date, fact
+                            )
         return count
 
     def _superseded_fact(self, fact: str, iso_date: str) -> str | None:
@@ -512,6 +532,11 @@ class LMEHarness:
         annotated = [(hit, *_hit_session(hit)) for hit in hits]
         chosen: list[tuple[Any, str, str]] = []
         used = 0
+        # CHECK MATERIAL reserves its bounded slice up front so the section
+        # displaces evidence measurably instead of overflowing the budget.
+        packing_budget = self.context_budget_tokens - (
+            self.check_material_budget_tokens if self.check_material else 0
+        )
         if self.packing == "breadth":
             # Breadth-first (ceiling measurement 2026-07-14: the pool holds
             # 100% of gold sessions at limit 128, but rank-order packing
@@ -526,7 +551,7 @@ class LMEHarness:
                 if session_id and session_id in seen_sessions:
                     continue
                 cost = conservative_token_estimate(hit.content.strip())
-                if used + cost > self.context_budget_tokens:
+                if used + cost > packing_budget:
                     continue
                 chosen.append(entry)
                 picked_ids.add(index)
@@ -536,14 +561,14 @@ class LMEHarness:
                 if index in picked_ids:
                     continue
                 cost = conservative_token_estimate(entry[0].content.strip())
-                if used + cost > self.context_budget_tokens:
+                if used + cost > packing_budget:
                     continue
                 chosen.append(entry)
                 used += cost
         else:  # "rank": plain greedy in fused order
             for entry in annotated:
                 cost = conservative_token_estimate(entry[0].content.strip())
-                if used + cost > self.context_budget_tokens:
+                if used + cost > packing_budget:
                     break
                 chosen.append(entry)
                 used += cost
@@ -556,6 +581,14 @@ class LMEHarness:
         for (date, _), blocks in sorted(groups.items()):
             header = f"## Session {date}" if date else "## Session (undated)"
             parts.append(header + "\n" + "\n".join(blocks))
+        check_material_metrics: dict[str, Any] = {}
+        if self.check_material:
+            section, check_material_metrics = self._check_material_section(
+                annotated, chosen
+            )
+            if section:
+                parts.append(section)
+                used += check_material_metrics["check_material_tokens"]
         included = [hit.id for hit, _, _ in chosen]
         retrieved_sessions = {sid for _, sid, _ in chosen if sid}
         haystack_tokens = sum(
@@ -565,6 +598,7 @@ class LMEHarness:
         )
         gold = set(item.answer_session_ids)
         metrics = {
+            **check_material_metrics,
             "context_tokens": used,
             "haystack_tokens": haystack_tokens,
             "retrieved_sessions": sorted(retrieved_sessions),
@@ -575,6 +609,120 @@ class LMEHarness:
             ) if gold else None,
         }
         return "\n\n".join(parts), included, metrics
+
+    def _check_material_section(
+        self, annotated: list, chosen: list
+    ) -> tuple[str, dict[str, Any]]:
+        """Bounded [CHECK MATERIAL] section: (a) earlier superseded
+        versions of packed facts (from the ingest supersession chains),
+        (b) still-live near-duplicate fact conflicts in the candidate pool.
+        Mistakes are soft by construction — a wrong flag costs packet
+        lines, never hides evidence."""
+        started = time.perf_counter()
+        prior_lines: list[str] = []
+        for hit, _, _ in chosen:
+            chain_id = hit.id
+            depth = 0
+            while depth < 2 and len(prior_lines) < 4:
+                entry = self._supersession_log.get(chain_id)
+                if entry is None:
+                    break
+                old_fact, old_date, old_id = entry
+                prior_lines.append(
+                    f"- ({old_date or 'undated'}) earlier version, replaced "
+                    f"by a later fact above: {old_fact}"
+                )
+                chain_id = old_id
+                depth += 1
+        conflict_lines: list[str] = []
+        fact_pool = [
+            (hit, date)
+            for hit, _, date in annotated
+            if date and str(hit.id).startswith("mem_")
+        ]
+        grouped: set[int] = set()
+        for left in range(len(fact_pool)):
+            if len(conflict_lines) >= 3:
+                break
+            if left in grouped:
+                continue
+            hit_a, date_a = fact_pool[left]
+            tokens_a = _fact_tokens(hit_a.content)
+            for right in range(left + 1, len(fact_pool)):
+                if right in grouped:
+                    continue
+                hit_b, date_b = fact_pool[right]
+                if date_a == date_b:
+                    continue
+                if _containment(tokens_a, _fact_tokens(hit_b.content)) < 0.30:
+                    continue
+                first, second = (
+                    ((hit_a, date_a), (hit_b, date_b))
+                    if date_a <= date_b else ((hit_b, date_b), (hit_a, date_a))
+                )
+                conflict_lines.append(
+                    f"- ({str(first[1])[:10]}) {first[0].content.strip()}\n"
+                    f"  vs ({str(second[1])[:10]}) {second[0].content.strip()}"
+                )
+                grouped.add(left)
+                grouped.add(right)
+                break
+        blocks: list[str] = []
+        if prior_lines:
+            blocks.append(
+                "Earlier versions of facts shown above (dates are "
+                "authoritative; later versions may omit details the earlier "
+                "ones carry):\n" + "\n".join(prior_lines)
+            )
+        if conflict_lines:
+            blocks.append(
+                "Potentially conflicting memories about the same subject "
+                "(different dates or different statements — prefer the "
+                "latest dated evidence, or state the information is "
+                "inconsistent if they cannot be reconciled):\n"
+                + "\n".join(conflict_lines)
+            )
+        section = ""
+        tokens = 0
+        if blocks:
+            section = "## [CHECK MATERIAL]\n" + "\n\n".join(blocks)
+            tokens = conservative_token_estimate(section)
+            while tokens > self.check_material_budget_tokens and (
+                prior_lines or conflict_lines
+            ):
+                # Trim from the tail until the reserved budget holds.
+                if conflict_lines:
+                    conflict_lines.pop()
+                elif prior_lines:
+                    prior_lines.pop()
+                blocks = []
+                if prior_lines:
+                    blocks.append(
+                        "Earlier versions of facts shown above (dates are "
+                        "authoritative; later versions may omit details the "
+                        "earlier ones carry):\n" + "\n".join(prior_lines)
+                    )
+                if conflict_lines:
+                    blocks.append(
+                        "Potentially conflicting memories about the same "
+                        "subject (different dates or different statements — "
+                        "prefer the latest dated evidence, or state the "
+                        "information is inconsistent if they cannot be "
+                        "reconciled):\n" + "\n".join(conflict_lines)
+                    )
+                section = (
+                    "## [CHECK MATERIAL]\n" + "\n\n".join(blocks)
+                    if blocks else ""
+                )
+                tokens = conservative_token_estimate(section) if section else 0
+        return section, {
+            "check_material_tokens": tokens,
+            "check_material_prior_versions": len(prior_lines),
+            "check_material_conflict_groups": len(conflict_lines),
+            "check_material_ms": round(
+                (time.perf_counter() - started) * 1000, 2
+            ),
+        }
 
     def run_question(self, item: LMEQuestion) -> dict[str, Any]:
         started = time.perf_counter()
@@ -649,6 +797,11 @@ class LMEHarness:
                 "packing": self.packing,
                 "rerank": self.rerank,
                 "ingest_mode": self.ingest_mode,
+                "check_material": self.check_material,
+                "check_material_budget_tokens": (
+                    self.check_material_budget_tokens
+                    if self.check_material else None
+                ),
                 "supersede_containment": (
                     self.supersede_containment
                     if self.ingest_mode == "distill-aware" else None
@@ -759,6 +912,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="run only questions of this question_type (targeted probes)",
     )
     parser.add_argument(
+        "--only-abstention", action="store_true",
+        help="run only the abstention subset (question ids ending in _abs)",
+    )
+    parser.add_argument(
+        "--check-material", action="store_true",
+        help="experimental opt-in packing section: earlier superseded fact "
+        "versions + still-live near-duplicate conflicts, bounded, with "
+        "token/latency accounting (eval-only)",
+    )
+    parser.add_argument(
         "--offset", type=int, default=0,
         help="skip the first N questions and append to existing results "
         "(resume support for long runs)",
@@ -772,6 +935,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     items = load_dataset(args.dataset)
     if args.only_type:
         items = [item for item in items if item.question_type == args.only_type]
+    if args.only_abstention:
+        items = [item for item in items if item.question_id.endswith("_abs")]
     if args.sample_per_type:
         taken: dict[str, int] = {}
         sampled = []
@@ -798,6 +963,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rerank=args.rerank,
         ingest_mode=args.ingest,
         distill_cache_dir=Path(args.distill_cache),
+        check_material=args.check_material,
     )
     mode = "a" if args.offset else "w"
     with jsonl_path.open(mode, encoding="utf-8") as stream:
