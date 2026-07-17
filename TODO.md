@@ -1,5 +1,23 @@
 # TODO — validation and usability
 
+## Readiness statement (2026-07-17, user assessment — the honest one)
+
+**The central user scenario is NOT proven: a user writes plain dialogue →
+the system reliably extracts a verified long-term record on its own.**
+What demonstrably works: the append-only journal, hooks capture, resume
+and MCP, lexical/semantic retrieval + reranker, provenance, snapshots,
+settlement, explicit markers with manual confirmation, performance and
+channel diagnostics. All of it is infrastructure AROUND the unproven
+core loop. The shipped extraction backend (nuextract-local) was never
+measured; a bridge-extractor research probe was mistakenly announced as
+"gate passed"; the central acceptance was skipped and project readiness
+was overstated. The central acceptance, pinned so it cannot be
+substituted again: (1) the backend that actually ships passes the
+corpus gate on held-out data with a frozen prompt and repeat runs, AND
+(2) an end-to-end live test on a real store: plain dialogue, no
+markers → correct typed candidates appear, quarantine and trust
+boundaries hold, resume surfaces them.
+
 The core works; the project is unvalidated and the UX has sharp edges. This
 file tracks the short list of work that actually changes that assessment —
 benchmarks people can check, settlement without manual magic, repeatable
