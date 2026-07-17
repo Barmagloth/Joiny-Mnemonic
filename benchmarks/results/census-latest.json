@@ -1,0 +1,199 @@
+[
+ {
+  "run": "benchmarks\\results\\longmemeval-latest.jsonl",
+  "total": 500,
+  "wrong": 60,
+  "buckets": {
+   "cov0_wrong": 1,
+   "full_correct": 435,
+   "full_wrong": 54,
+   "partial_correct": 5,
+   "partial_wrong": 5
+  },
+  "bucket_ids": {
+   "cov0_wrong": [
+    "gpt4_4929293b"
+   ],
+   "full_wrong": [
+    "51a45a95",
+    "0a995998",
+    "dd2973ad",
+    "c4a1ceb8",
+    "gpt4_2f8be40d",
+    "2ce6a0f2",
+    "d851d5ba",
+    "gpt4_ab202e7f",
+    "gpt4_731e37d7",
+    "bf659f65",
+    "81507db6",
+    "75832dbd",
+    "0edc2aef",
+    "32260d93",
+    "06f04340",
+    "6b7dfb22",
+    "1a1907b4",
+    "09d032c9",
+    "d24813b1",
+    "95228167",
+    "75f70248",
+    "b6025781",
+    "0a34ad58",
+    "a11281a2",
+    "9ee3ecd6",
+    "ba358f49",
+    "73d42213",
+    "09ba9854",
+    "37f165cf",
+    "a96c20ee_abs",
+    "09ba9854_abs",
+    "gpt4_7f6b06db",
+    "gpt4_468eb063",
+    "370a8ff4",
+    "gpt4_d6585ce8",
+    "gpt4_f420262c",
+    "gpt4_af6db32f",
+    "gpt4_85da3956",
+    "gpt4_1e4a8aec",
+    "6e984302",
+    "gpt4_8279ba03",
+    "gpt4_70e84552",
+    "gpt4_93159ced",
+    "gpt4_2d58bcd6",
+    "gpt4_65aabe59",
+    "gpt4_c27434e8",
+    "gpt4_fe651585",
+    "852ce960",
+    "01493427",
+    "07741c45",
+    "cc539528",
+    "1d4da289",
+    "1b9b7252",
+    "561fabcd"
+   ],
+   "partial_wrong": [
+    "6d550036",
+    "gpt4_7abb270c",
+    "gpt4_e061b84f",
+    "eac54add",
+    "gpt4_68e94288"
+   ]
+  },
+  "per_type": {
+   "knowledge-update": {
+    "full_correct": 75,
+    "full_wrong": 3
+   },
+   "multi-session": {
+    "full_wrong": 18,
+    "partial_wrong": 1,
+    "full_correct": 113,
+    "partial_correct": 1
+   },
+   "single-session-assistant": {
+    "full_correct": 52,
+    "full_wrong": 4
+   },
+   "single-session-preference": {
+    "full_correct": 18,
+    "full_wrong": 12
+   },
+   "single-session-user": {
+    "full_correct": 69,
+    "full_wrong": 1
+   },
+   "temporal-reasoning": {
+    "full_correct": 108,
+    "full_wrong": 16,
+    "partial_wrong": 4,
+    "partial_correct": 4,
+    "cov0_wrong": 1
+   }
+  }
+ },
+ {
+  "run": "benchmarks\\results\\distill-keyed-knowledge-update\\longmemeval-latest.jsonl",
+  "total": 78,
+  "wrong": 5,
+  "buckets": {
+   "full_correct": 73,
+   "full_wrong": 5
+  },
+  "bucket_ids": {
+   "full_wrong": [
+    "0f05491a",
+    "01493427",
+    "59524333",
+    "031748ae_abs",
+    "07741c45"
+   ]
+  },
+  "per_type": {
+   "knowledge-update": {
+    "full_correct": 73,
+    "full_wrong": 5
+   }
+  }
+ },
+ {
+  "run": "benchmarks\\results\\distill-keyed-preference\\longmemeval-latest.jsonl",
+  "total": 30,
+  "wrong": 9,
+  "buckets": {
+   "full_correct": 21,
+   "full_wrong": 9
+  },
+  "bucket_ids": {
+   "full_wrong": [
+    "75832dbd",
+    "195a1a1b",
+    "06f04340",
+    "6b7dfb22",
+    "95228167",
+    "75f70248",
+    "d6233ab6",
+    "b6025781",
+    "b0479f84"
+   ]
+  },
+  "per_type": {
+   "single-session-preference": {
+    "full_correct": 21,
+    "full_wrong": 9
+   }
+  }
+ },
+ {
+  "run": "benchmarks\\results\\cm-abs-baseline\\longmemeval-latest.jsonl",
+  "total": 30,
+  "wrong": 3,
+  "buckets": {
+   "full_correct": 26,
+   "full_wrong": 3,
+   "partial_correct": 1
+  },
+  "bucket_ids": {
+   "full_wrong": [
+    "a96c20ee_abs",
+    "09ba9854_abs",
+    "031748ae_abs"
+   ]
+  },
+  "per_type": {
+   "knowledge-update": {
+    "full_correct": 5,
+    "full_wrong": 1
+   },
+   "multi-session": {
+    "partial_correct": 1,
+    "full_correct": 9,
+    "full_wrong": 2
+   },
+   "single-session-user": {
+    "full_correct": 6
+   },
+   "temporal-reasoning": {
+    "full_correct": 6
+   }
+  }
+ }
+]
