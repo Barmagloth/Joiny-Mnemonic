@@ -1,46 +1,62 @@
-# Offline failure census of saved runs (2026-07-17, no LLM)
+# Offline failure census of saved runs — v2 (2026-07-17, no LLM)
 
-Deterministic bucketing of every persisted question row (user taxonomy);
-script: `benchmarks/census.py`, raw buckets in `census-latest.json`. The
-saved rows record *packed* sessions, so the retrieval-vs-packing split
-for sub-coverage cases was resolved by a local retrieval re-run (pool at
-limit 64, no LLM) for exactly those questions.
+v1 of this document overclaimed ("90% reader/synthesis") and its
+retrieval/packing split was not reproducible; both defects were called
+out in review and are fixed here. Script: `benchmarks/census.py`
+(shallow bucketing + `--deep` reproducible evidence pass); artifacts:
+`census-latest.json` (session-level buckets),
+`census-deep-latest.json` (per-failure candidate pool, packed
+gold-fragment texts, config and code commit).
 
-## Raw-500 (the published 88.0% run): all 60 failures located
+## What `gold_coverage` actually means
 
-| class | n | share of failures |
-|---|---:|---:|
-| **reader/synthesis** — gold fully packed, answer wrong | **54** | **90%** |
-| packing — gold in the 64-pool, pushed below the budget line | 5 | 8.3% |
-| retrieval — gold absent from the pool (gpt4_4929293b) | 1 | 1.7% |
-| leakage — correct with zero gold packed | 0 | 0% |
+In the saved rows it is SESSION-level: a gold session counts as covered
+when at least one of its fragments is packed
+(`longmemeval.py::build_context`). It never proved that the supporting
+passage was packed. The deep pass adds that middle step with a
+deterministic proxy: substring containment of the gold answer (plus
+parenthesized variants, casefolded) in the packed gold-session
+fragments; answers longer than 30 chars are marked indeterminate
+instead of guessed.
 
-Reader failures by type: multi-session 18, temporal-reasoning 16,
-preference 12, single-session-assistant 4, knowledge-update 3,
-single-session-user 1.
+## Raw-500: all 60 failures, three-level split (deep, reproducible)
 
-Probe arms show the same shape: keyed-KU 5/5 failures are full-coverage,
-keyed-preference 9/9, abstention baseline 3/3.
+| stage | n | meaning |
+|---|---:|---|
+| retrieval | 1 | no gold session in the 64-candidate pool |
+| packing (session) | 5 | gold in pool, session not represented in packet |
+| **passage:no** | **17** | sessions represented, but the literal answer text is NOT in any packed gold fragment — passage-selection/packing failures *inside* covered sessions |
+| **passage:yes** | **11** | answer text demonstrably in the packet — proven reader/synthesis failures |
+| passage:indeterminate | 26 | non-extractive answers (aggregations, preference rubrics) — proxy cannot judge |
 
-## Consequences for the four-point scope
+By type: passage:no is dominated by multi-session (10) and temporal (5);
+passage:yes spreads thin; indeterminate is mostly preference (12) and
+temporal (8).
 
-1. **The main failure class is the last mile**: sources are in the
-   packet; the answer still goes wrong. Everything measured this week
-   (stale-status collapse, enumeration, abstention, preference breadth)
-   lives in this bucket.
-2. **Graph gate: firmly closed by data.** One candidate
-   connectivity-style miss in 500 questions — and it still needs a check
-   whether it is connectivity or plain lexical mismatch. No failure
-   class exists for graph indexing to fix.
-3. **Set-selector headroom is now a number: ≤5 questions (~1pp).** Any
-   selector work must justify itself against that ceiling on this
-   benchmark; effectively deprioritized until a workload with different
-   packing pressure exists.
-4. **Leakage clean**: no correct answers without gold in the packet —
-   the 88.0% number is not inflated by alternative-source luck.
+## Corrected conclusions (superseding v1)
 
-Caveat: the census inherits the judge's verdicts (a "reader failure" is
-a judged-wrong answer; judge-sensitive types like preference blur the
-boundary), and the packing/retrieval split was recomputed on today's
-code, not the run-day binary — chain-of-custody for that split is
-code-version-loose, acceptable for prioritization.
+1. **"90% reader" is dead.** Proven reader failures: 11/60 (18%).
+   Proven retrieval-or-packing at session or passage level: 23/60
+   (38%). Undetermined: 26/60 (43%).
+2. **Selector/packing headroom is up to ~23 questions (~4.6pp), not
+   ≤5.** Passage-level selection inside covered sessions (especially
+   multi-session) is back on the table as a measured opportunity — any
+   candidate selector still competes against the tuned
+   session-diversity packing on a frozen set.
+3. **Graph gate stays closed, for the correct reason**: the
+   connectivity failure class remains unmeasured (1 retrieval miss in
+   500 is not it); nothing here justifies graph indexing.
+4. **No inflation at the session level**: zero correct answers without
+   any gold session packed. (A weaker statement than "no leakage" — an
+   alternative source could coexist with an irrelevant gold fragment;
+   not measured.)
+
+## Proxy caveats (both directions)
+
+`passage:no` can overcount packing failures when the packet carries a
+paraphrase of the answer ("weekly" vs "every week") — some of the 17
+may be reader failures; `passage:yes` can overcount reader failures if
+the matched string appears in a misleading context. The 26 indeterminate
+rows need LLM-assisted labelling if a finer split is ever required.
+The deep pass re-runs on current code (commit recorded in the artifact),
+not the run-day binary.

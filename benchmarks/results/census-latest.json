@@ -5,16 +5,23 @@
   "wrong": 60,
   "buckets": {
    "cov0_wrong": 1,
-   "full_correct": 435,
-   "full_wrong": 54,
    "partial_correct": 5,
-   "partial_wrong": 5
+   "partial_wrong": 5,
+   "sessions_ok_correct": 435,
+   "sessions_ok_wrong": 54
   },
   "bucket_ids": {
    "cov0_wrong": [
     "gpt4_4929293b"
    ],
-   "full_wrong": [
+   "partial_wrong": [
+    "6d550036",
+    "gpt4_7abb270c",
+    "gpt4_e061b84f",
+    "eac54add",
+    "gpt4_68e94288"
+   ],
+   "sessions_ok_wrong": [
     "51a45a95",
     "0a995998",
     "dd2973ad",
@@ -69,41 +76,34 @@
     "1d4da289",
     "1b9b7252",
     "561fabcd"
-   ],
-   "partial_wrong": [
-    "6d550036",
-    "gpt4_7abb270c",
-    "gpt4_e061b84f",
-    "eac54add",
-    "gpt4_68e94288"
    ]
   },
   "per_type": {
    "knowledge-update": {
-    "full_correct": 75,
-    "full_wrong": 3
+    "sessions_ok_correct": 75,
+    "sessions_ok_wrong": 3
    },
    "multi-session": {
-    "full_wrong": 18,
+    "sessions_ok_wrong": 18,
     "partial_wrong": 1,
-    "full_correct": 113,
+    "sessions_ok_correct": 113,
     "partial_correct": 1
    },
    "single-session-assistant": {
-    "full_correct": 52,
-    "full_wrong": 4
+    "sessions_ok_correct": 52,
+    "sessions_ok_wrong": 4
    },
    "single-session-preference": {
-    "full_correct": 18,
-    "full_wrong": 12
+    "sessions_ok_correct": 18,
+    "sessions_ok_wrong": 12
    },
    "single-session-user": {
-    "full_correct": 69,
-    "full_wrong": 1
+    "sessions_ok_correct": 69,
+    "sessions_ok_wrong": 1
    },
    "temporal-reasoning": {
-    "full_correct": 108,
-    "full_wrong": 16,
+    "sessions_ok_correct": 108,
+    "sessions_ok_wrong": 16,
     "partial_wrong": 4,
     "partial_correct": 4,
     "cov0_wrong": 1
@@ -115,11 +115,11 @@
   "total": 78,
   "wrong": 5,
   "buckets": {
-   "full_correct": 73,
-   "full_wrong": 5
+   "sessions_ok_correct": 73,
+   "sessions_ok_wrong": 5
   },
   "bucket_ids": {
-   "full_wrong": [
+   "sessions_ok_wrong": [
     "0f05491a",
     "01493427",
     "59524333",
@@ -129,8 +129,8 @@
   },
   "per_type": {
    "knowledge-update": {
-    "full_correct": 73,
-    "full_wrong": 5
+    "sessions_ok_correct": 73,
+    "sessions_ok_wrong": 5
    }
   }
  },
@@ -139,11 +139,11 @@
   "total": 30,
   "wrong": 9,
   "buckets": {
-   "full_correct": 21,
-   "full_wrong": 9
+   "sessions_ok_correct": 21,
+   "sessions_ok_wrong": 9
   },
   "bucket_ids": {
-   "full_wrong": [
+   "sessions_ok_wrong": [
     "75832dbd",
     "195a1a1b",
     "06f04340",
@@ -157,8 +157,8 @@
   },
   "per_type": {
    "single-session-preference": {
-    "full_correct": 21,
-    "full_wrong": 9
+    "sessions_ok_correct": 21,
+    "sessions_ok_wrong": 9
    }
   }
  },
@@ -167,12 +167,12 @@
   "total": 30,
   "wrong": 3,
   "buckets": {
-   "full_correct": 26,
-   "full_wrong": 3,
-   "partial_correct": 1
+   "partial_correct": 1,
+   "sessions_ok_correct": 26,
+   "sessions_ok_wrong": 3
   },
   "bucket_ids": {
-   "full_wrong": [
+   "sessions_ok_wrong": [
     "a96c20ee_abs",
     "09ba9854_abs",
     "031748ae_abs"
@@ -180,19 +180,19 @@
   },
   "per_type": {
    "knowledge-update": {
-    "full_correct": 5,
-    "full_wrong": 1
+    "sessions_ok_correct": 5,
+    "sessions_ok_wrong": 1
    },
    "multi-session": {
     "partial_correct": 1,
-    "full_correct": 9,
-    "full_wrong": 2
+    "sessions_ok_correct": 9,
+    "sessions_ok_wrong": 2
    },
    "single-session-user": {
-    "full_correct": 6
+    "sessions_ok_correct": 6
    },
    "temporal-reasoning": {
-    "full_correct": 6
+    "sessions_ok_correct": 6
    }
   }
  }
