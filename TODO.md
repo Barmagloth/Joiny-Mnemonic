@@ -214,7 +214,11 @@ is premature.
       scoring — type-span for typing quality, exact-triple for provenance
       calligraphy — per-example audit JSONL, stamped combined report)
 - [x] Recall/precision figures in the README next to the LongMemEval number
-- [x] First gate cycle complete (2026-07-17). Narrow claims only
+- [x] First corpus cycle complete (2026-07-17) — reframed after review
+      (2026-07-17): this was a RESEARCH PROBE of the claude-code bridge
+      extractor (Haiku), NOT the product gate. The shipped backend
+      (nuextract-local) was never measured; 'gate passed' in earlier
+      wording overstated the experiment's identity. Narrow claims only
       (review 2026-07-17): PROVEN — the gate mechanism stops a bad
       version (run 1 honestly failed: preference en 1.00/0.78,
       ru 0.97/0.67); type-span scoring works as a regression tool;
@@ -238,6 +242,11 @@ is premature.
       list (pref-005 vegetarian, pref-030 cat names) — single-type gold
       is itself a corpus defect to fix in the held-out tranche
       (multi-type golds)
+- [ ] PRODUCT GATE proper: run the same corpus + scoring against the
+      shipped backend (nuextract-local) — the system that would actually
+      be installed and enabled. It may fail hard; that is the point of
+      a gate. Until then automatic extraction has no measured shipped
+      path at all
 - [ ] Held-out tranche authored AFTER prompt freeze + repeat runs for
       stochasticity — required before any enablement decision; held-out
       design notes: multi-type golds for multi-assertion lines, more

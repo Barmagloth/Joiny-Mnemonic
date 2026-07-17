@@ -53,3 +53,35 @@ quoted — they now get their own `passage:aggregate` bucket
 - Selector design stays unjustified; if anything earns a probe next, it
   is answer-time temporal discipline and status/recency presentation —
   both last-mile, both already flagged by the four-point scope.
+
+---
+
+# Independent re-judge reconciliation (2026-07-17, GPT via user)
+
+The independent review of the (v3) seven `passage:yes` cases sustains
+only 4 as reader failures and moves 3 to uncertain — dd2973ad and
+gpt4_fe651585 because the system's answer is arguably more defensible
+than gold on the packed dates, and 852ce960 because the packet holds
+both $350k and $400k without resolving which is canonical (an
+unresolved source conflict, not a proven reader error). My original
+"all confirmed reader-side" claim is therefore withdrawn; likewise
+"two confirmed status failures" reduces to one (9ee3ecd6) plus one
+unresolved conflict (852ce960).
+
+**Adopted joint verdict over the 28 audited cases: ~15 reader,
+~8 passage missing, ~5 uncertain.** The ~2.2-2.6pp figure is an
+estimate of the *observed* selector opportunity, not a ceiling — the
+26 indeterminate cases remain unexamined by scope decision and may
+hide more of either class.
+
+Also fixed after this review: the deep artifact's provenance now
+records the dirty flag, the census script's SHA-256 and the active
+plugin set (the v3 artifact was stamped with a commit that did not
+contain the algorithm that produced it); the numeric bucket is renamed
+`short_numeric_indeterminate` (it includes directly-stated short
+values, not only computed aggregates — and short numerics are
+unjudgeable by containment in both directions); the proxy now has unit
+tests (tests/test_census_proxy.py), which immediately caught two more
+edge cases ($400,000 exceeded the old length cap and slipped into
+containment — exactly how 852ce960 reached passage:yes; parenthesized
+variants fell into indeterminate).

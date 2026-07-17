@@ -397,9 +397,18 @@ python -m joiny_mnemonic.report_signing verify benchmarks/results/longmemeval-la
 Reproduce with `joiny-mnemonic-longmemeval` against the public dataset; the
 harness, runner bridge and per-question rows are all in this repository.
 
-## Extraction typing gate
+## Extraction typing corpus (research probe)
 
-Automatic **preference** typing is gated by a hand-labelled bilingual
+What follows is a **research probe of a bridge extractor** (the local
+Claude Code CLI driving Haiku) against the gate corpus — it answers "can
+this model family type preferences under the product's evidence rules",
+which informs the keyed-distillation work. It is **not the product
+gate**: the shipped extraction backend (`nuextract-local`) has not been
+measured against this corpus at all, and automatic extraction remains
+off with no measured shipped path. Earlier wording called this "gate
+passed"; that overstated the experiment's identity.
+
+Automatic **preference** typing is scored by a hand-labelled bilingual
 corpus — 140 examples (70 per language: 50 prose preference positives,
 10 hard negatives — other people's tastes, hypotheticals, sarcasm,
 quoted strangers, past phases — 3 untrusted-zone injection traps, and 7

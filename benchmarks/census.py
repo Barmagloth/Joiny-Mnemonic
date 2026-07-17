@@ -111,6 +111,14 @@ def deep(run_path: Path, dataset: str, output_dir: Path) -> dict:
         for q in load_dataset(dataset)
         if q.question_id in wrong_ids
     }
+    import hashlib
+
+    dirty = bool(
+        subprocess.run(
+            ["git", "-C", str(ROOT), "status", "--porcelain"],
+            capture_output=True, text=True,
+        ).stdout.strip()
+    )
     config = {
         "budget": 12288, "retrieval_limit": 64, "packing": "rank",
         "ingest": "raw",
@@ -118,6 +126,13 @@ def deep(run_path: Path, dataset: str, output_dir: Path) -> dict:
             ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
             capture_output=True, text=True,
         ).stdout.strip(),
+        # Review 2026-07-17: a commit hash alone lied once (v3 ran with
+        # uncommitted census.py edits). Record enough to actually
+        # reproduce the algorithm.
+        "working_tree_dirty": dirty,
+        "census_script_sha256": hashlib.sha256(
+            Path(__file__).read_bytes()
+        ).hexdigest(),
         "note": "re-run on current code, not the run-day binary",
     }
     harness = LMEHarness(
@@ -133,6 +148,12 @@ def deep(run_path: Path, dataset: str, output_dir: Path) -> dict:
         item = items[qid]
         gold = set(item.answer_session_ids)
         service = MemoryService(":memory:", project_root=ROOT)
+        if "active_plugins" not in config:
+            config["active_plugins"] = {
+                "semantic": sorted(service.plugins.semantic),
+                "rerankers": sorted(service.plugins.rerankers),
+                "knowledge_graph": sorted(service.plugins.knowledge_graph),
+            }
         try:
             harness.ingest(service, item)
             anchor = (
@@ -171,16 +192,17 @@ def deep(run_path: Path, dataset: str, output_dir: Path) -> dict:
         } & gold
         haystack = " ".join(" ".join(t.split()) for t in packed_gold_texts).casefold()
         variants = _answer_variants(item.answer)
-        extractive = all(len(v) <= 30 for v in variants[:1])
-        # Aggregate answers (bare counts/sums) are computed, never quoted:
-        # substring containment cannot judge them (manual audit 2026-07-17
-        # found the len>=2 variant filter silently dumped every one-digit
-        # count into passage:no). They get their own honest bucket.
-        aggregate = bool(re.fullmatch(r"[\d,.$ ]{1,7}", " ".join(str(item.answer).split())))
+        extractive = any(len(v) <= 30 for v in variants)
+        # Short numeric answers are unjudgeable by substring containment
+        # in BOTH directions: computed counts are never quoted, and even
+        # directly-stated short numerics collide with dates ("25" matches
+        # "2023/05/25"). Review 2026-07-17: the bucket is honestly named
+        # for what the proxy establishes - nothing.
+        aggregate = bool(re.fullmatch(r"[\d,.$ ]{1,12}", " ".join(str(item.answer).split())))
         if not packed_gold_texts:
             answer_packed = "no_gold_fragments"
         elif aggregate:
-            answer_packed = "aggregate"
+            answer_packed = "short_numeric_indeterminate"
         elif not extractive:
             answer_packed = "indeterminate"
         elif any(v.casefold() in haystack for v in variants):
