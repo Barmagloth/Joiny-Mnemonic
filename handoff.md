@@ -145,10 +145,14 @@ TODO#6 наследует заострённую цель — update-aware disti
 необходимость графа, ECO-онтологии или универсального evidence-слоя.
 
 Оправданы только четыре узких направления (формулировка пользователя):
-1. **Health/watermark каналов**: включён ли semantic/reranker, до какой
-   позиции построен индекс, когда был последний успешный результат.
-   Потребители: capabilities, диагностика, предупреждение. Закрывает
-   пережитый инцидент.
+1. ~~Health/watermark каналов~~ — **СДЕЛАН (2026-07-17)**: проекция
+   retrieval_channel_health, каждая ветка помечает успех
+   (watermark=head на момент sync) или ошибку с таймстампом; дельты
+   персистятся (минутная грануляция успехов). Потребители:
+   capabilities.core.retrieval_health (lag, degraded, absent_optional —
+   явный сигнал «semantic не установлен», наш инцидент) + bounded
+   staleness-строки в resume. Стадия hook-timing retrieval_health warm
+   p95 = 0.31ms, все гейты зелёные, 274 теста. tests/test_retrieval_health.py.
 2. **Не терять существующий статус источника** (raw/derived/superseded/
    quarantined) там, где это меняет ranking/packing или отображение
    provenance. Новую онтологию не создавать.

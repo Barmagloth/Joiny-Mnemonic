@@ -191,6 +191,17 @@ CREATE TABLE IF NOT EXISTS consolidation_receipts (
     created_at TEXT NOT NULL
 );
 
+-- Rebuildable projection (health/watermark, 2026-07-17): last known state
+-- of each retrieval channel. Hook processes are short-lived, so channel
+-- health must survive process boundaries to be visible in capabilities
+-- and resume warnings. An empty search result must be distinguishable
+-- from a dead or absent channel. Safe to drop at any time.
+CREATE TABLE IF NOT EXISTS retrieval_channel_health (
+    channel TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Rebuildable projection (task6 packet-assembly fix): SHA-256 per project
 -- file keyed by (size, mtime_ns) so resume-time snapshot staleness checks
 -- re-hash only files whose stat changed. Safe to drop at any time.
@@ -2542,6 +2553,29 @@ class MemoryStore:
             replay_code_version=SNAPSHOT_REPLAY_CODE_VERSION,
             blob_available=True,
         )
+
+    def retrieval_health_load(self) -> dict[str, dict[str, Any]]:
+        """Rebuildable channel-health projection (see schema comment)."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT channel, payload_json FROM retrieval_channel_health"
+            ).fetchall()
+        return {
+            str(row["channel"]): json.loads(row["payload_json"]) for row in rows
+        }
+
+    def retrieval_health_store(self, channels: dict[str, dict[str, Any]]) -> None:
+        if not channels:
+            return
+        with self._transaction() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO retrieval_channel_health"
+                "(channel, payload_json, updated_at) VALUES(?,?,?)",
+                [
+                    (channel, _json(payload), _now())
+                    for channel, payload in channels.items()
+                ],
+            )
 
     def file_hash_cache_load(self, root: str) -> dict[str, tuple[int, int, str]]:
         """Rebuildable stat->hash projection for one project root."""

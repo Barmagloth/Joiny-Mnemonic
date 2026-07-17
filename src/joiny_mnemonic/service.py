@@ -210,6 +210,54 @@ class MemoryService:
             self._witness_status = self.security_status()["witness"]
         return {**result, "witness": self._witness_status}
 
+    def retrieval_health(self) -> dict[str, Any]:
+        """Channel health/watermark view (2026-07-17): last known state of
+        every retrieval arm, merged from the persisted projection and this
+        process's live marks, with lag against the current head. An absent
+        optional plugin is reported explicitly — an empty search result
+        must never be mistaken for a healthy one."""
+        try:
+            persisted = self.store.retrieval_health_load()
+        except Exception:
+            persisted = {}
+        merged: dict[str, dict[str, Any]] = {**persisted}
+        for channel, entry in self.retrieval._health.items():
+            merged[channel] = {**merged.get(channel, {}), **entry}
+        try:
+            head = int(self.store.chain_checkpoint().get("head_seq") or 0)
+        except Exception:
+            head = None
+        expected = {"lexical", "temporal"}
+        expected.update(f"semantic:{name}" for name in self.plugins.semantic)
+        expected.update(f"reranker:{name}" for name in self.plugins.rerankers)
+        expected.update(f"graph:{name}" for name in self.plugins.knowledge_graph)
+        channels: dict[str, dict[str, Any]] = {}
+        for channel in sorted(expected | set(merged)):
+            entry = dict(merged.get(channel, {}))
+            entry.setdefault("configured", channel in expected)
+            watermark = entry.get("indexed_through_seq")
+            entry["head_seq"] = head
+            entry["lag"] = (
+                head - int(watermark)
+                if head is not None and isinstance(watermark, int)
+                else None
+            )
+            error_at = entry.get("last_error_at")
+            success_at = entry.get("last_success_at")
+            entry["degraded"] = bool(
+                error_at and (not success_at or error_at >= success_at)
+            )
+            channels[channel] = entry
+        return {
+            "channels": channels,
+            "head_seq": head,
+            "absent_optional": {
+                "semantic": not bool(self.plugins.semantic),
+                "reranker": not bool(self.plugins.rerankers),
+                "knowledge_graph": not bool(self.plugins.knowledge_graph),
+            },
+        }
+
     def security_status(self) -> dict[str, Any]:
         witness = self.witness.check_and_update(self.store)
         finding_type = witness.get("finding")
@@ -754,6 +802,31 @@ class MemoryService:
                 "automatic extraction backlog is incomplete; "
                 f"oldest_pending_age={extraction_status.oldest_pending_age:.1f}s",
             )
+        # Channel health consumer (2026-07-17): a degraded retrieval arm is
+        # a staleness disclosure — the packet may be built on fewer arms
+        # than configured. Bounded to three lines; measured as its own
+        # hook-timing stage per the 6A standing rule.
+        from . import hooks as _hooks
+
+        with _hooks._stage("retrieval_health"):
+            try:
+                health = self.retrieval_health()
+                degraded = [
+                    (channel, entry)
+                    for channel, entry in health["channels"].items()
+                    if entry.get("configured") and entry.get("degraded")
+                ][:3]
+                stale_reasons = (
+                    *stale_reasons,
+                    *(
+                        f"retrieval channel {channel} degraded: "
+                        f"{entry.get('last_error', 'unknown error')} "
+                        f"at {entry.get('last_error_at', '?')}"
+                        for channel, entry in degraded
+                    ),
+                )
+            except Exception:
+                pass
         instructions: tuple[str, ...] = (DURABLE_MEMORY_INSTRUCTION,)
         try:
             pending = self.reconciler.pending_completions(branch_id=branch_id)
@@ -964,6 +1037,7 @@ class MemoryService:
                 "code_context": {"python": "ast-symbol-call-impact", "other_languages": "unsupported"},
                 "semantic_retrieval": bool(self.plugins.semantic),
                 "knowledge_graph": bool(self.plugins.knowledge_graph),
+                "retrieval_health": self.retrieval_health(),
                 "kv_tiers": sorted(self.plugins.kv_tiers),
                 "extractor_plugin_category": True,
                 "http_api": True,

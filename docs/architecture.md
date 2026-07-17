@@ -334,6 +334,22 @@ the user via the hook `systemMessage` on claude-code (with a ready
 `[STATE MAINTENANCE - AUTO-CLOSED RECENTLY]` elsewhere; capabilities report
 the per-kind settlement policy and the notification channel.
 
+### Retrieval channel health / watermark
+
+Every retrieval arm (lexical, semantic:\*, graph:\*, temporal,
+reranker:\*) marks its outcome during normal search into a cheap
+persisted projection (`retrieval_channel_health`): success carries the
+store head it was synced against (`indexed_through_seq`), failure
+carries the error and timestamp. Success stamps are minute-coarse so a
+healthy steady state writes at most one row per channel per minute.
+Consumers: `capabilities.core.retrieval_health` (per-channel lag =
+head − watermark, degraded flag, and `absent_optional` — an explicitly
+reported missing plugin, so an empty semantic result is never mistaken
+for a healthy one) and the resume packet (bounded staleness lines for
+degraded channels). The health read in resume is its own hook-timing
+stage (`retrieval_health`, warm p95 ≈ 0.3ms); the projection is
+rebuildable and never breaks retrieval on write failure.
+
 ### Packet-assembly invariant: empty sections cost zero
 
 An optional packet section must cost zero budget and zero text when it

@@ -77,6 +77,8 @@ class RetrievalEngine:
     def __init__(self, store: MemoryStore, plugins: PluginRegistry | None = None) -> None:
         self.store = store
         self.plugins = plugins or PluginRegistry()
+        self._health: dict[str, dict[str, Any]] = {}
+        self._health_flushed: dict[str, dict[str, Any]] = {}
 
     def _memory_hit(self, record: MemoryRecord, context: RetrievalContext) -> RetrievalHit:
         relevance = _lexical_relevance(
@@ -323,9 +325,60 @@ class RetrievalEngine:
             boosted.append(replace(hit, score=hit.score * factor, metadata=metadata))
         return boosted
 
+    # --- channel health / watermark (2026-07-17) ------------------------
+    # Cheap maintained projection, not per-call probing: every arm marks
+    # success (with the store head it was synced against) or failure, and
+    # deltas persist so short-lived hook processes still see the last
+    # known state. An empty result stays distinguishable from a dead or
+    # absent channel. Success timestamps are minute-coarse so a healthy
+    # steady state writes at most one row per channel per minute.
+
+    def _mark_health(
+        self, channel: str, *, ok: bool,
+        watermark_seq: int | None = None, error: str | None = None,
+        backend: str | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        entry = dict(self._health.get(channel, {}))
+        entry["configured"] = True
+        if backend:
+            entry["backend"] = backend
+        if ok:
+            entry["last_success_at"] = now.isoformat(timespec="minutes")
+            if watermark_seq is not None:
+                entry["indexed_through_seq"] = int(watermark_seq)
+        else:
+            entry["last_error"] = str(error)[:300]
+            entry["last_error_at"] = now.isoformat(timespec="seconds")
+        self._health[channel] = entry
+
+    def _flush_health(self) -> None:
+        changed = {
+            channel: entry
+            for channel, entry in self._health.items()
+            if self._health_flushed.get(channel) != entry
+        }
+        if not changed:
+            return
+        try:
+            self.store.retrieval_health_store(changed)
+        except Exception:
+            return  # health must never break retrieval
+        self._health_flushed.update(
+            {channel: dict(entry) for channel, entry in changed.items()}
+        )
+
     def search(self, context: RetrievalContext) -> list[RetrievalHit]:
         if context.limit < 1:
             return []
+        head_seq: int | None = None
+        if context.query:
+            try:
+                head_seq = int(
+                    self.store.chain_checkpoint().get("head_seq") or 0
+                )
+            except Exception:
+                head_seq = None
         hits: list[RetrievalHit] = []
         if context.query and self.store.fts_enabled:
             memory_candidates = self.store.search_memories_fts(
@@ -394,6 +447,13 @@ class RetrievalEngine:
                 hits.extend(self._event_hit(event, context) for event in events)
             if context.query:
                 hits = [hit for hit in hits if hit.score > 0.05]
+        if context.query:
+            # Lexical is transactional with the store: its watermark IS the
+            # head at query time.
+            self._mark_health(
+                "lexical", ok=True, watermark_seq=head_seq,
+                backend="fts5-bm25" if self.store.fts_enabled else "python-fallback",
+            )
 
         if context.semantic and context.query and self.plugins.semantic:
             visible_records = self.store.list_memories(
@@ -432,10 +492,16 @@ class RetrievalEngine:
                     hits.extend(
                         plugin.search(context.query, limit=context.limit, filters=filters)
                     )
+                    self._mark_health(
+                        f"semantic:{plugin.name}", ok=True, watermark_seq=head_seq
+                    )
                 except Exception as exc:
                     error = f"semantic:{plugin.name}: {exc}"
                     if error not in self.plugins.errors:
                         self.plugins.errors.append(error)
+                    self._mark_health(
+                        f"semantic:{plugin.name}", ok=False, error=str(exc)
+                    )
 
         # Multi-arm fusion (task5.md B2/B5). Extra arms exist when the query
         # carries a temporal cue or the knowledge-graph plugin matches
@@ -454,6 +520,7 @@ class RetrievalEngine:
         arms: dict[str, list[RetrievalHit]] = {}
         if context.query and window is not None:
             temporal_hits = self._temporal_arm(context, window)
+            self._mark_health("temporal", ok=True, watermark_seq=head_seq)
             if temporal_hits:
                 arms["temporal"] = temporal_hits
         if context.query and self.plugins.knowledge_graph:
@@ -480,10 +547,16 @@ class RetrievalEngine:
                             filters={"allowed_memory_ids": visible_ids},
                         )
                     )
+                    self._mark_health(
+                        f"graph:{plugin.name}", ok=True, watermark_seq=head_seq
+                    )
                 except Exception as exc:
                     error = f"knowledge_graph:{plugin.name}: {exc}"
                     if error not in self.plugins.errors:
                         self.plugins.errors.append(error)
+                    self._mark_health(
+                        f"graph:{plugin.name}", ok=False, error=str(exc)
+                    )
             if graph_hits:
                 arms["graph"] = graph_hits
         if arms:
@@ -521,10 +594,16 @@ class RetrievalEngine:
             for plugin in self.plugins.rerankers.values():
                 try:
                     ordered = list(plugin.rerank(context.query, ordered))
+                    self._mark_health(f"reranker:{plugin.name}", ok=True)
                 except Exception as exc:
                     error = f"reranker:{plugin.name}: {exc}"
                     if error not in self.plugins.errors:
                         self.plugins.errors.append(error)
+                    self._mark_health(
+                        f"reranker:{plugin.name}", ok=False, error=str(exc)
+                    )
+        if context.query:
+            self._flush_health()
         return ordered[: context.limit]
 
     @staticmethod
