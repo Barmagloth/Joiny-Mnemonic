@@ -1,0 +1,93 @@
+{
+  "benchmark": "LongMemEval-S",
+  "harness": "joiny-mnemonic-longmemeval",
+  "judge_prompts": "arXiv 2512.12818 Appendix A.4 (verbatim)",
+  "config": {
+    "context_budget_tokens": 12288,
+    "retrieval_limit": 64,
+    "packing": "rank",
+    "rerank": false,
+    "ingest_mode": "distill-keyed",
+    "check_material": false,
+    "check_material_budget_tokens": null,
+    "supersede_containment": null,
+    "semantic_plugins": [
+      "local-sentence-transformers"
+    ],
+    "reranker_plugins": [
+      "local-cross-encoder"
+    ],
+    "runner_command": [
+      "python",
+      "benchmarks/runner_claude_code.py"
+    ],
+    "runner_env": {
+      "LME_DISTILL_KEYED": "1"
+    }
+  },
+  "per_type": {
+    "knowledge-update": {
+      "total": 6,
+      "correct": 5,
+      "accuracy": 0.8333,
+      "ci95": 0.2982,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
+    },
+    "multi-session": {
+      "total": 12,
+      "correct": 10,
+      "accuracy": 0.8333,
+      "ci95": 0.2109,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 0.9792
+    },
+    "single-session-user": {
+      "total": 6,
+      "correct": 6,
+      "accuracy": 1.0,
+      "ci95": 0.0,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
+    },
+    "temporal-reasoning": {
+      "total": 6,
+      "correct": 6,
+      "accuracy": 1.0,
+      "ci95": 0.0,
+      "retrieval_recall": 1.0,
+      "gold_coverage_mean": 1.0
+    }
+  },
+  "overall": {
+    "total": 30,
+    "correct": 27,
+    "accuracy": 0.9,
+    "ci95": 0.1074
+  },
+  "tokens": {
+    "context_sent_total": 358452,
+    "haystack_total": 4897740,
+    "savings_ratio": 0.9268,
+    "context_per_question_mean": 11948
+  },
+  "unparseable_judgments": 0,
+  "dataset_sha256_16": "d6f21ea9d60a0d56",
+  "provenance": {
+    "signing_version": "report-signing-v1",
+    "generated_at": "2026-07-17T02:07:32.213378+00:00",
+    "git_commit": "25a43dd64039290f31a50ebd5408474c88ab0c7e",
+    "git_dirty": false,
+    "package_version": "0.8.0",
+    "schema_version": 9,
+    "temporal_projection_code_version": "temporal-core-v1",
+    "snapshot_replay_code_version": "snapshot-materializer-v2",
+    "python": "3.13.1",
+    "platform": "win32",
+    "artifact_sha256": {
+      "dataset": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+      "per_question_jsonl": "850e151027581ffa2c4af49a3a9e17f56b45d5f6e5bc5a484e9f45349c1ecd3a"
+    }
+  },
+  "report_sha256": "036ea1d5126d0c60e7eea8688b4835d1ce7151c6f03fd69a7881f21bbf0b30c0"
+}
