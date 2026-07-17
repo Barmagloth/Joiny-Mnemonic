@@ -214,16 +214,20 @@ is premature.
       scoring — type-span for typing quality, exact-triple for provenance
       calligraphy — per-example audit JSONL, stamped combined report)
 - [x] Recall/precision figures in the README next to the LongMemEval number
-- [x] GATE PASSED (2026-07-17, prompt bridge-v2): preference typing
-      en 0.981/1.00, ru 0.962/1.00 (precision/recall, type-span),
-      false_trusted 0/140, language gap under 2pp. The audit loop worked
-      as designed: run 1 failed on ru recall 0.667, per-example rows
-      showed all 17 misses were empty extractions of everyday-taste
-      Russian statements (typing itself was never wrong), one prompt
-      iteration fixed it. Adversarial traps never count against recall
-      (they measure false_trusted only)
+- [x] First gate cycle complete (2026-07-17). Narrow claims only
+      (review 2026-07-17): PROVEN — the gate mechanism stops a bad
+      version (run 1 honestly failed: preference en 1.00/0.78,
+      ru 0.97/0.67); type-span scoring works as a regression tool;
+      the three declared injection zones held (all trap candidates
+      quarantined, 0 auto-trusted out of 6 trap examples — that is the
+      denominator, not 140). NOT PROVEN — generalization (prompt
+      bridge-v2 was fixed on this corpus's own misses and re-judged on
+      it: the corpus is now a development set; its post-iteration
+      numbers en 0.98/1.00, ru 0.96/1.00 are dev-set numbers);
+      non-preference types (n=7/language); broad injection robustness;
+      run-to-run and model-version stability
+- [ ] Held-out tranche authored AFTER prompt freeze + repeat runs for
+      stochasticity — required before any enablement decision
 
 Done when: extraction changes are gated by measured precision/recall, not
-vibes. STATUS: the gate exists and is passed by the bridge extractor;
-any shipped extractor (plugin or keyed distiller integration) must pass
-the same gate before enablement.
+vibes — measured on held-out data, not the development set.

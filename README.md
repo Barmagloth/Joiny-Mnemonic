@@ -399,21 +399,35 @@ harness, runner bridge and per-question rows are all in this repository.
 
 ## Extraction typing gate
 
-Automatic typing (a preference labelled `preference`, a decision labelled
-`decision`, with an exact evidence quote) is gated by a hand-labelled
-bilingual corpus — 140 examples (70 en / 70 ru), 50 prose preference
-positives per language, hard negatives (other people's tastes,
-hypotheticals, sarcasm, quoted strangers, past phases) and
-untrusted-zone injection traps. Current gate result (2026-07-17, bridge
-extractor = local Claude Code CLI, Haiku, prompt `bridge-v2`, typing
-matched by type + evidence-span overlap): preference precision/recall
-**0.98 / 1.00 en** and **0.96 / 1.00 ru**, zero candidates from
-injection traps trusted (0/140). Scoring, corpus and per-example audit
-rows: `benchmarks/extraction_gate.py`, `evals/extraction_*_v2.json`,
-`benchmarks/results/extraction-gate-latest.json` (stamped). Caveats: the
-system under test is the bridge extractor, not a shipped default —
-automatic extraction stays off until a shipped path passes this same
-gate; the corpus is small (CI on 50 positives ≈ ±8pp) and hand-authored.
+Automatic **preference** typing is gated by a hand-labelled bilingual
+corpus — 140 examples (70 per language: 50 prose preference positives,
+10 hard negatives — other people's tastes, hypotheticals, sarcasm,
+quoted strangers, past phases — 3 untrusted-zone injection traps, and 7
+smaller-coverage examples of the other types). What the current numbers
+do and do not show (2026-07-17, bridge extractor = local Claude Code
+CLI, Haiku, typing matched by type + evidence-span overlap):
+
+- **Shown:** on this corpus the extractor types preferences at
+  precision/recall **1.00 / 0.78 en, 0.97 / 0.67 ru** with its first
+  prompt, and **0.98 / 1.00 en, 0.96 / 1.00 ru** after one prompt
+  iteration driven by this corpus's own misses — which makes the corpus
+  a *development set* for the second number, not a held-out test. All
+  candidates extracted from the 6 injection traps were quarantined,
+  never auto-trusted (a designed-zone smoke test, not a broad
+  adversarial eval). The gate mechanism itself works: run 1 failed and
+  the per-example rows located the exact failure class (empty
+  extraction of everyday-taste Russian statements).
+- **Not shown:** generalization beyond this corpus (enablement requires
+  a fresh held-out tranche authored after prompt freeze), quality on
+  the non-preference types (n=7 per language here), robustness to
+  injections beyond the three declared zones, and run-to-run/model
+  stability (single run per configuration; the extractor is stochastic).
+
+Scoring, corpus and per-example audit rows:
+`benchmarks/extraction_gate.py`, `evals/extraction_*_v2.json`,
+`benchmarks/results/extraction-gate-latest.json` (stamped). Automatic
+extraction stays off; a shipped path must pass this gate on held-out
+data before enablement.
 
 ## Evaluation
 
