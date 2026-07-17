@@ -397,6 +397,24 @@ python -m joiny_mnemonic.report_signing verify benchmarks/results/longmemeval-la
 Reproduce with `joiny-mnemonic-longmemeval` against the public dataset; the
 harness, runner bridge and per-question rows are all in this repository.
 
+## Extraction typing gate
+
+Automatic typing (a preference labelled `preference`, a decision labelled
+`decision`, with an exact evidence quote) is gated by a hand-labelled
+bilingual corpus — 140 examples (70 en / 70 ru), 50 prose preference
+positives per language, hard negatives (other people's tastes,
+hypotheticals, sarcasm, quoted strangers, past phases) and
+untrusted-zone injection traps. Current gate result (2026-07-17, bridge
+extractor = local Claude Code CLI, Haiku, prompt `bridge-v2`, typing
+matched by type + evidence-span overlap): preference precision/recall
+**0.98 / 1.00 en** and **0.96 / 1.00 ru**, zero candidates from
+injection traps trusted (0/140). Scoring, corpus and per-example audit
+rows: `benchmarks/extraction_gate.py`, `evals/extraction_*_v2.json`,
+`benchmarks/results/extraction-gate-latest.json` (stamped). Caveats: the
+system under test is the bridge extractor, not a shipped default —
+automatic extraction stays off until a shipped path passes this same
+gate; the corpus is small (CI on 50 positives ≈ ±8pp) and hand-authored.
+
 ## Evaluation
 
 The legacy diagnostic checks whether required evidence strings survive a policy:

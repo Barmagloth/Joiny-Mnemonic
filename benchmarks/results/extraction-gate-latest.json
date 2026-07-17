@@ -1,0 +1,433 @@
+{
+  "schema": "joiny-mnemonic-extraction-gate-v1",
+  "system_under_test": {
+    "extractor": "claude-code-bridge",
+    "model": "haiku",
+    "prompt": "extraction-gate-bridge-v2"
+  },
+  "corpora": {
+    "extraction_en_v2": "en-memory-extraction-v2",
+    "extraction_ru_v2": "ru-memory-extraction-v2"
+  },
+  "gate_match_mode": "type-span",
+  "reports": {
+    "extraction_en_v2": {
+      "corpus_version": "en-memory-extraction-v2",
+      "match_mode": "type-span",
+      "examples": 70,
+      "overall": {
+        "true_positive": 55,
+        "false_positive": 4,
+        "false_negative": 2,
+        "precision": 0.9322033898305084,
+        "recall": 0.9649122807017544,
+        "f1": 0.9482758620689654
+      },
+      "by_memory_type": {
+        "decision": {
+          "true_positive": 2,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "fact": {
+          "true_positive": 1,
+          "false_positive": 3,
+          "false_negative": 0,
+          "precision": 0.25,
+          "recall": 1.0,
+          "f1": 0.4
+        },
+        "failure": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "lesson": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "preference": {
+          "true_positive": 51,
+          "false_positive": 1,
+          "false_negative": 0,
+          "precision": 0.9807692307692307,
+          "recall": 1.0,
+          "f1": 0.9902912621359222
+        },
+        "task": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 55,
+          "false_positive": 4,
+          "false_negative": 2,
+          "precision": 0.9322033898305084,
+          "recall": 0.9649122807017544,
+          "f1": 0.9482758620689654
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.03389830508474576,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 12911.643985702123,
+        "max": 42835.330199915916
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    },
+    "extraction_ru_v2": {
+      "corpus_version": "ru-memory-extraction-v2",
+      "match_mode": "type-span",
+      "examples": 70,
+      "overall": {
+        "true_positive": 55,
+        "false_positive": 2,
+        "false_negative": 2,
+        "precision": 0.9649122807017544,
+        "recall": 0.9649122807017544,
+        "f1": 0.9649122807017544
+      },
+      "by_memory_type": {
+        "decision": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1": 0.6666666666666666
+        },
+        "fact": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "failure": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "lesson": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "preference": {
+          "true_positive": 51,
+          "false_positive": 2,
+          "false_negative": 0,
+          "precision": 0.9622641509433962,
+          "recall": 1.0,
+          "f1": 0.9807692307692307
+        },
+        "task": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 55,
+          "false_positive": 2,
+          "false_negative": 2,
+          "precision": 0.9649122807017544,
+          "recall": 0.9649122807017544,
+          "f1": 0.9649122807017544
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.07017543859649122,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 16394.36376999864,
+        "max": 40019.689299864694
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "exact_triple_reports": {
+    "extraction_en_v2": {
+      "corpus_version": "en-memory-extraction-v2",
+      "match_mode": "exact-triple",
+      "examples": 70,
+      "overall": {
+        "true_positive": 1,
+        "false_positive": 58,
+        "false_negative": 59,
+        "precision": 0.01694915254237288,
+        "recall": 0.016666666666666666,
+        "f1": 0.01680672268907563
+      },
+      "by_memory_type": {
+        "decision": {
+          "true_positive": 0,
+          "false_positive": 2,
+          "false_negative": 2,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "fact": {
+          "true_positive": 0,
+          "false_positive": 4,
+          "false_negative": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "failure": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "lesson": {
+          "true_positive": 1,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "preference": {
+          "true_positive": 0,
+          "false_positive": 52,
+          "false_negative": 54,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "task": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "blockquote": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "fenced_code": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "inline_code": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "prose": {
+          "true_positive": 1,
+          "false_positive": 58,
+          "false_negative": 56,
+          "precision": 0.01694915254237288,
+          "recall": 0.017543859649122806,
+          "f1": 0.017241379310344827
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.03389830508474576,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 0.014201421955866473,
+        "max": 0.026799971237778664
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    },
+    "extraction_ru_v2": {
+      "corpus_version": "ru-memory-extraction-v2",
+      "match_mode": "exact-triple",
+      "examples": 70,
+      "overall": {
+        "true_positive": 0,
+        "false_positive": 57,
+        "false_negative": 60,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "by_memory_type": {
+        "decision": {
+          "true_positive": 0,
+          "false_positive": 1,
+          "false_negative": 2,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "fact": {
+          "true_positive": 0,
+          "false_positive": 1,
+          "false_negative": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "failure": {
+          "true_positive": 0,
+          "false_positive": 1,
+          "false_negative": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "lesson": {
+          "true_positive": 0,
+          "false_positive": 1,
+          "false_negative": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "preference": {
+          "true_positive": 0,
+          "false_positive": 53,
+          "false_negative": 54,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "task": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "blockquote": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "fenced_code": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "inline_code": {
+          "true_positive": 0,
+          "false_positive": 0,
+          "false_negative": 1,
+          "precision": 1.0,
+          "recall": 0.0,
+          "f1": 0.0
+        },
+        "prose": {
+          "true_positive": 0,
+          "false_positive": 57,
+          "false_negative": 57,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.07017543859649122,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 0.015284290670284204,
+        "max": 0.0295999925583601
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "gate_rows": {
+    "en": {
+      "preference_precision": 0.9807692307692307,
+      "preference_recall": 1.0,
+      "false_trusted": 0
+    },
+    "ru": {
+      "preference_precision": 0.9622641509433962,
+      "preference_recall": 1.0,
+      "false_trusted": 0
+    }
+  },
+  "gate": {
+    "precision_en_ge_0.9": true,
+    "precision_ru_ge_0.9": true,
+    "recall_en_ge_0.7": true,
+    "recall_ru_ge_0.7": true,
+    "false_trusted_zero": true,
+    "language_gap_le_10pp": true
+  },
+  "passed": true,
+  "limited_to": null,
+  "provenance": {
+    "signing_version": "report-signing-v1",
+    "generated_at": "2026-07-17T10:13:49.295253+00:00",
+    "git_commit": "ff941285a9c736957072ed7152f38a00ec9f7706",
+    "git_dirty": true,
+    "package_version": "0.8.0",
+    "schema_version": 9,
+    "temporal_projection_code_version": "temporal-core-v1",
+    "snapshot_replay_code_version": "snapshot-materializer-v2",
+    "python": "3.13.1",
+    "platform": "win32",
+    "artifact_sha256": {}
+  },
+  "report_sha256": "a19facccf6d014902bbfa910819c99337d46602a7b39a0c79673106d9f2ed1e9"
+}

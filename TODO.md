@@ -205,9 +205,25 @@ distiller as the ceiling); if it does, this corpus gets a concrete target
 ("close the gap to the A/B distiller"), if it does not, component tuning
 is premature.
 
-- [ ] Fixture corpus + expected-candidate labels
-- [ ] Extraction eval runner + signed report
-- [ ] Recall/precision figures in the README next to the LongMemEval number
+- [x] Fixture corpus + expected-candidate labels (2026-07-17: v2 corpora,
+      70 en + 70 ru, 50 prose preference positives per language, 10 hard
+      negatives + 3 untrusted-zone traps each; structurally validated by
+      benchmarks/validate_corpus.py against the harness evidence rules)
+- [x] Extraction eval runner + signed report (benchmarks/extraction_gate.py:
+      claude-CLI bridge extractor as the system under test, memoized dual
+      scoring — type-span for typing quality, exact-triple for provenance
+      calligraphy — per-example audit JSONL, stamped combined report)
+- [x] Recall/precision figures in the README next to the LongMemEval number
+- [x] GATE PASSED (2026-07-17, prompt bridge-v2): preference typing
+      en 0.981/1.00, ru 0.962/1.00 (precision/recall, type-span),
+      false_trusted 0/140, language gap under 2pp. The audit loop worked
+      as designed: run 1 failed on ru recall 0.667, per-example rows
+      showed all 17 misses were empty extractions of everyday-taste
+      Russian statements (typing itself was never wrong), one prompt
+      iteration fixed it. Adversarial traps never count against recall
+      (they measure false_trusted only)
 
 Done when: extraction changes are gated by measured precision/recall, not
-vibes.
+vibes. STATUS: the gate exists and is passed by the bridge extractor;
+any shipped extractor (plugin or keyed distiller integration) must pass
+the same gate before enablement.

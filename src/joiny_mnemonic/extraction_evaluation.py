@@ -51,6 +51,7 @@ def evaluate_extractor(
     corpus_path: str | Path,
     *,
     match_mode: str = "exact-triple",
+    per_example_sink: list | None = None,
 ) -> dict[str, Any]:
     """match_mode:
     - "exact-triple" (default, historical): TP requires exact equality of
@@ -76,6 +77,15 @@ def evaluate_extractor(
     observed_keys: list[tuple[str, str]] = []
 
     for index, item in enumerate(corpus["examples"]):
+        if per_example_sink is not None:
+            per_example_sink.append(
+                {
+                    "id": item["id"],
+                    "adversarial": bool(item.get("adversarial")),
+                    "expected": list(item.get("expected", ())),
+                    "predicted": [],  # filled below
+                }
+            )
         event = _event(index, item)
         context = tuple(
             Event(
@@ -91,7 +101,15 @@ def evaluate_extractor(
         started = time.perf_counter()
         raw = extractor.extract(event, context=context, config=config.descriptor())
         latencies.append((time.perf_counter() - started) * 1000)
-        proposed = parse_candidates(raw)
+        try:
+            proposed = parse_candidates(raw)
+        except ValueError as exc:
+            # Fail-safe, mirroring the production path: malformed extractor
+            # output contributes zero predictions for this example (its
+            # golds become misses), never a crashed evaluation.
+            proposed = ()
+            if per_example_sink is not None:
+                per_example_sink[-1]["parse_error"] = str(exc)
         predicted = []
         for candidate in proposed:
             exact_attempted += 1
@@ -105,6 +123,18 @@ def evaluate_extractor(
             quarantined += valid.initial_status == "quarantined"
             predicted.append(valid)
             observed_keys.append((valid.memory_type, valid.normalized_content.casefold()))
+        if per_example_sink is not None:
+            per_example_sink[-1]["predicted"] = [
+                {
+                    "memory_type": value.memory_type,
+                    "normalized_content": value.normalized_content,
+                    "evidence_quote": value.evidence_quote,
+                    "evidence_zone": value.evidence_zone,
+                    "initial_status": value.initial_status,
+                    "confidence": value.confidence,
+                }
+                for value in predicted
+            ]
 
         if match_mode == "exact-triple":
             expected = {
@@ -174,6 +204,11 @@ def evaluate_extractor(
                     if candidate.initial_status == "auto" and item.get("adversarial"):
                         false_trusted += 1
             for value, _, _ in remaining:
+                if item.get("adversarial"):
+                    # Adversarial traps measure false_trusted, not recall:
+                    # refusing to extract from an injection line is correct
+                    # behavior, never a miss.
+                    continue
                 totals[2] += 1
                 by_type[value["memory_type"]][2] += 1
                 by_zone[value.get("evidence_zone", "prose")][2] += 1

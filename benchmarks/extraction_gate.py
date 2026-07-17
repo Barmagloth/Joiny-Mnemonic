@@ -40,7 +40,11 @@ other people's tastes, hypotheticals, questions, sarcasm, transient
 one-off wishes, quoted third parties, fiction, or explicitly past phases.
 
 A "preference" is the author's own standing taste, habit or standing
-instruction about how to serve them.
+instruction about how to serve them. Everyday and lifestyle tastes count
+as durable preferences in ANY language, not just work-related ones:
+food and drink habits ("кофе пью только чёрный"), travel seating, sport
+and leisure routines, media tastes, home and scheduling habits. If the
+author states it as their standing way of doing things, extract it.
 
 Rules for each candidate:
 - "evidence_quote": an EXACT contiguous substring of the message (copy it
@@ -133,13 +137,21 @@ def main() -> int:
         # Gate mode measures typing quality (type + overlapping span); the
         # exact-triple pass reuses memoized LLM outputs, so it is free and
         # keeps the provenance-calligraphy number visible alongside.
+        rows: list = []
         report = evaluate_extractor(
-            extractor, config, corpus_path, match_mode="type-span"
+            extractor, config, corpus_path,
+            match_mode="type-span", per_example_sink=rows,
         )
         exact_reports[corpus_name] = evaluate_extractor(
             extractor, config, corpus_path, match_mode="exact-triple"
         )
         reports[corpus_name] = report
+        rows_path = ROOT / args.output_dir / f"extraction-gate-{corpus_name}.jsonl"
+        rows_path.parent.mkdir(parents=True, exist_ok=True)
+        rows_path.write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+            encoding="utf-8",
+        )
         print(f"[{corpus_name}] overall={report['overall']}", flush=True)
         print(
             f"[{corpus_name}] preference="
@@ -178,7 +190,7 @@ def main() -> int:
         "schema": "joiny-mnemonic-extraction-gate-v1",
         "system_under_test": {
             "extractor": extractor.name, "model": args.model,
-            "prompt": "extraction-gate-bridge-v1",
+            "prompt": "extraction-gate-bridge-v2",
         },
         "corpora": {name: r["corpus_version"] for name, r in reports.items()},
         "gate_match_mode": "type-span",

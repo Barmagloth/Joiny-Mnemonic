@@ -184,7 +184,18 @@ TODO#6 наследует заострённую цель — update-aware disti
    distill-находок (preference частично закрывается фактами).
 3. Storage split: candidate/finding/extraction секции из ~4.7k-строчного
    storage.py в фокусные модули (остаток 6A, zero behavior change).
-4. Extraction eval corpus (TODO#6, цель заострена A/B-вердиктом);
+4. ~~Extraction eval corpus~~ — **ГЕЙТ ПОСТРОЕН И ПРОЙДЕН (2026-07-17)**:
+   корпуса v2 (70 en + 70 ru, 50 preference-позитивов/язык, hard
+   negatives + инъекционные ловушки), два режима скоринга
+   (type-span = качество типизации, exact-triple = каллиграфия
+   провенанса), bridge-экстрактор haiku прошёл: preference
+   en 0.981/1.00, ru 0.962/1.00, false_trusted 0/140. Аудит-петля
+   сработала: ран-1 упал на ru recall 0.667 — все 17 промахов были
+   пустыми выдачами бытовых вкусов по-русски (тип не путал ни разу),
+   одна итерация промпта закрыла. Правила: adversarial-ловушки не
+   штрафуют recall; malformed-выдача = ноль предсказаний примера, не
+   краш. Дальше: любой шипуемый экстрактор обязан пройти ТОТ ЖЕ гейт
+   до включения. README-секция добавлена. Остаток TODO#6 закрыт;
    task7 (native memory channels).
 4b. Option matrix (TODO#1): таблица «качество × цена» по вариантам
    retrieval-опций — lexical-only / +semantic / +reranker / +both — на
