@@ -199,6 +199,13 @@ TODO#6 наследует заострённую цель — update-aware disti
    До любого включения: held-out транш, написанный ПОСЛЕ заморозки
    промпта, + повторные прогоны. Состав корпуса: 50 позитивов + 10
    негативов + 3 ловушки + 7 other-типов = 70/язык.
+   **Независимый пересуд (GPT-5.4 via codex, read-only):**
+   `pass_with_narrowed_claim`,
+   benchmarks/results/extraction-codex-audit-20260717/ — подтвердил
+   preference-числа и рамку 0-из-6-ловушек; добавил контрпримеры:
+   EN fact precision 0.25 (1TP/3FP), exact-triple около нуля. Часть
+   fact-FP — строки с реальным фактом, не внесённым в однотипное золото
+   (pref-005, pref-030) → held-out делать с мульти-типным золотом.
    task7 (native memory channels).
 4b. Option matrix (TODO#1): таблица «качество × цена» по вариантам
    retrieval-опций — lexical-only / +semantic / +reranker / +both — на

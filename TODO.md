@@ -226,8 +226,23 @@ is premature.
       numbers en 0.98/1.00, ru 0.96/1.00 are dev-set numbers);
       non-preference types (n=7/language); broad injection robustness;
       run-to-run and model-version stability
+- [x] Independent re-judge done (2026-07-17, local GPT-5.4 via codex,
+      read-only sandbox): verdict `pass_with_narrowed_claim`, claim-by-
+      claim with evidence pointers —
+      benchmarks/results/extraction-codex-audit-20260717/. Confirms the
+      preference dev-set numbers and the 0-of-6-traps framing; adds two
+      concrete counterexamples to any cross-type claim: English fact
+      precision 0.25 (1 TP / 3 FP), and exact-triple scores near zero
+      (the headline measures type + span overlap only). Notable: part of
+      the fact FPs sit on lines that DO carry a fact the gold did not
+      list (pref-005 vegetarian, pref-030 cat names) — single-type gold
+      is itself a corpus defect to fix in the held-out tranche
+      (multi-type golds)
 - [ ] Held-out tranche authored AFTER prompt freeze + repeat runs for
-      stochasticity — required before any enablement decision
+      stochasticity — required before any enablement decision; held-out
+      design notes: multi-type golds for multi-assertion lines, more
+      fact/decision/task/failure/lesson positives before any cross-type
+      claim
 
 Done when: extraction changes are gated by measured precision/recall, not
 vibes — measured on held-out data, not the development set.

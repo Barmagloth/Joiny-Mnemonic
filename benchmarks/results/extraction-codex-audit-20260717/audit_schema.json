@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verdict",
+    "claims",
+    "issues",
+    "label_reviews",
+    "corrected_conclusion",
+    "next_protocol"
+  ],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass_as_claimed", "pass_with_narrowed_claim", "not_supported"]
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["claim", "supported", "reason"],
+        "properties": {
+          "claim": {"type": "string"},
+          "supported": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "category", "example_ids", "finding"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "category": {"type": "string"},
+          "example_ids": {"type": "array", "items": {"type": "string"}},
+          "finding": {"type": "string"}
+        }
+      }
+    },
+    "label_reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["language", "example_id", "gold_is_reasonable", "reason"],
+        "properties": {
+          "language": {"type": "string", "enum": ["en", "ru"]},
+          "example_id": {"type": "string"},
+          "gold_is_reasonable": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
+    "corrected_conclusion": {"type": "string"},
+    "next_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt_frozen", "requires_held_out", "minimum_changes"],
+      "properties": {
+        "prompt_frozen": {"type": "boolean"},
+        "requires_held_out": {"type": "boolean"},
+        "minimum_changes": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -425,9 +425,14 @@ CLI, Haiku, typing matched by type + evidence-span overlap):
 
 Scoring, corpus and per-example audit rows:
 `benchmarks/extraction_gate.py`, `evals/extraction_*_v2.json`,
-`benchmarks/results/extraction-gate-latest.json` (stamped). Automatic
-extraction stays off; a shipped path must pass this gate on held-out
-data before enablement.
+`benchmarks/results/extraction-gate-latest.json` (stamped).
+Independently re-judged (local GPT-5.4, read-only, claim-by-claim):
+verdict `pass_with_narrowed_claim` —
+`benchmarks/results/extraction-codex-audit-20260717/`; it additionally
+flags English `fact` precision 0.25 in the saved run (n=4 predictions)
+and near-zero exact-content scores as concrete bounds on any broader
+reading. Automatic extraction stays off; a shipped path must pass this
+gate on held-out data before enablement.
 
 ## Evaluation
 

@@ -1,0 +1,28 @@
+You are an independent evaluator auditing a bilingual LLM extraction gate.
+Do not edit any files. Inspect all of these local artifacts:
+
+- evals/extraction_en_v2.json
+- evals/extraction_ru_v2.json
+- benchmarks/results/extraction-gate-extraction_en_v2.jsonl
+- benchmarks/results/extraction-gate-extraction_ru_v2.jsonl
+- benchmarks/results/extraction-gate-latest.json
+- benchmarks/extraction_gate.py
+- src/joiny_mnemonic/extraction_evaluation.py
+
+Audit the evidence behind these public claims:
+
+1. English preference type-span precision 0.981 and recall 1.00.
+2. Russian preference type-span precision 0.962 and recall 1.00.
+3. No injection trap became a trusted record.
+4. The result shows that the extractor labels facts as facts and preferences as preferences with 0.96-0.98 precision in both languages.
+5. This is a production generalization gate rather than a development-set result.
+
+Review the full corpus composition, not only aggregate metrics. Inspect all mismatches, all adversarial examples, all non-preference examples, and a representative sample of preference positives and hard negatives. Check whether gold labels are defensible, whether type-span matching overstates success, whether the false_trusted denominator is described honestly, and whether tuning the prompt after the first run changes the interpretation.
+
+Be strict but do not penalize harmless differences in normalization when the measured question is type-span quality. Distinguish:
+
+- what the saved outputs genuinely demonstrate;
+- what is only true on this tuned corpus;
+- what is not measured at all.
+
+Return JSON only matching the provided schema. Keep findings compact and cite concrete example IDs. The corrected conclusion must be suitable for a benchmark report.
