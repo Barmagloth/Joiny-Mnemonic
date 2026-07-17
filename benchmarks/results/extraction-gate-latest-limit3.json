@@ -1,0 +1,225 @@
+{
+  "schema": "joiny-mnemonic-extraction-gate-v1",
+  "system_under_test": {
+    "extractor": "claude-code-bridge",
+    "model": "haiku",
+    "prompt": "extraction-gate-bridge-v1"
+  },
+  "corpora": {
+    "extraction_en_v2": "en-memory-extraction-v2",
+    "extraction_ru_v2": "ru-memory-extraction-v2"
+  },
+  "gate_match_mode": "type-span",
+  "reports": {
+    "extraction_en_v2": {
+      "corpus_version": "en-memory-extraction-v2",
+      "match_mode": "type-span",
+      "examples": 3,
+      "overall": {
+        "true_positive": 3,
+        "false_positive": 0,
+        "false_negative": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "by_memory_type": {
+        "preference": {
+          "true_positive": 3,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 3,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.0,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 11832.808600040153,
+        "max": 19312.62130010873
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    },
+    "extraction_ru_v2": {
+      "corpus_version": "ru-memory-extraction-v2",
+      "match_mode": "type-span",
+      "examples": 3,
+      "overall": {
+        "true_positive": 3,
+        "false_positive": 0,
+        "false_negative": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "by_memory_type": {
+        "preference": {
+          "true_positive": 3,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 3,
+          "false_positive": 0,
+          "false_negative": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.0,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 13124.744466661165,
+        "max": 15317.53719993867
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "exact_triple_reports": {
+    "extraction_en_v2": {
+      "corpus_version": "en-memory-extraction-v2",
+      "match_mode": "exact-triple",
+      "examples": 3,
+      "overall": {
+        "true_positive": 0,
+        "false_positive": 3,
+        "false_negative": 3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "by_memory_type": {
+        "preference": {
+          "true_positive": 0,
+          "false_positive": 3,
+          "false_negative": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 0,
+          "false_positive": 3,
+          "false_negative": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.0,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 0.016733305528759956,
+        "max": 0.01950003206729889
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    },
+    "extraction_ru_v2": {
+      "corpus_version": "ru-memory-extraction-v2",
+      "match_mode": "exact-triple",
+      "examples": 3,
+      "overall": {
+        "true_positive": 0,
+        "false_positive": 3,
+        "false_negative": 3,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "by_memory_type": {
+        "preference": {
+          "true_positive": 0,
+          "false_positive": 3,
+          "false_negative": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "by_evidence_zone": {
+        "prose": {
+          "true_positive": 0,
+          "false_positive": 3,
+          "false_negative": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0
+        }
+      },
+      "exact_evidence_acceptance_rate": 1.0,
+      "false_trusted_records": 0,
+      "quarantine_rate": 0.0,
+      "duplicate_rate": 0.0,
+      "latency_ms": {
+        "mean": 0.020533334463834763,
+        "max": 0.03050011582672596
+      },
+      "automatic_enablement_allowed": false,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "gate_rows": {
+    "en": {
+      "preference_precision": 1.0,
+      "preference_recall": 1.0,
+      "false_trusted": 0
+    },
+    "ru": {
+      "preference_precision": 1.0,
+      "preference_recall": 1.0,
+      "false_trusted": 0
+    }
+  },
+  "gate": {
+    "precision_en_ge_0.9": true,
+    "precision_ru_ge_0.9": true,
+    "recall_en_ge_0.7": true,
+    "recall_ru_ge_0.7": true,
+    "false_trusted_zero": true,
+    "language_gap_le_10pp": true
+  },
+  "passed": true,
+  "limited_to": 3,
+  "provenance": {
+    "signing_version": "report-signing-v1",
+    "generated_at": "2026-07-17T08:05:42.086345+00:00",
+    "git_commit": "a30caef98f785a2bc5f9d734480df8ae871f73fd",
+    "git_dirty": true,
+    "package_version": "0.8.0",
+    "schema_version": 9,
+    "temporal_projection_code_version": "temporal-core-v1",
+    "snapshot_replay_code_version": "snapshot-materializer-v2",
+    "python": "3.13.1",
+    "platform": "win32",
+    "artifact_sha256": {}
+  },
+  "report_sha256": "5dfb15f4083ce0e4f350427f1d8a9f8bd2a900ee996f20c2b791f3b94149bdd3"
+}
