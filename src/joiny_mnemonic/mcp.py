@@ -387,7 +387,18 @@ TOOLS: tuple[dict[str, Any], ...] = (
             "task_key": {"type": "string"},
             "status": {"type": "string", "enum": ["active", "blocked", "completed", "cancelled"]},
             "note": {"type": "string"},
+            "source_event_id": {"type": ["string", "null"]},
         }, ["task_key", "status"]),
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
+    },
+    {
+        "name": "memory_task_reopen",
+        "description": "Reopen a terminal workstream with a reason and new trusted source event.",
+        "inputSchema": _schema({
+            "task_key": {"type": "string"},
+            "reason": {"type": "string", "minLength": 1},
+            "source_event_id": {"type": "string"},
+        }, ["task_key", "reason", "source_event_id"]),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
     },
     {
@@ -576,6 +587,13 @@ class MCPServer:
                 arguments["task_key"],
                 arguments["status"],
                 note=arguments.get("note", ""),
+                source_event_id=arguments.get("source_event_id"),
+            )
+        if name == "memory_task_reopen":
+            return self.service.tasks.reopen(
+                arguments["task_key"],
+                reason=arguments["reason"],
+                source_event_id=arguments["source_event_id"],
             )
         if name == "memory_task_resume":
             return self.service.tasks.resume(

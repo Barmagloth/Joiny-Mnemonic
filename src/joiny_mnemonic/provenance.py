@@ -9,11 +9,11 @@ INTERNAL = "internal"
 LEGACY_UNTRUSTED = "legacy_untrusted"
 ORIGIN_CHANNELS = frozenset({PUBLIC_API, HOST_HOOK, INTERNAL, LEGACY_UNTRUSTED})
 
-# task6.md 6C: manual settlement rides one canonical request event. The
-# internal channel cannot be minted by public-API or MCP text (surfaces
-# hardcode origin_channel), so the payload below is process-authored fact,
-# not a caller claim.
+# Manual settlement and workstream lifecycle commands ride canonical internal
+# request events. Public API/MCP text cannot mint the internal channel; the
+# stored payload is process-authored evidence, never a caller claim.
 SETTLEMENT_REQUEST_OPERATION = "settlement_requested"
+WORKSTREAM_REQUEST_OPERATION = "workstream_transition_requested"
 
 
 class EventProvenance(Protocol):
@@ -48,6 +48,7 @@ def origin_evidence_type(event: EventProvenance) -> str:
         and (event.role or "").casefold() == "assistant"
         and event.payload.get("hook_event_name") == "Stop"
         and bool(event.origin_adapter)
+        and event.payload.get("_joiny_origin_adapter") == event.origin_adapter
     ):
         return HOST_ASSISTANT_FINALIZATION
     if (
@@ -57,7 +58,10 @@ def origin_evidence_type(event: EventProvenance) -> str:
         return BOOTSTRAP_TOFU
     if (
         event.origin_channel == INTERNAL
-        and event.payload.get("operation") == SETTLEMENT_REQUEST_OPERATION
+        and event.payload.get("operation") in {
+            SETTLEMENT_REQUEST_OPERATION,
+            WORKSTREAM_REQUEST_OPERATION,
+        }
     ):
         requested_by = event.payload.get("requested_by")
         if requested_by == "operator":

@@ -10,8 +10,11 @@ class Stage1GateTest(unittest.TestCase):
         self.assertEqual(contract_errors(), [])
 
     def test_contract_gate_rejects_dead_value_fixture(self) -> None:
-        errors = contract_errors({"origins": {"dead_origin_fixture"}})
-        self.assertTrue(any("dead_origin_fixture" in error for error in errors))
+        for category in ("origins", "statuses", "modes"):
+            with self.subTest(category=category):
+                value = f"dead_{category}_fixture"
+                errors = contract_errors({category: {value}})
+                self.assertTrue(any(value in error for error in errors))
 
     def test_complexity_gate_uses_frozen_baseline(self) -> None:
         self.assertEqual(complexity_errors(), [])

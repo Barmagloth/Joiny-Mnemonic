@@ -5,6 +5,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from .models import PromptPacket, TaskRecord
+from .provenance import WORKSTREAM_REQUEST_OPERATION
 
 if TYPE_CHECKING:
     from .service import MemoryService
@@ -158,6 +159,86 @@ class TaskManager:
         if session_id is not None:
             self.service.store.bind_task_session(session_id, task_key)
         return task
+
+    def set_status_as_operator(
+        self,
+        task_key: str,
+        status: str,
+        *,
+        note: str = "",
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> TaskRecord:
+        """Apply one local-operator transition with process-authored evidence."""
+        current = self.service.store.get_task(task_key)
+        if current.status == status:
+            return current
+        if status == "active" and current.status in {"completed", "cancelled"}:
+            raise ValueError("use task-reopen for a terminal workstream")
+        events, _ = self.service.store.append_internal_events_once(
+            f"workstream-request:{task_key}:{current.version}:{status}:operator",
+            [{
+                "kind": "state",
+                "role": None,
+                "content": f"workstream {status} requested by local operator: {task_key}",
+                "payload": {
+                    "operation": WORKSTREAM_REQUEST_OPERATION,
+                    "task_key": task_key,
+                    "transition": status,
+                    "reason": note,
+                    "requested_by": "operator",
+                },
+            }],
+            branch_id=current.branch_id,
+            session_id=session_id,
+        )
+        return self.set_status(
+            task_key,
+            status,
+            note=note,
+            session_id=session_id,
+            metadata=metadata,
+            source_event_id=events[0].id,
+        )
+
+    def reopen_as_operator(
+        self,
+        task_key: str,
+        *,
+        reason: str,
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> TaskRecord:
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("workstream reopen requires a non-empty reason")
+        current = self.service.store.get_task(task_key)
+        if current.status not in {"completed", "cancelled"}:
+            raise ValueError("only a terminal workstream can be reopened")
+        events, _ = self.service.store.append_internal_events_once(
+            f"workstream-reopen:{task_key}:{current.version}:operator",
+            [{
+                "kind": "state",
+                "role": None,
+                "content": f"workstream reopen requested by local operator: {task_key}",
+                "payload": {
+                    "operation": WORKSTREAM_REQUEST_OPERATION,
+                    "task_key": task_key,
+                    "transition": "active",
+                    "reason": reason,
+                    "requested_by": "operator",
+                },
+            }],
+            branch_id=current.branch_id,
+            session_id=session_id,
+        )
+        return self.reopen(
+            task_key,
+            reason=reason,
+            source_event_id=events[0].id,
+            session_id=session_id,
+            metadata=metadata,
+        )
 
     def complete(
         self,

@@ -459,7 +459,7 @@ class IntegrationTest(unittest.TestCase):
         )["result"]["tools"]}
         self.assertTrue({
             "memory_output_views", "memory_usage", "memory_governor",
-            "memory_task_start", "memory_task_status", "memory_task_resume",
+            "memory_task_start", "memory_task_status", "memory_task_reopen", "memory_task_resume",
         }.issubset(names))
         task = server._call_tool(
             "memory_task_start",

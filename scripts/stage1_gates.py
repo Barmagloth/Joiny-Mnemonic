@@ -19,6 +19,7 @@ from joiny_mnemonic.provenance import (
     origin_evidence_type,
 )
 from joiny_mnemonic.service import MemoryService
+from joiny_mnemonic.storage import MemoryStore
 from joiny_mnemonic.transition_rules import (
     CANDIDATE_FLOW,
     FINDING_FLOW,
@@ -50,7 +51,11 @@ def _origin_producers() -> set[str]:
         origin_evidence_type(_Event("public_api")),
         origin_evidence_type(_Event("host_hook", "user", "claude-code")),
         origin_evidence_type(_Event(
-            "host_hook", "assistant", "codex", {"hook_event_name": "Stop"}
+            "host_hook", "assistant", "codex",
+            {
+                "hook_event_name": "Stop",
+                "_joiny_origin_adapter": "codex",
+            },
         )),
         origin_evidence_type(_Event(
             INTERNAL, payload={"operation": "policy_bootstrapped"}
@@ -70,6 +75,68 @@ def _origin_producers() -> set[str]:
             },
         )),
     }
+
+
+def _runtime_string_literals(*, excluded: set[str] | None = None) -> set[str]:
+    """Exact runtime literals outside canonical declarations; no copied registry."""
+    values: set[str] = set()
+    excluded = excluded or set()
+    for path in (ROOT / "src" / "joiny_mnemonic").glob("*.py"):
+        if path.name in excluded:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        values.update(
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        )
+    return values
+
+
+def _mode_producers() -> set[str]:
+    """Exercise ingress and discover legacy reconstruction; no copied registry."""
+    store = MemoryStore(":memory:")
+    try:
+        public = store.append_event(kind="state", content="gate")
+        host = store.append_host_event(
+            adapter="gate-adapter", kind="state", content="gate"
+        )
+        internal, _ = store.append_internal_events_once(
+            "stage1-mode-gate",
+            [{"kind": "state", "content": "gate", "payload": {}}],
+        )
+        produced = {
+            public.origin_channel,
+            host.origin_channel,
+            internal[0].origin_channel,
+        }
+        # Legacy reconstruction is a real producer in snapshots/prompt,
+        # discovered from runtime literals rather than copied here.
+        produced.update(
+            set(ORIGIN_CHANNELS)
+            & _runtime_string_literals(excluded={"provenance.py"})
+        )
+        return produced
+    finally:
+        store.close()
+
+def _status_producers() -> set[str]:
+    """Bind each entity flow to the runtime method that persists its target."""
+    bindings = (
+        (MemoryStore.create_task_version, WORKSTREAM_FLOW, "WORKSTREAM_RULE"),
+        (MemoryStore.transition_candidate, CANDIDATE_FLOW, "CANDIDATE_RULE"),
+        (MemoryStore.transition_finding, FINDING_FLOW, "FINDING_RULE"),
+        (MemoryStore.settle_candidate, SETTLEMENT_FLOW, "SETTLEMENT_RULE"),
+    )
+    produced: set[str] = set()
+    for method, flow, rule_name in bindings:
+        source = inspect.getsource(method)
+        if rule_name not in source or "validate_transition" not in source:
+            continue
+        if not ("to_status" in source or "status" in source):
+            continue
+        produced.update(_flow_values(flow))
+    return produced
 
 
 def _policy_producers() -> set[str]:
@@ -107,10 +174,11 @@ def contract_errors(extra: dict[str, set[str]] | None = None) -> list[str]:
     }
     for category, values in (extra or {}).items():
         expected.setdefault(category, set()).update(values)
+
     produced = {
         "origins": _origin_producers(),
-        "statuses": set().union(*(_flow_values(flow) for flow in flows)),
-        "modes": {"public_api", "host_hook", "internal", "legacy_untrusted"},
+        "statuses": _status_producers(),
+        "modes": _mode_producers(),
         "capability_flags": set(adapter_capabilities("claude-code")) - {"agent"},
         "policy_flags": _policy_producers(),
     }

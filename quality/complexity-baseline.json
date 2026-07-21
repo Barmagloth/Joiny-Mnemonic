@@ -2,8 +2,8 @@
   "version": 1,
   "files": {
     "src/joiny_mnemonic/storage.py": {
-      "physical_lines": 5028,
-      "functions_methods": 163,
+      "physical_lines": 4847,
+      "functions_methods": 156,
       "classes": 4
     },
     "src/joiny_mnemonic/hooks.py": {

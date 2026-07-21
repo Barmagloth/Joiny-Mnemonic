@@ -53,6 +53,8 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
         def _dispatch_error(self, exc: Exception) -> None:
             if isinstance(exc, KeyError):
                 status = HTTPStatus.NOT_FOUND
+            elif isinstance(exc, PermissionError):
+                status = HTTPStatus.FORBIDDEN
             elif isinstance(exc, (ValueError, TypeError)):
                 status = HTTPStatus.BAD_REQUEST
             else:
@@ -256,6 +258,16 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         task_key,
                         body["status"],
                         note=body.get("note", ""),
+                        session_id=body.get("session_id"),
+                        metadata=body.get("metadata"),
+                        source_event_id=body.get("source_event_id"),
+                    )
+                elif path.startswith("/v1/tasks/") and path.endswith("/reopen"):
+                    task_key = path.split("/")[-2]
+                    result = service.tasks.reopen(
+                        task_key,
+                        reason=body["reason"],
+                        source_event_id=body["source_event_id"],
                         session_id=body.get("session_id"),
                         metadata=body.get("metadata"),
                     )

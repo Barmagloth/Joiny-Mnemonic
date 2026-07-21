@@ -474,6 +474,10 @@ def build_parser() -> argparse.ArgumentParser:
     task_status.add_argument("status", choices=["active", "blocked", "completed", "cancelled"])
     task_status.add_argument("--note", default="")
     task_status.add_argument("--session")
+    task_reopen = commands.add_parser("task-reopen")
+    task_reopen.add_argument("key")
+    task_reopen.add_argument("--reason", required=True)
+    task_reopen.add_argument("--session")
 
     task_resume = commands.add_parser("task-resume")
     task_resume.add_argument("key")
@@ -870,16 +874,15 @@ def run(args: argparse.Namespace) -> int:
                 ))
         elif args.command == "task-start":
             _print(service.tasks.start(
-                args.key,
-                args.title,
-                parent_branch=args.parent_branch,
-                parent_task_key=args.parent_task,
-                session_id=args.session,
+                args.key, args.title, parent_branch=args.parent_branch,
+                parent_task_key=args.parent_task, session_id=args.session,
             ))
         elif args.command == "task-status":
-            _print(service.tasks.set_status(
-                args.key, args.status, note=args.note, session_id=args.session
-            ))
+            _print(service.tasks.set_status_as_operator(
+                args.key, args.status, note=args.note, session_id=args.session))
+        elif args.command == "task-reopen":
+            _print(service.tasks.reopen_as_operator(
+                args.key, reason=args.reason, session_id=args.session))
         elif args.command == "task-resume":
             packet = service.tasks.resume(
                 args.key, token_budget=args.budget, query=args.query

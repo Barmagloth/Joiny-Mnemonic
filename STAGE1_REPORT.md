@@ -18,6 +18,32 @@
 
 Workstream, Candidate, Finding и Settlement сохранили собственные таблицы переходов и собственную семантику. Универсальная таблица состояний для всех сущностей не создавалась.
 
+## Исправления после post-stage аудита
+
+После первоначальной приёмки был обнаружен блокер: терминальные переходы
+Workstream требовали source_event_id, но публичные CLI, MCP и HTTP поверхности
+не могли передать или законно создать такое доказательство. Блокер устранён:
+
+- CLI task-status создаёт process-authored local_operator evidence;
+- CLI task-reopen является отдельной командой с обязательной причиной;
+- MCP memory_task_status принимает ID сохранённого source event;
+- MCP memory_task_reopen является отдельным tool;
+- HTTP status принимает ID сохранённого source event;
+- HTTP /v1/tasks/{key}/reopen является отдельным endpoint;
+- public/untrusted, отсутствующее и невидимое evidence по-прежнему отклоняется.
+
+Также исправлены замечания «буква vs дух»:
+
+- assistant finalization теперь требует совпадения origin_adapter с adapter
+  evidence, проштампованным принимающей host boundary;
+- producers modes получаются реальным прогоном ingress, а statuses привязаны
+  к runtime-методам, сохраняющим переходы; ручной список modes удалён;
+- отдельный policy trust-набор удалён из storage.py;
+- threshold storage.py понижен до исторической исходной точки;
+- внешний markdown fence вокруг ROADMAP.md удалён.
+
+Дополнительно изменены api.py, mcp.py, cli.py и task_storage.py; исполняемые
+round-trip проверки находятся в tests/test_workstream_surfaces.py.
 ## Проверка H1–H9
 
 ### Закрытые обходы H1–H7
@@ -107,7 +133,7 @@ python scripts/stage1_gates.py complexity
 
 Результат: **PASS**.
 
-Фиксированный baseline хранится в `quality/complexity-baseline.json` и не пересчитывается от текущего разросшегося дерева.
+Фиксированный baseline хранится в quality/complexity-baseline.json. Порог storage.py после аудита необратимо понижен до исторического tracked HEAD: 4847 строк, 156 функций/методов и 4 класса. Текущий результат: 4832/146/4.
 
 Совместный запуск:
 
@@ -122,12 +148,12 @@ python scripts/stage1_gates.py all
 
 Focused stage-1 tests:
 
-- **14/14 passed**.
+- **19/19 passed**.
 
 Полный suite:
 
-- **294/294 passed**;
-- время финального запуска: **341.830 s**.
+- **302/302 passed**;
+- время финального запуска после включения observation-only dogfood: **758.466 s**.
 
 Первый запуск полного suite внутри sandbox дал три инфраструктурные ошибки Windows `WinError 5`, связанные с системным TEMP/Git signal pipe. Повторный полный запуск вне sandbox прошёл без ошибок.
 
@@ -172,8 +198,30 @@ Focused stage-1 tests:
 
 Пересекающиеся изменения в `storage.py` и `service.py` были сохранены; существующая dataflow-реализация вынесена в отдельный mixin без изменения её внешнего поведения, чтобы выполнить зафиксированный complexity baseline.
 
-Staging, commit и push не выполнялись.
+Основная реализация этапа 1 сохранена локальным коммитом `01506a9`. Исправления post-stage аудита и observation-only dogfood также сохранены локально; push не выполнялся.
+
+## Observation-only dogfood финализации
+
+Ранний поведенческий сбор для риска этапа 5 включён без реализации самого
+этапа 5:
+
+- `AGENTS.md` и `CLAUDE.md` требуют от Codex и Claude Code строгие финальные
+  теги только для действительно разрешённых итогов;
+- `src/joiny_mnemonic/finalization_observer.py` читает сохранённые assistant
+  `Stop`-события через SQLite `mode=ro`;
+- `scripts/finalization_observe.py` считает валидные, отсутствующие,
+  malformed и исключённые Markdown-lookalike строки отдельно по адаптерам;
+- `tests/test_finalization_observer.py` доказывает неизменность event chain,
+  memories, active blocks и Workstreams, а также hostile-грамматику;
+- материализация, карантин, scoring и экстрактор не запускаются.
+
+Focused observer tests: **5/5 passed**. Совмещённая focused-регрессия этапа 1
+и наблюдателя: **20/20 passed**. Первый read-only срез по
+`.joiny-mnemonic/memory.db`: **0** сохранённых доверенных assistant `Stop`
+events; корпус начнёт наполняться следующими доставленными хуками.
 
 ## Следующий шаг
 
-Работа остановлена на границе этапа 1. Dogfood может быть начат только отдельным следующим действием после принятия этого отчёта и результатов этапа 1.
+Dogfood публичного Workstream lifecycle и observation-only сбор финальных
+тегов готовы. Продолжать собирать реальные `Stop`-события обоих хостов; этапы
+2–6, материализация финализаций и выбор экстрактора не начинались.

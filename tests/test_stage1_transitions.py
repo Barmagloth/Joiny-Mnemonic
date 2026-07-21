@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from types import SimpleNamespace
 
 from joiny_mnemonic.provenance import (
@@ -293,6 +294,13 @@ class Stage1ExploitRegressionTest(unittest.TestCase):
         )
         self.assertEqual(
             origin_evidence_type(valid), "host_assistant_finalization"
+        )
+        mismatched_adapter = replace(
+            valid,
+            payload={**valid.payload, "_joiny_origin_adapter": "claude-code"},
+        )
+        self.assertEqual(
+            origin_evidence_type(mismatched_adapter), "external_untrusted"
         )
         wrong_role = self.store.append_host_event(
             adapter="codex",
