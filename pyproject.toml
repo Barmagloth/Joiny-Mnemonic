@@ -13,6 +13,8 @@ dependencies = []
 
 [project.optional-dependencies]
 benchmark = ["tiktoken>=0.7"]
+explorer = ["fastapi>=0.115", "pydantic>=2.11", "uvicorn>=0.34"]
+dev = ["ruff>=0.12", "pyright>=1.1.400"]
 
 [project.scripts]
 joiny-mnemonic = "joiny_mnemonic.cli:main"
@@ -28,8 +30,22 @@ where = ["src"]
 include = ["joiny_mnemonic*"]
 
 [tool.setuptools.package-data]
-joiny_mnemonic = ["context_limit_presets.json"]
+joiny_mnemonic = ["context_limit_presets.json", "explorer.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Start with correctness-only rules so CI is green on the existing codebase;
+# style/modernization rules can be ratcheted in without a repository-wide rewrite.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+include = ["src"]

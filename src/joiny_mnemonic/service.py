@@ -14,6 +14,7 @@ from .configuration import effective_configuration
 from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsolidator
 from .context import ContextWindow, ExactSourceResult, build_context_window
 from .context_limits import ContextLimitConfig
+from .dataflow import DataflowRecorder, DataflowSink
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
 from .extraction import ExtractionService, ExtractorConfig
@@ -65,9 +66,11 @@ class MemoryService:
         extractor_config: ExtractorConfig | None = None,
         extractor_enabled: bool | None = None,
         witness_registry_path: str | Path | None = None,
+        dataflow_sinks: Sequence[DataflowSink] = (),
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.store = MemoryStore(database)
+        self.dataflow = DataflowRecorder(self.store, dataflow_sinks)
         self.witness = WitnessRegistry(witness_registry_path)
         self._witness_status: dict[str, Any] = {"status": "uninitialized"}
         self.context_limits = ContextLimitConfig(self.project_root)
@@ -128,6 +131,7 @@ class MemoryService:
             self.store,
             self.retrieval,
             telemetry=self._record_prompt_injection,
+            dataflow=self.dataflow,
         )
         self.consolidator = EvidenceConsolidator()
         self.code = PythonCodeIndex(self.project_root)
@@ -193,7 +197,6 @@ class MemoryService:
             "untrusted_evidence_zones": [
                 "inline_code", "fenced_code", "blockquote"
             ],
-            "auto_can_create_protected_blocks": False,
         }
         result = self.store.initialize_project(
             repository_identity=self._repository_identity(),
@@ -367,13 +370,59 @@ class MemoryService:
         self._witness_status = self.witness.check_and_update(self.store)
         return self._witness_status
     def append_event(self, **values: Any) -> Event:
-        for untrusted_key in ("origin_channel", "origin_adapter", "origin_evidence_type"):
-            values.pop(untrusted_key, None)
-        event = self.store.append_event(**values)
-        self.consolidator.consolidate_event(self, event)
-        self.extraction.notify()
-        self.checkpoint_witness()
-        return event
+        branch_id = str(values.get("branch_id", "main"))
+        session_id = values.get("session_id")
+        flow = self.dataflow.begin(
+            "append_event", source="memory_service", branch_id=branch_id,
+            session_id=session_id, input_value=values,
+        )
+        try:
+            ignored = {}
+            for key in ("origin_channel", "origin_adapter", "origin_evidence_type"):
+                if key in values:
+                    ignored[key] = values.pop(key)
+            flow.step(
+                "boundary.validation", input_value=values,
+                output_value={"accepted_fields": sorted(values)},
+                decision={"ignored_untrusted_fields": sorted(ignored)},
+            )
+            event = self.store.append_event(**values)
+            flow.step(
+                "security.redaction", input_value={
+                    "content_bytes": len(str(values.get("content", "")).encode("utf-8")),
+                    "payload": values.get("payload", {}),
+                    "files": values.get("files", ()),
+                },
+                output_value={
+                    "content": event.content, "payload": event.payload, "files": event.files,
+                },
+                refs={"event_id": event.id},
+                decision={"redactions": event.payload.get("_security_redactions", {})},
+            )
+            flow.step(
+                "persistence.canonical_append", output_value=event,
+                refs={"event_id": event.id, "seq": event.seq, "chain_hash": event.chain_hash},
+                decision={"committed": True, "journal_mode": self.store.journal_mode},
+            )
+            consolidation = self.consolidator.consolidate_event(self, event)
+            flow.step(
+                "consolidation", input_value={"event_id": event.id},
+                output_value=consolidation,
+                refs={
+                    "event_id": event.id,
+                    "memory_ids": consolidation.memory_ids,
+                    "block_ids": consolidation.block_ids,
+                },
+            )
+            self.extraction.notify()
+            flow.step("extraction.wakeup", decision={"notified": True})
+            witness = self.checkpoint_witness()
+            flow.step("integrity.witness", output_value=witness)
+            flow.complete(output_value=event, refs={"event_id": event.id})
+            return event
+        except Exception as exc:
+            flow.fail(exc)
+            raise
 
     def request_candidate_transition(
         self,
@@ -506,8 +555,41 @@ class MemoryService:
         session_id = values.pop("session_id", None)
         task_key = values.pop("task_key", None)
         telemetry_receipt = values.pop("telemetry_receipt", None)
-        context = RetrievalContext(**values)
-        hits = self.retrieval.search(context)
+        flow = self.dataflow.begin(
+            "search", source="memory_service",
+            branch_id=str(values.get("branch_id", "main")),
+            session_id=session_id, input_value=values,
+        )
+        try:
+            context = RetrievalContext(**values)
+            flow.step(
+                "boundary.validation", input_value=values, output_value=context,
+                decision={"strict_context": True},
+            )
+            hits = self.retrieval.search(context)
+            flow.step(
+                "retrieval.rank_and_filter",
+                input_value={
+                    "query": context.query,
+                    "filters": {
+                        "memory_types": context.memory_types, "file": context.file,
+                        "since": context.since, "until": context.until,
+                        "include_events": context.include_events,
+                        "semantic": context.semantic,
+                    },
+                },
+                output_value={"ranked_hits": hits},
+                refs={
+                    "result_ids": [hit.id for hit in hits],
+                    "source_event_ids": sorted({
+                        source for hit in hits for source in hit.source_event_ids
+                    }),
+                },
+                decision={"limit": context.limit, "returned": len(hits)},
+            )
+        except Exception as exc:
+            flow.fail(exc)
+            raise
         if record_telemetry:
             try:
                 self.usage.record_retrieval_search(
@@ -544,6 +626,9 @@ class MemoryService:
             except Exception:
                 pass
         if not include_staleness:
+            flow.complete(
+                output_value=hits, refs={"result_ids": [hit.id for hit in hits]}
+            )
             return hits
         inspections = {
             item.memory_id: item
@@ -554,7 +639,7 @@ class MemoryService:
                 ),
             )
         }
-        return [
+        result = [
             replace(
                 hit,
                 metadata={
@@ -568,6 +653,14 @@ class MemoryService:
             )
             for hit in hits
         ]
+        flow.step(
+            "staleness.inspect", output_value=inspections,
+            decision={"warning_only": True, "ranking_changed": False},
+        )
+        flow.complete(
+            output_value=result, refs={"result_ids": [hit.id for hit in result]}
+        )
+        return result
 
     def _record_prompt_injection(
         self, packet: PromptPacket, context: dict[str, Any]
@@ -769,8 +862,22 @@ class MemoryService:
         task_key: str | None = None,
         telemetry_receipt: str | None = None,
         record_telemetry: bool = True,
+        parent_operation_id: str | None = None,
     ) -> PromptPacket:
+        flow = self.dataflow.begin(
+            "resume", source="memory_service", branch_id=branch_id,
+            session_id=session_id, parent_operation_id=parent_operation_id,
+            input_value={
+                "branch_id": branch_id, "token_budget": token_budget, "query": query,
+                "session_id": session_id, "task_key": task_key,
+            },
+        )
         budget = min(token_budget, 1500)
+        flow.step(
+            "boundary.validation",
+            output_value={"effective_budget": budget, "query": query},
+            decision={"hard_resume_cap": 1500},
+        )
         snapshot = self.store.latest_snapshot(branch_id=branch_id)
         stale_reasons: tuple[str, ...] = ()
         snapshot_id: str | None = None
@@ -781,6 +888,16 @@ class MemoryService:
             state = restored.state
         else:
             state = self.snapshots.build_state(branch_id=branch_id)
+        flow.step(
+            "snapshot.restore_or_build",
+            input_value={"snapshot": snapshot},
+            output_value={"snapshot_id": snapshot_id, "state": state},
+            refs={"snapshot_id": snapshot_id},
+            decision={
+                "path": "restore" if snapshot is not None else "build_from_canonical",
+                "stale_reasons": stale_reasons,
+            },
+        )
         security = self.security_status()
         active_findings = [
             item for item in security["findings"]
@@ -924,6 +1041,15 @@ class MemoryService:
             task_key=task_key,
             telemetry_receipt=telemetry_receipt,
             record_telemetry=record_telemetry,
+            dataflow_operation_id=flow.operation_id,
+        )
+        flow.complete(
+            output_value=packet,
+            refs={
+                "event_ids": packet.included_event_ids,
+                "memory_ids": packet.included_memory_ids,
+                "snapshot_id": packet.snapshot_id,
+            },
         )
         return packet
 

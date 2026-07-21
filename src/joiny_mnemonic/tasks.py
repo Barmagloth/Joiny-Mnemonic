@@ -119,16 +119,29 @@ class TaskManager:
         note: str = "",
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        source_event_id: str | None = None,
+        _reopen: bool = False,
+        _reason: str = "",
     ) -> TaskRecord:
         current = self.service.store.get_task(task_key)
-        source = self.service.store.append_event(
-            branch_id=current.branch_id,
-            session_id=session_id,
-            kind="state",
-            role=None,
-            content=f"Task {status}: {current.title}" + (f"\n{note}" if note else ""),
-            payload={"task": {"key": task_key, "status": status, "note": note}},
-        )
+        if current.status == status:
+            return current
+        if status in {"completed", "cancelled"} and source_event_id is None:
+            raise PermissionError(
+                f"task {status} requires a trusted source_event_id"
+            )
+        if source_event_id is None:
+            source = self.service.store.append_event(
+                branch_id=current.branch_id,
+                session_id=session_id,
+                kind="state",
+                role=None,
+                content=f"Task {status}: {current.title}" + (f"\n{note}" if note else ""),
+                payload={"task": {"key": task_key, "status": status, "note": note}},
+            )
+            source_event_id = source.id
+        else:
+            source = self.service.store.get_event(source_event_id)
         snapshot = self.service.create_snapshot(branch_id=current.branch_id)
         task = self.service.store.create_task_version(
             task_key=task_key,
@@ -139,6 +152,8 @@ class TaskManager:
             source_event_ids=[*current.source_event_ids, source.id],
             snapshot_id=snapshot.id,
             metadata={**current.metadata, **(metadata or {})},
+            reopen=_reopen,
+            transition_reason=_reason,
         )
         if session_id is not None:
             self.service.store.bind_task_session(session_id, task_key)
@@ -151,6 +166,7 @@ class TaskManager:
         note: str = "",
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        source_event_id: str | None = None,
     ) -> TaskRecord:
         return self.set_status(
             task_key,
@@ -158,6 +174,27 @@ class TaskManager:
             note=note,
             session_id=session_id,
             metadata=metadata,
+            source_event_id=source_event_id,
+        )
+
+    def reopen(
+        self,
+        task_key: str,
+        *,
+        reason: str,
+        source_event_id: str,
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> TaskRecord:
+        return self.set_status(
+            task_key,
+            "active",
+            note=reason,
+            session_id=session_id,
+            metadata=metadata,
+            source_event_id=source_event_id,
+            _reopen=True,
+            _reason=reason,
         )
 
     def resume(

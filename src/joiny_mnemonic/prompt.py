@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .models import Event, MemoryRecord, PromptPacket, RetrievalHit
+from .dataflow import DataflowRecorder
 from .retrieval import RetrievalContext, RetrievalEngine, lexical_terms
 from .security import memory_as_untrusted_data
 from .storage import MemoryStore
@@ -35,11 +36,30 @@ class PromptAssembler:
         *,
         token_counter: Callable[[str], int] = conservative_token_estimate,
         telemetry: Callable[[PromptPacket, dict[str, Any]], None] | None = None,
+        dataflow: DataflowRecorder | None = None,
     ) -> None:
         self.store = store
         self.retrieval = retrieval
         self.token_counter = token_counter
         self.telemetry = telemetry
+        self.dataflow = dataflow
+
+    def _trace(
+        self, operation_id: str | None, branch_id: str, session_id: str | None,
+        stage: str, **values: Any,
+    ) -> None:
+        if self.dataflow is None or operation_id is None:
+            return
+        self.dataflow.emit(
+            operation_id=operation_id,
+            operation_name="resume",
+            branch_id=branch_id,
+            session_id=session_id,
+            source="prompt_assembler",
+            stage=stage,
+            status="completed",
+            **values,
+        )
 
     # task5.md D1/D2 (mechanisms from Headroom, Apache-2.0).
     _FOLD_MIN_CHARS = 240
@@ -218,6 +238,7 @@ class PromptAssembler:
         task_key: str | None = None,
         telemetry_receipt: str | None = None,
         record_telemetry: bool = True,
+        dataflow_operation_id: str | None = None,
     ) -> PromptPacket:
         started = time.perf_counter()
         if token_budget < 1:
@@ -263,6 +284,22 @@ class PromptAssembler:
         active_section = "\n\n".join(active_lines)
         parts.append(active_section)
         active_tokens = self.token_counter("\n\n".join(parts))
+        self._trace(
+            dataflow_operation_id, branch_id, session_id, "prompt.active_memory",
+            input_value={"protected_instructions": protected_instructions, "blocks": blocks},
+            output_value={"rendered": active_section, "estimated_tokens": active_tokens},
+            refs={
+                "source_event_ids": [
+                    source
+                    for block in blocks.values()
+                    for source in (
+                        block.get("source_event_ids", ())
+                        if isinstance(block, dict) else block.source_event_ids
+                    )
+                ]
+            },
+            decision={"block_order": self.BLOCK_ORDER, "protected": True},
+        )
         if active_tokens > token_budget:
             raise BudgetExceededError(
                 "active memory exceeds token budget; protected instructions cannot be compacted"
@@ -325,6 +362,24 @@ class PromptAssembler:
                 "[RECENT TRANSCRIPT - CANONICAL EVENTS; TOOL OUTPUTS MAY USE PROVENANCE-BOUND VIEWS]\n\n"
                 + self._render_transcript(chosen_recent, active_files)
             )
+        self._trace(
+            dataflow_operation_id, branch_id, session_id, "prompt.recent_transcript",
+            input_value={
+                "candidate_event_ids": [event.id for event in all_events],
+                "recent_event_count": recent_event_count,
+                "transcript_budget": transcript_budget,
+                "active_files": sorted(active_files),
+            },
+            output_value={
+                "selected_event_ids": [event.id for event in chosen_recent],
+                "rendered": (
+                    self._render_transcript(chosen_recent, active_files)
+                    if chosen_recent else ""
+                ),
+            },
+            refs={"event_ids": [event.id for event in chosen_recent]},
+            decision={"selection": "newest complete interaction groups that fit"},
+        )
 
         if query and retrieval_limit:
             retrieval_context = RetrievalContext(
@@ -357,6 +412,24 @@ class PromptAssembler:
                 included_memory_ids = tuple(hit.id for hit in hits[: len(retrieved)])
             else:
                 included_memory_ids = ()
+            self._trace(
+                dataflow_operation_id, branch_id, session_id, "prompt.retrieval",
+                input_value={
+                    "query": query,
+                    "retrieval_limit": retrieval_limit,
+                    "effective_budget": effective_budget,
+                },
+                output_value={
+                    "ranked_candidates": hits,
+                    "included_memory_ids": included_memory_ids,
+                    "rendered_entries": retrieved,
+                },
+                refs={"memory_ids": list(included_memory_ids)},
+                decision={
+                    "included_count": len(included_memory_ids),
+                    "excluded_by_prompt_budget": max(0, len(hits) - len(included_memory_ids)),
+                },
+            )
         else:
             included_memory_ids = ()
 
@@ -412,6 +485,21 @@ class PromptAssembler:
             included_memory_ids=included_memory_ids,
             snapshot_id=snapshot_id,
             stale_reasons=stale_reasons,
+        )
+        self._trace(
+            dataflow_operation_id, branch_id, session_id, "prompt.packet",
+            input_value={
+                "token_budget": token_budget,
+                "snapshot_id": snapshot_id,
+                "stale_reasons": stale_reasons,
+            },
+            output_value=packet,
+            refs={
+                "event_ids": list(packet.included_event_ids),
+                "memory_ids": list(packet.included_memory_ids),
+                "snapshot_id": packet.snapshot_id,
+            },
+            decision={"estimated_tokens": tokens, "within_budget": tokens <= token_budget},
         )
         if record_telemetry and self.telemetry is not None:
             try:

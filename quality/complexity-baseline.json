@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "files": {
+    "src/joiny_mnemonic/storage.py": {
+      "physical_lines": 5028,
+      "functions_methods": 163,
+      "classes": 4
+    },
+    "src/joiny_mnemonic/hooks.py": {
+      "physical_lines": 1336,
+      "functions_methods": 41,
+      "classes": 2
+    },
+    "src/joiny_mnemonic/service.py": {
+      "physical_lines": 1251,
+      "functions_methods": 39,
+      "classes": 1
+    }
+  },
+  "preexisting_large_runtime_modules": {
+    "src/joiny_mnemonic/longmemeval.py": 1009
+  },
+  "new_runtime_module_max_physical_lines": 1000
+}

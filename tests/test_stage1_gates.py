@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+import unittest
+
+from scripts.stage1_gates import complexity_errors, contract_errors
+
+
+class Stage1GateTest(unittest.TestCase):
+    def test_contract_gate_passes_canonical_values(self) -> None:
+        self.assertEqual(contract_errors(), [])
+
+    def test_contract_gate_rejects_dead_value_fixture(self) -> None:
+        errors = contract_errors({"origins": {"dead_origin_fixture"}})
+        self.assertTrue(any("dead_origin_fixture" in error for error in errors))
+
+    def test_complexity_gate_uses_frozen_baseline(self) -> None:
+        self.assertEqual(complexity_errors(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

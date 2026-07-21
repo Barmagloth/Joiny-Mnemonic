@@ -350,6 +350,13 @@ def process_hook(
     event_name = _event_name(value)
     external_session = _native_session(value)
     task_key = _task_key(value)
+    flow = service.dataflow.begin(
+        "hook_delivery", source=agent, branch_id=branch_id,
+        input_value={
+            "agent": agent, "event_name": event_name,
+            "external_session": external_session, "native_payload": value,
+        },
+    )
     task = None
     with _stage("session_resolution"):
         if task_key is not None:
@@ -372,6 +379,13 @@ def process_hook(
         )
         if task is not None:
             service.store.bind_task_session(session_id, task.task_key)
+    flow.session_id = session_id
+    flow.branch_id = branch_id
+    flow.step(
+        "hook.session_resolution",
+        output_value={"session_id": session_id, "task": task, "branch_id": branch_id},
+        refs={"session_id": session_id, "task_key": task.task_key if task else None},
+    )
 
     if event_name in {"PreCompact", "PostCompact"}:
         with _stage("compact_work"):
@@ -392,6 +406,13 @@ def process_hook(
                 **value,
                 "_joiny_precheck": asdict(precheck_report),
             }
+        flow.step(
+            "hook.precheck", input_value={
+                "files": _tool_files(value), "command": _tool_command(value)
+            },
+            output_value=precheck_report,
+            decision={"warning_only": True},
+        )
 
     receipt_key = _receipt_key(agent, external_session, value)
     with _stage("capture_append"):
@@ -402,10 +423,21 @@ def process_hook(
             branch_id=branch_id,
             session_id=session_id,
         )
+    flow.step(
+        "hook.capture_append", input_value={"receipt_key": receipt_key},
+        output_value={"created": _created, "events": events},
+        refs={"event_ids": [event.id for event in events]},
+        decision={"idempotent_receipt": receipt_key},
+    )
     with _stage("reduction"):
-        service.reduce_tool_outputs(events)
+        reductions = service.reduce_tool_outputs(events)
         if event_name == "PostToolUseFailure":
             _derive_native_failure(service, value, events)
+    flow.step(
+        "hook.tool_output_reduction", input_value={"events": events},
+        output_value={"reductions": reductions},
+        refs={"event_ids": [event.id for event in events]},
+    )
     with _stage("usage_telemetry"):
         service.usage.capture_native(
             value,
@@ -435,12 +467,29 @@ def process_hook(
             )
             if counter is not None else False
         )
+    flow.step(
+        "hook.usage_and_budget",
+        output_value={"context_counter": counter, "checkpoint_warning": warning},
+        refs={"event_id": events[-1].id},
+    )
     # A retry may follow a crash after capture but before consolidation; receipts make
     # capture idempotent and every derived subsystem has its own idempotent receipt.
     with _stage("consolidation"):
-        service.consolidator.consolidate_pending(service, branch_id=branch_id, events=events)
+        consolidation = service.consolidator.consolidate_pending(
+            service, branch_id=branch_id, events=events
+        )
+    flow.step(
+        "hook.consolidation", output_value=consolidation,
+        refs={
+            "event_ids": [event.id for event in events],
+            "memory_ids": [
+                memory_id for result in consolidation for memory_id in result.memory_ids
+            ],
+        },
+    )
     with _stage("reconcile"):
         reconcile_summary = service.reconciler.reconcile(branch_id=branch_id)
+    flow.step("hook.reconcile", output_value=reconcile_summary)
     with _stage("maintenance"):
         service.extraction.notify(detached=True)
         service.checkpoint_witness()
@@ -450,6 +499,11 @@ def process_hook(
             source_event=events[-1],
             agent=agent,
         )
+    flow.step(
+        "hook.maintenance",
+        output_value={"governor": decision, "witness": service._witness_status},
+        decision={"extraction_notified": True},
+    )
 
     if event_name == "PreToolUse":
         stored = events[-1].payload.get("_joiny_precheck")
@@ -458,7 +512,13 @@ def process_hook(
         if precheck_report is not None:
             warning_packet = service.prechecks.render(precheck_report, max_bytes=4096)
             if warning_packet:
-                return _context_output(agent, event_name, warning_packet)
+                output = _context_output(agent, event_name, warning_packet)
+                flow.complete(
+                    output_value=output,
+                    refs={"event_ids": [event.id for event in events]},
+                    decision={"delivery": "precheck_warning"},
+                )
+                return output
 
     # PostCompact is capture/compaction work only: Codex validates each
     # event's stdout against its own schema and rejects additionalContext
@@ -480,7 +540,16 @@ def process_hook(
                 session_id=session_id,
                 task_key=task.task_key if task is not None else None,
                 telemetry_receipt=f"prompt-injection:{receipt_key}",
+                parent_operation_id=flow.operation_id,
             )
+        flow.step(
+            "hook.packet_assembly", output_value=packet,
+            refs={
+                "event_ids": packet.included_event_ids,
+                "memory_ids": packet.included_memory_ids,
+                "snapshot_id": packet.snapshot_id,
+            },
+        )
         context = packet.text
         thresholds = service.governor.thresholds(policy)
         if warning and counter is not None:
@@ -508,10 +577,22 @@ def process_hook(
                 "Consider starting a new session for this task; a durable resume packet is "
                 "available."
             )
-        return _with_auto_notice(
+        output = _with_auto_notice(
             _context_output(agent, event_name, context), agent, reconcile_summary
         )
-    return _with_auto_notice({}, agent, reconcile_summary)
+        flow.complete(
+            output_value=output,
+            refs={"event_ids": [event.id for event in events]},
+            decision={"delivery": "context_injection"},
+        )
+        return output
+    output = _with_auto_notice({}, agent, reconcile_summary)
+    flow.complete(
+        output_value=output,
+        refs={"event_ids": [event.id for event in events]},
+        decision={"delivery": "no_context"},
+    )
+    return output
 
 
 def _with_auto_notice(

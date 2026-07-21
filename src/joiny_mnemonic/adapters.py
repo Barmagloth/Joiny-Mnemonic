@@ -6,6 +6,16 @@ from typing import Any, Protocol
 from .models import AgentCapabilities
 
 
+PUBLIC_CAPABILITY_FLAGS = frozenset({
+    "event_ingestion",
+    "automatic_resume",
+    "tool_capture",
+    "tool_failure_capture",
+    "pre_action_precheck",
+    "active_compaction",
+    "hook_installer",
+})
+
 def _payload_with_call_id(native_event: dict[str, Any]) -> dict[str, Any]:
     payload = dict(native_event)
     for key in ("tool_call_id", "tool_use_id", "call_id", "id"):
@@ -58,7 +68,12 @@ class ClaudeCodeAdapter:
                 "tool_output", str(native_event.get("tool_response", "")), "tool",
                 _payload_with_call_id(native_event),
             )
-        if hook in {"SessionStart", "Stop"}:
+        if hook == "Stop":
+            return NormalizedEvent(
+                "message", str(native_event.get("last_assistant_message", "")),
+                "assistant", native_event,
+            )
+        if hook == "SessionStart":
             return NormalizedEvent("state", hook, None, native_event)
         return None
 
@@ -180,7 +195,4 @@ def adapter_capabilities(agent: str, supplied: dict[str, Any] | None = None) -> 
         "pre_action_precheck": "PreToolUse" in hooks,
         "active_compaction": bool(hooks & {"PreCompact", "PostCompact", "experimental.session.compacting"}),
         "hook_installer": agent in {"claude-code", "codex", "opencode", "openhands"},
-        "kv_cache_tiers": kv_access,
-        "text_memory": True,
-        "manual_cli_api_mcp": True,
     }

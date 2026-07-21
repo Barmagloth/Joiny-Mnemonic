@@ -219,16 +219,12 @@ class IntegrationTest(unittest.TestCase):
         for name, event in native.items():
             result = self.service.ingest_native(name, event)
             self.assertIsNotNone(result)
-            self.assertTrue(adapter_capabilities(name)["text_memory"])
         self.assertEqual(len(ADAPTERS), 4)
         self.assertEqual(len(self.service.store.query_events()), 4)
 
     def test_capabilities_disable_unavailable_kv_without_disabling_text(self) -> None:
         values = adapter_capabilities("minimal-agent", {"hooks": [], "kv_access": False})
         self.assertFalse(values["event_ingestion"])
-        self.assertFalse(values["kv_cache_tiers"])
-        self.assertTrue(values["text_memory"])
-        self.assertTrue(values["manual_cli_api_mcp"])
         self.assertEqual(
             self.service.capabilities()["core"]["durable_memory_markers"],
             [

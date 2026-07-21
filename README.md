@@ -91,6 +91,24 @@ The default database is `.joiny-mnemonic/memory.db`. If only a legacy `.llm-memo
 joiny-mnemonic --db .state/memory.db --project-root . verify
 ```
 
+### Live Dataflow Explorer
+
+Install the optional local UI and start it on loopback:
+
+    python -m pip install -e ".[explorer]"
+    joiny-mnemonic explore
+
+Open http://127.0.0.1:8766/. The live timeline shows the redacted input,
+output, decisions, references, byte counts and duration of every captured
+stage: validation, redaction, canonical commit, consolidation, retrieval,
+prompt assembly and hook delivery. Values remain local in the append-only
+dataflow_entries SQLite ledger. Secrets and private regions are redacted
+before observability data is stored; canonical event and memory IDs provide
+drill-down references.
+
+The recorder exposes a DataflowSink protocol for future OpenTelemetry
+integration, but no OpenTelemetry or Jaeger dependency is installed.
+
 ## Optional semantic search and knowledge graph
 
 The core has no heavy model dependency. Install either plugin from this repository when needed:

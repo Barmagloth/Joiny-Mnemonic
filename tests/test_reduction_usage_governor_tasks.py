@@ -295,7 +295,13 @@ class ReductionUsageGovernorTaskTest(unittest.TestCase):
         packet = self.service.tasks.resume("ISSUE-417", token_budget=700)
         self.assertLessEqual(packet.estimated_tokens, 700)
         self.assertIn("Repair invoice accounting", packet.text)
-        completed = self.service.tasks.complete("ISSUE-417", note="Regression test added")
+        approval = self.service.store.append_host_event(
+            adapter="codex", branch_id=task.branch_id,
+            kind="message", role="user", content="complete ISSUE-417",
+        )
+        completed = self.service.tasks.complete(
+            "ISSUE-417", note="Regression test added", source_event_id=approval.id
+        )
         self.assertEqual(completed.version, 2)
         self.assertEqual(completed.status, "completed")
         self.assertEqual(self.service.tasks.list(status="completed"), (completed,))

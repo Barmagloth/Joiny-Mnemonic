@@ -1,0 +1,163 @@
+<div id="app">
+  <header>
+    <div><h1>Joiny-Mnemonic &middot; Потоки данных</h1><p id="status">Подключение&hellip;</p></div>
+    <div class="toolbar">
+      <label>Ветка <input id="branch" value="main" autocomplete="off"></label>
+      <label class="check"><input id="live" type="checkbox" checked> Автообновление</label>
+      <button id="refresh" type="button">Обновить</button>
+    </div>
+  </header>
+  <section class="workbench" aria-label="Запустить наблюдаемую операцию">
+    <label for="payload">Входные данные</label>
+    <textarea id="payload" rows="3">Решение: обозреватель показывает каждое преобразование после удаления секретов.</textarea>
+    <div class="actions">
+      <button id="append" class="primary" type="button">Записать событие</button>
+      <button id="search" type="button">Найти в памяти</button>
+      <button id="resume" type="button">Собрать контекст</button>
+    </div>
+    <output id="action-result"></output>
+  </section>
+  <main>
+    <aside aria-label="Операции">
+      <div class="section-head"><h2>Операции</h2><span id="operation-count"></span></div>
+      <div id="operations" role="list"></div>
+    </aside>
+    <section class="detail" aria-live="polite">
+      <div id="empty">Запустите операцию или выберите её в списке.</div>
+      <div id="selected" hidden>
+        <div class="operation-head">
+          <div><h2 id="operation-name"></h2><code id="operation-id"></code></div>
+          <div id="operation-meta"></div>
+        </div>
+        <div class="flow-explanation">
+          <div><strong>Что произошло</strong><span id="operation-purpose"></span></div>
+          <div id="operation-relations"></div>
+          <p>Читайте сверху вниз. Стрелка объясняет, почему запустился следующий этап. Раскройте этап, чтобы увидеть точный JSON.</p>
+        </div>
+        <ol id="steps"></ol>
+      </div>
+    </section>
+  </main>
+</div>
+<style>
+  :root { color-scheme:light dark; --bg:#f4f1e9; --panel:#fffdf8; --text:#25231f; --muted:#706b61; --line:#d8d1c3; --accent:#176b5b; --accent-soft:#dceee8; --danger:#a33a32; --start:#8a6b24; --code:#ece7dc; }
+  @media (prefers-color-scheme:dark) { :root { --bg:#171815; --panel:#20211d; --text:#ecebdc; --muted:#aaa89c; --line:#393a34; --accent:#70c9b4; --accent-soft:#213d36; --danger:#f08a81; --start:#e2bd65; --code:#292a25; } }
+  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace; } button,input,textarea { font:inherit; color:inherit; }
+  #app { min-height:100vh; } header { display:flex; justify-content:space-between; gap:20px; align-items:end; padding:20px 24px 14px; border-bottom:1px solid var(--line); }
+  h1,h2,p { margin:0; } h1 { font:500 22px/1.2 system-ui,sans-serif; } h2 { font:500 16px/1.2 system-ui,sans-serif; } #status { margin-top:5px; color:var(--muted); }
+  .toolbar,.actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; } label { color:var(--muted); } input,textarea,button { border:1px solid var(--line); background:var(--panel); border-radius:5px; }
+  input { width:110px; padding:6px 8px; } textarea { width:100%; resize:vertical; padding:9px; } button { padding:7px 11px; cursor:pointer; } button:hover { border-color:var(--accent); }
+  button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; } button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent); }
+  .check { display:flex; align-items:center; gap:5px; } .check input { width:auto; } .workbench { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 14px; padding:14px 24px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .workbench>label { grid-column:1/-1; } .workbench textarea { grid-column:1; } .workbench .actions { grid-column:2; align-self:start; } #action-result { grid-column:1/-1; min-height:18px; color:var(--muted); white-space:pre-wrap; }
+  main { display:grid; grid-template-columns:300px minmax(0,1fr); min-height:calc(100vh - 205px); } aside { border-right:1px solid var(--line); padding:16px 12px; }
+  .section-head { display:flex; justify-content:space-between; align-items:baseline; padding:0 8px 10px; color:var(--muted); } #operations { display:grid; gap:4px; }
+  .op { display:grid; width:100%; text-align:left; grid-template-columns:1fr auto; gap:3px 8px; padding:9px; background:transparent; border-color:transparent; } .op.selected { background:var(--accent-soft); border-color:var(--accent); }
+  .op-name { font-weight:600; color:var(--text); } .op-source,.op-time,.op-id { color:var(--muted); font-size:12px; } .badge { align-self:start; padding:1px 6px; border:1px solid currentColor; border-radius:999px; font-size:11px; }
+  .completed { color:var(--accent); } .failed { color:var(--danger); } .started { color:var(--start); } .skipped { color:var(--muted); } .detail { padding:18px 24px 40px; min-width:0; } #empty { color:var(--muted); padding:30px 0; }
+  .operation-head { display:flex; justify-content:space-between; align-items:start; gap:20px; padding-bottom:12px; } .operation-head code { display:block; color:var(--muted); margin-top:5px; word-break:break-all; } #operation-meta { max-width:430px; text-align:right; color:var(--muted); }
+  .flow-explanation { margin:0 0 18px 22px; padding:10px 12px; border-left:3px solid var(--accent); background:var(--accent-soft); } .flow-explanation div { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; } .flow-explanation span,.flow-explanation p { color:var(--muted); } .flow-explanation p { margin:5px 0 0; }
+  #steps { list-style:none; margin:0; padding:0 0 0 22px; } .step { position:relative; padding:0 0 18px 22px; border-left:1px solid var(--line); } .step:last-child { border-left-color:transparent; }
+  .dot { position:absolute; left:-6px; top:5px; width:11px; height:11px; border:2px solid var(--panel); border-radius:50%; background:var(--muted); } .step.completed .dot { background:var(--accent); } .step.failed .dot { background:var(--danger); } .step.started .dot { background:var(--start); }
+  details { border-bottom:1px solid var(--line); padding-bottom:10px; } summary { cursor:pointer; display:grid; grid-template-columns:minmax(170px,1fr) auto auto; gap:12px; align-items:start; } summary::marker { color:var(--muted); }
+  .stage { display:grid; gap:2px; overflow-wrap:anywhere; } .stage strong { font-weight:600; } .stage code,.why { color:var(--muted); font-size:12px; } .why { display:block; margin-top:2px; font-family:system-ui,sans-serif; } .duration,.seq { color:var(--muted); font-size:12px; white-space:nowrap; } .values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; } .value { min-width:0; }
+  .handoff { margin:8px 0 0 4px; color:var(--muted); font:12px/1.35 system-ui,sans-serif; }
+  .value h3 { margin:0 0 4px; color:var(--muted); font:500 12px/1.3 system-ui,sans-serif; text-transform:uppercase; letter-spacing:.06em; } pre { margin:0; padding:9px; background:var(--code); border-radius:4px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:420px; overflow-y:auto; }
+  .metrics { color:var(--muted); font-size:11px; margin-top:3px; }
+  @media (max-width:800px) { header { align-items:start; flex-direction:column; } .workbench { grid-template-columns:1fr; } .workbench textarea,.workbench .actions { grid-column:1; } main { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); max-height:300px; overflow-y:auto; } .values { grid-template-columns:1fr; } .operation-head { flex-direction:column; } #operation-meta { text-align:left; } }
+</style>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const state = { operations:[], selected:null, currentOperation:null, timer:null };
+  const encoder = new TextEncoder();
+  const json = value => JSON.stringify(value,null,2);
+  const metrics = value => `${json(value).length.toLocaleString()} символов \u00b7 ${encoder.encode(json(value)).length.toLocaleString()} байт`;
+  const statusNames = {started:"выполняется",completed:"завершено",failed:"ошибка",skipped:"пропущено"};
+  const operationNames = {append_event:"Запись события",search:"Поиск в памяти",resume:"Сбор контекста для агента",hook_delivery:"Обработка события coding agent",http_validation:"Отклонение неверного API-запроса"};
+  const operationPurposes = {
+    append_event:"Получен новый факт или сообщение. Система проверила данные, удалила секреты, сохранила событие, обновила производную память и проверила целостность.",
+    search:"Получен вопрос. Система проверила ограничения поиска, ранжировала подходящие свидетельства и вернула только отобранные результаты.",
+    resume:"Агенту нужен рабочий контекст. Система восстановила устойчивое состояние, отобрала свидетельства в пределах бюджета токенов и собрала точный пакет промпта.",
+    hook_delivery:"Получено событие от coding agent. Система определила сессию, однократно записала событие, обслужила память и решила, нужно ли вернуть контекст.",
+    http_validation:"Запрос остановлен на границе API: JSON не соответствует строгому контракту. Бизнес-операция не запускалась."
+  };
+  const stageNames = {operation:"Граница операции","boundary.validation":"Проверка запроса","security.redaction":"Удаление секретов","persistence.canonical_append":"Запись канонического события",consolidation:"Обновление производной памяти","extraction.wakeup":"Запуск фонового извлечения","integrity.witness":"Проверка целостности журнала","retrieval.rank_and_filter":"Ранжирование и фильтрация свидетельств","staleness.inspect":"Проверка актуальности","snapshot.restore_or_build":"Восстановление устойчивого состояния","prompt.active_memory":"Добавление защищённой памяти","prompt.recent_transcript":"Отбор недавнего диалога","prompt.retrieval":"Отбор найденной памяти","prompt.packet":"Сборка итогового промпта","hook.session_resolution":"Определение сессии агента","hook.precheck":"Проверка действия инструмента","hook.capture_append":"Однократная запись hook-события","hook.tool_output_reduction":"Сжатие вывода инструмента","hook.usage_and_budget":"Измерение бюджета контекста","hook.consolidation":"Консолидация записанных событий","hook.reconcile":"Сверка состояния памяти","hook.maintenance":"Обслуживание памяти","hook.packet_assembly":"Сборка ответа с контекстом"};
+  function el(tag,className,text) { const node=document.createElement(tag); if(className)node.className=className; if(text!==undefined)node.textContent=text; return node; }
+  function displayTime(value) { const date=new Date(value); return Number.isNaN(date.valueOf())?value:date.toLocaleTimeString(); }
+  function operationName(value) { return operationNames[value]||value; }
+  function stageName(value) { return stageNames[value]||value; }
+  function countOf(value,key) { const item=value&&value[key]; return Array.isArray(item)?item.length:(item&&typeof item==="object"?Object.keys(item).length:0); }
+  function why(entry,index,total) {
+    const d=entry.decision||{}, o=entry.output||{};
+    if(entry.stage==="operation") return index===0?"Эти входные данные создали поток.":entry.status==="failed"?"Обработка остановлена из-за ошибки операции.":"Все обязательные предыдущие этапы завершены, поэтому результат возвращён вызывающей стороне.";
+    if(entry.stage==="boundary.validation") return d.accepted===false?"JSON нарушает строгую схему, поэтому обработка остановлена здесь.":"Непроверенные данные не допускаются к хранилищу или поиску.";
+    if(entry.stage==="security.redaction") return `В постоянное хранилище поступают только очищенные значения; зафиксировано категорий редактирования: ${countOf(d,"redactions")}.`;
+    if(entry.stage==="persistence.canonical_append") return d.committed?"Очищенное событие прошло границу и записано как канонический источник истины.":"Событие достигло границы постоянного хранилища.";
+    if(entry.stage==="consolidation"||entry.stage==="hook.consolidation") return `Каноническое событие уже существует, поэтому производная память пересчитана. Затронуто записей памяти: ${countOf(entry.refs,"memory_ids")}.`;
+    if(entry.stage==="extraction.wakeup") return d.notified?"Новое каноническое событие может содержать устойчивые факты, поэтому фоновое извлечение получило уведомление.":"После записи была проверена необходимость извлечения.";
+    if(entry.stage==="integrity.witness") return "Произошла постоянная запись, поэтому проверена и зафиксирована контрольная точка цепочки хешей.";
+    if(entry.stage==="retrieval.rank_and_filter") return `Проверенный запрос выполнен; после ранжирования, фильтров и ограничения осталось результатов: ${d.returned??countOf(o,"ranked_hits")}.`;
+    if(entry.stage==="staleness.inspect") return "Запрошена информация об актуальности; предупреждения добавлены без изменения ранжирования.";
+    if(entry.stage==="snapshot.restore_or_build") return d.path==="restore"?"Найден пригодный снимок, поэтому состояние восстановлено из него.":"Пригодного снимка нет, поэтому состояние собрано заново из канонических событий.";
+    if(entry.stage==="prompt.active_memory") return "Защищённые инструкции и активные блоки обязательны, поэтому они входят в пакет раньше необязательных свидетельств.";
+    if(entry.stage==="prompt.recent_transcript") return `В бюджет диалога поместилось недавних событий полными группами взаимодействий: ${countOf(o,"selected_event_ids")}.`;
+    if(entry.stage==="prompt.retrieval") return `В пакет поместилось ранжированных записей памяти: ${d.included_count??countOf(o,"included_memory_ids")}; исключено из-за бюджета: ${d.excluded_by_prompt_budget??0}.`;
+    if(entry.stage==="prompt.packet") return d.within_budget?`Выбранные разделы уложились в бюджет (${d.estimated_tokens} токенов по оценке), поэтому пакет сформирован.`:"Пакет превысил разрешённый бюджет.";
+    if(entry.stage==="hook.session_resolution") return "Внешние идентификаторы агента и сессии сопоставлены локальной ветке до записи событий.";
+    if(entry.stage==="hook.precheck") return "Hook может затронуть файлы или команды, поэтому сначала выполнена предупреждающая проверка безопасности.";
+    if(entry.stage==="hook.capture_append") return o.created===false?"Эта квитанция уже встречалась, поэтому повторная запись подавлена.":"Квитанция новая, поэтому нативное hook-событие записано ровно один раз.";
+    if(entry.stage==="hook.tool_output_reduction") return "Вывод инструмента может быть большим, поэтому подготовлены компактные представления с сохранением происхождения.";
+    if(entry.stage==="hook.usage_and_budget") return "После записи измерено использование контекста, чтобы решить, нужен ли снимок или передача задачи.";
+    if(entry.stage==="hook.reconcile") return "Производные записи сверены с каноническим состоянием для устранения расхождений.";
+    if(entry.stage==="hook.maintenance") return "Запись и консолидация завершены, поэтому безопасно запущены извлечение, проверка целостности и контроль бюджета.";
+    if(entry.stage==="hook.packet_assembly") return "Тип hook-события или решение по бюджету требует вернуть контекст, поэтому собран resume-пакет.";
+    const keys=Object.keys(d); return keys.length?`Этот путь выбран по решению: ${keys.map(key=>`${key}=${json(d[key]).replace(/\s+/g," ")}`).join(", ")}.`:`Предыдущий этап успешно завершён и разрешил запуск этого этапа (${index+1} из ${total}).`;
+  }
+  async function request(url,options) { const response=await fetch(url,options); const body=await response.json().catch(()=>({})); if(!response.ok)throw new Error(body.detail||body.message||response.statusText); return body; }
+  function renderOperations() {
+    const list=$("operations"); list.replaceChildren(); $("operation-count").textContent=state.operations.length;
+    for(const op of state.operations) {
+      const button=el("button",`op ${op.operation_id===state.selected?"selected":""}`); button.type="button"; button.setAttribute("role","listitem"); button.addEventListener("click",()=>selectOperation(op.operation_id));
+      button.append(el("span","op-name",operationName(op.operation_name)),el("span",`badge ${op.status}`,statusNames[op.status]||op.status),el("span","op-source",`${op.source} / ветка ${op.branch_id}`),el("span","op-time",displayTime(op.started_at)),el("span","op-id",`этапов: ${op.entry_count} \u00b7 ${op.operation_id.slice(0,15)}\u2026`)); list.append(button);
+    }
+  }
+  function addValue(container,label,value) {
+    if(value===null||value===undefined)return; if(typeof value==="object"&&Object.keys(value).length===0)return;
+    const box=el("div","value"); box.append(el("h3","",label)); const pre=el("pre"); pre.textContent=json(value); box.append(pre,el("div","metrics",metrics(value))); container.append(box);
+  }
+  function renderOperation(op) {
+    const openEntries=new Set(Array.from(document.querySelectorAll("#steps details[open]"),node=>node.dataset.entryId)); const switched=state.currentOperation&&state.currentOperation.operation_id!==op.operation_id; if(switched)openEntries.clear(); state.currentOperation=op;
+    $("empty").hidden=true; $("selected").hidden=false; $("operation-name").textContent=`${operationName(op.operation_name)} \u00b7 ${statusNames[op.status]||op.status}`; $("operation-id").textContent=`ID запуска: ${op.operation_id}`;
+    $("operation-meta").textContent=`Компонент: ${op.source} \u00b7 Ветка данных: ${op.branch_id} \u00b7 Записано этапов: ${op.entry_count}`;
+    $("operation-purpose").textContent=operationPurposes[op.operation_name]||"Локальная операция провела данные через перечисленные ниже этапы.";
+    const relations=$("operation-relations"); relations.replaceChildren(); const related=[]; if(op.parent_operation_id)related.push(`Запущено родительским потоком ${op.parent_operation_id}`); const children=state.operations.filter(item=>item.parent_operation_id===op.operation_id); if(children.length)related.push(`Запущено дочерних потоков: ${children.length} (${children.map(item=>operationName(item.operation_name)).join(", ")})`); if(related.length){relations.append(el("strong","","Связанные потоки"),el("span","",related.join(". ")));}
+    const steps=$("steps"); steps.replaceChildren();
+    for(const [index,entry] of op.entries.entries()) {
+      const item=el("li",`step ${entry.status}`); item.append(el("span","dot")); const details=document.createElement("details"); const summary=document.createElement("summary");
+      details.dataset.entryId=entry.id; details.open=openEntries.has(entry.id); const stage=el("span","stage"); stage.append(el("strong","",`${index+1}. ${stageName(entry.stage)}`),el("code","",entry.stage),el("span","why",why(entry,index,op.entries.length))); summary.append(stage,el("span","duration",entry.duration_ms==null?(statusNames[entry.status]||entry.status):`${entry.duration_ms.toFixed(3)} мс`),el("span","seq",`журнал #${entry.seq}`)); details.append(summary);
+      const values=el("div","values"); addValue(values,"Получено этим этапом",entry.input); addValue(values,"Создано / передано дальше",entry.output); addValue(values,"Решение маршрутизации (почему)",entry.decision); addValue(values,"Связанные записи (ID)",entry.refs); addValue(values,"Ошибка",entry.error); details.append(values); item.append(details); if(index<op.entries.length-1)item.append(el("div","handoff",`\u2193 Завершение разрешило этап ${index+2}: ${stageName(op.entries[index+1].stage)}`)); steps.append(item);
+    }
+  }
+  async function selectOperation(id) { state.selected=id; renderOperations(); try { renderOperation(await request(`/v1/dataflow/operations/${encodeURIComponent(id)}`)); } catch(error) { $("action-result").textContent=error.message; } }
+  async function refresh(force=false) {
+    const branch=$("branch").value.trim(); const suffix=branch?`?branch=${encodeURIComponent(branch)}&limit=100`:"?limit=100";
+    try {
+      const [status,operations]=await Promise.all([request("/v1/dataflow/status"),request(`/v1/dataflow/operations${suffix}`)]); state.operations=operations;
+      $("status").textContent=`${status.database} \u00b7 регистратор: ${status.recorder_errors.length?"есть ошибки":"исправен"} \u00b7 внешних приёмников: ${status.external_sinks}`; renderOperations();
+      if(!state.selected&&operations.length)state.selected=operations[0].operation_id; const selectedSummary=operations.find(item=>item.operation_id===state.selected); const unchanged=state.currentOperation&&selectedSummary&&state.currentOperation.last_seq===selectedSummary.last_seq; if(state.selected&&(!unchanged||force))await selectOperation(state.selected);
+    } catch(error) { $("status").textContent=`Нет подключения \u00b7 ${error.message}`; }
+  }
+  async function run(path,body) {
+    $("action-result").textContent="Выполняется\u2026";
+    try { const result=await request(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); $("action-result").textContent=`${metrics(result)} \u00b7 операция записана`; await refresh(true); }
+    catch(error) { $("action-result").textContent=`Ошибка: ${error.message}`; await refresh(true); }
+  }
+  $("append").addEventListener("click",()=>run("/v1/events",{kind:"message",role:"user",content:$("payload").value,branch_id:$("branch").value.trim()||"main",payload:{},files:[]}));
+  $("search").addEventListener("click",()=>run("/v1/search",{query:$("payload").value,branch_id:$("branch").value.trim()||"main",limit:10,exact:false,include_events:true,semantic:true}));
+  $("resume").addEventListener("click",()=>run("/v1/resume",{query:$("payload").value,branch_id:$("branch").value.trim()||"main",token_budget:1500}));
+  $("refresh").addEventListener("click",()=>refresh(true)); $("branch").addEventListener("change",()=>{state.selected=null;state.currentOperation=null;refresh(true);});
+  $("live").addEventListener("change",event=>{clearInterval(state.timer);state.timer=event.target.checked?setInterval(refresh,1500):null;});
+  state.timer=setInterval(refresh,1500); refresh();
+})();
+</script>

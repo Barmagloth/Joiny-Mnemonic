@@ -501,6 +501,9 @@ def build_parser() -> argparse.ArgumentParser:
     api = commands.add_parser("serve")
     api.add_argument("--host", default="127.0.0.1")
     api.add_argument("--port", type=int, default=8765)
+    explorer = commands.add_parser("explore")
+    explorer.add_argument("--host", default="127.0.0.1")
+    explorer.add_argument("--port", type=int, default=8766)
     commands.add_parser("mcp")
 
     physical = commands.add_parser("physical-plan")
@@ -908,6 +911,14 @@ def run(args: argparse.Namespace) -> int:
             return 0 if result["valid"] else 2
         elif args.command == "serve":
             serve(service, args.host, args.port)
+        elif args.command == "explore":
+            try:
+                from .explorer import serve_explorer
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Dataflow Explorer requires: pip install 'joiny-mnemonic[explorer]'"
+                ) from exc
+            serve_explorer(service, args.host, args.port)
         elif args.command == "mcp":
             serve_stdio(service)
         elif args.command == "physical-plan":

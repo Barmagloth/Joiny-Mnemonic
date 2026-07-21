@@ -126,7 +126,13 @@ class RetrievalTelemetryTest(unittest.TestCase):
             sample.metadata["estimated_emitted_tokens"],
             with_telemetry.estimated_tokens,
         )
-        completed = self.service.tasks.complete(task.task_key)
+        approval = self.service.store.append_host_event(
+            adapter="codex", branch_id=task.branch_id,
+            kind="message", role="user", content="complete task",
+        )
+        completed = self.service.tasks.complete(
+            task.task_key, source_event_id=approval.id
+        )
         self.assertEqual(completed.status, "completed")
 
         report = self.service.usage.report(branch_id=task.branch_id)

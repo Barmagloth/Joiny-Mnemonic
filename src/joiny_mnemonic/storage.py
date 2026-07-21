@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import functools
 import hashlib
 import json
 import os
@@ -23,7 +22,22 @@ from .models import (
     ToolOutputView, UsageSample,
 )
 from . import temporal
-from .provenance import origin_evidence_type
+from .provenance import (
+    BOOTSTRAP_TOFU,
+    EXTERNAL_UNTRUSTED,
+    HOST_LOGICAL_USER,
+    origin_evidence_type,
+)
+from .dataflow_storage import DataflowStorageMixin
+from .storage_support import integrity_checked
+from .transition_rules import (
+    CANDIDATE_RULE,
+    FINDING_RULE,
+    SETTLEMENT_FLOW,
+    SETTLEMENT_RULE,
+    WORKSTREAM_RULE,
+    validate_transition,
+)
 
 from .security import SecretRedactor, redaction_counts
 
@@ -114,22 +128,13 @@ class SnapshotIntegrityError(RuntimeError):
         super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 SETTLEMENT_CONFIG_HASH = "settlement-reconciler-v1"
 FIRST_VERSIONED_MIGRATION = 7
 # v2: memory records serialize bitemporal valid-time fields (task4.md); the
 # canonical state layout changed, so rebuilt hashes are only comparable within
 # this version.
 SNAPSHOT_REPLAY_CODE_VERSION = "snapshot-materializer-v2"
-
-
-def integrity_checked(method: Any) -> Any:
-    @functools.wraps(method)
-    def wrapped(self: "MemoryStore", *args: Any, **kwargs: Any) -> Any:
-        self._guard_read()
-        return method(self, *args, **kwargs)
-
-    return wrapped
 
 
 BASE_SCHEMA = """
@@ -317,6 +322,41 @@ CREATE TABLE IF NOT EXISTS usage_samples (
     metadata_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Human-facing, append-only execution ledger. This is a derived observability
+-- surface, not canonical memory: entries point at canonical/derived ids and
+-- retain the redacted values that crossed each boundary.
+CREATE TABLE IF NOT EXISTS dataflow_entries (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    operation_id TEXT NOT NULL,
+    parent_operation_id TEXT,
+    operation_name TEXT NOT NULL,
+    branch_id TEXT NOT NULL,
+    session_id TEXT,
+    source TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    status TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    output_json TEXT NOT NULL,
+    refs_json TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    error_json TEXT NOT NULL,
+    duration_ms REAL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dataflow_operation_seq
+ON dataflow_entries(operation_id, seq);
+CREATE INDEX IF NOT EXISTS idx_dataflow_branch_seq
+ON dataflow_entries(branch_id, seq);
+
+CREATE TRIGGER IF NOT EXISTS dataflow_entries_no_update
+BEFORE UPDATE ON dataflow_entries
+BEGIN SELECT RAISE(ABORT, 'dataflow entries are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS dataflow_entries_no_delete
+BEFORE DELETE ON dataflow_entries
+BEGIN SELECT RAISE(ABORT, 'dataflow entries cannot be deleted'); END;
 
 CREATE TABLE IF NOT EXISTS hook_context_counters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -736,7 +776,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, 
 """
 
 
-class MemoryStore:
+class MemoryStore(DataflowStorageMixin):
     """Durable SQLite event store with immutable canonical and derived records."""
 
     MAX_ACTIVE_BYTES = 3000
@@ -931,6 +971,11 @@ class MemoryStore:
                 _now(),
             ),
         )
+
+    def _migrate_to_v10(self) -> None:
+        # v10: append-only human-readable dataflow ledger. BASE_SCHEMA creates
+        # the table before numbered migrations run, including on legacy stores.
+        return None
 
     def _migrate_to_v8(self) -> None:
         # v8: bitemporal valid-time fields (task4.md). Additive nullable columns
@@ -1615,6 +1660,29 @@ class MemoryStore:
     @staticmethod
     def _event_origin_evidence(row: sqlite3.Row) -> str:
         return origin_evidence_type(MemoryStore._event_from_row(row))
+
+    def _event_visible_locked(
+        self, conn: sqlite3.Connection, event_row: sqlite3.Row, branch_id: str
+    ) -> bool:
+        event_branch = str(event_row["branch_id"])
+        event_seq = int(event_row["seq"])
+        return any(
+            visible_branch == event_branch
+            and (cutoff is None or event_seq <= cutoff)
+            for visible_branch, cutoff in self._lineage_locked(branch_id)
+        )
+
+    @staticmethod
+    def _delegation_enabled_locked(conn: sqlite3.Connection) -> bool:
+        row = conn.execute(
+            "SELECT policy_json FROM policy_ledger ORDER BY version DESC LIMIT 1"
+        ).fetchone()
+        return bool(
+            row is not None
+            and json.loads(row["policy_json"]).get(
+                "agent_settlement_delegation_enabled", False
+            )
+        )
 
     @integrity_checked
     def get_event(self, event_id: str) -> Event:
@@ -3302,6 +3370,8 @@ class MemoryStore:
         parent_task_key: str | None = None,
         snapshot_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        reopen: bool = False,
+        transition_reason: str = "",
     ) -> TaskRecord:
         if not task_key or not title:
             raise ValueError("task key and title must be non-empty")
@@ -3317,6 +3387,35 @@ class MemoryStore:
             ).fetchone()
             if current is not None and current["branch_id"] != branch_id:
                 raise ValueError("task key is already assigned to another branch")
+            if current is not None and str(current["status"]) == status:
+                return self._task_from_row(current)
+            if current is None:
+                if status != "active":
+                    raise ValueError("a workstream must start in active state")
+            else:
+                source_id = str(source_event_ids[-1]) if source_event_ids else ""
+                source_row = conn.execute(
+                    "SELECT * FROM events WHERE id=?", (source_id,)
+                ).fetchone()
+                if source_row is None:
+                    raise KeyError(f"unknown source event: {source_id}")
+                previous_sources = set(json.loads(current["source_event_ids_json"]))
+                if source_id in previous_sources:
+                    raise ValueError("workstream transition requires a new source event")
+                decision = validate_transition(
+                    WORKSTREAM_RULE,
+                    current=str(current["status"]),
+                    target=status,
+                    origin=self._event_origin_evidence(source_row),
+                    source_visible=self._event_visible_locked(
+                        conn, source_row, branch_id
+                    ),
+                    delegated_enabled=self._delegation_enabled_locked(conn),
+                    reopen=reopen,
+                    reason=transition_reason,
+                )
+                if not decision.changed:
+                    return self._task_from_row(current)
             version = int(current["version"]) + 1 if current is not None else 1
             task_id = f"task_{uuid.uuid4().hex}"
             conn.execute(
@@ -3596,7 +3695,7 @@ class MemoryStore:
                 "VALUES(?,?,NULL,'active',?,?,?,?)",
                 (
                     f"ftr_{uuid.uuid4().hex}", finding_id, event.id,
-                    "integrity_monitor", "extractor", _now(),
+                    "integrity_monitor", EXTERNAL_UNTRUSTED, _now(),
                 ),
             )
         return finding_id
@@ -3632,12 +3731,25 @@ class MemoryStore:
     ) -> tuple[Event, str]:
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT to_status FROM finding_transitions "
+                "SELECT id,to_status,source_event_id FROM finding_transitions "
                 "WHERE finding_id=? ORDER BY rowid DESC LIMIT 1",
                 (finding_id,),
             ).fetchone()
             if row is None:
                 raise KeyError(f"unknown security finding: {finding_id}")
+            if str(row["to_status"]) == "acknowledgement_requested":
+                existing = conn.execute(
+                    "SELECT * FROM events WHERE id=?", (row["source_event_id"],)
+                ).fetchone()
+                assert existing is not None
+                return self._event_from_row(existing), str(row["id"])
+            if "acknowledgement_requested" not in FINDING_RULE.flow.get(
+                str(row["to_status"]), frozenset()
+            ):
+                raise ValueError(
+                    "illegal security finding transition: "
+                    f"{row['to_status']} -> acknowledgement_requested"
+                )
             event = self._append_event_in_tx(
                 conn,
                 branch_id=branch_id,
@@ -3656,6 +3768,17 @@ class MemoryStore:
                 files=(),
             )
             transition_id = f"ftr_{uuid.uuid4().hex}"
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (event.id,)
+            ).fetchone()
+            assert source_row is not None
+            validate_transition(
+                FINDING_RULE,
+                current=str(row["to_status"]),
+                target="acknowledgement_requested",
+                origin=self._event_origin_evidence(source_row),
+                source_visible=self._event_visible_locked(conn, source_row, branch_id),
+            )
             conn.execute(
                 "INSERT INTO finding_transitions"
                 "(id, finding_id, from_status, to_status, source_event_id, "
@@ -3663,7 +3786,7 @@ class MemoryStore:
                 (
                     transition_id, finding_id, row["to_status"],
                     "acknowledgement_requested", event.id, "request_reducer",
-                    origin_evidence_type, _now(),
+                    self._event_origin_evidence(source_row), _now(),
                 ),
             )
         return event, transition_id
@@ -3675,7 +3798,7 @@ class MemoryStore:
         source_event_id: str,
         actor: str,
         origin_evidence_type: str | None = None,
-    ) -> str:
+    ) -> str | None:
         if to_status not in {"acknowledgement_requested", "acknowledged"}:
             raise ValueError("unsupported finding transition")
         with self._transaction() as conn:
@@ -3692,13 +3815,16 @@ class MemoryStore:
             if source_row is None:
                 raise KeyError(f"unknown source event: {source_event_id}")
             derived_origin = self._event_origin_evidence(source_row)
-            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
-                raise PermissionError("claimed origin evidence does not match source event")
-            if to_status == "acknowledged" and derived_origin not in {
-                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-                "external_trusted_ui",
-            }:
-                raise PermissionError("finding acknowledgement requires trusted origin")
+            decision = validate_transition(
+                FINDING_RULE,
+                current=str(row["to_status"]),
+                target=to_status,
+                origin=derived_origin,
+                source_visible=self._event_visible_locked(conn, source_row, "main"),
+                delegated_enabled=self._delegation_enabled_locked(conn),
+            )
+            if not decision.changed:
+                return None
             transition_id = f"ftr_{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO finding_transitions"
@@ -3730,10 +3856,7 @@ class MemoryStore:
             derived_origin = self._event_origin_evidence(source_row)
             if origin_evidence_type is not None and origin_evidence_type != derived_origin:
                 raise PermissionError("claimed origin evidence does not match source event")
-            if derived_origin not in {
-                "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-                "external_trusted_ui",
-            }:
+            if derived_origin not in {BOOTSTRAP_TOFU, HOST_LOGICAL_USER}:
                 raise PermissionError("policy activation requires trusted origin")
             previous = conn.execute(
                 "SELECT id, version FROM policy_ledger "
@@ -4063,7 +4186,7 @@ class MemoryStore:
                     (
                         f"ctr_{uuid.uuid4().hex}", candidate_id,
                         initial_status, event.id, "extractor",
-                        initial_rule, "extractor", run_id, created_at,
+                    initial_rule, origin_evidence_type(event), run_id, created_at,
                     ),
                 )
                 if initial_status != "auto":
@@ -4202,6 +4325,26 @@ class MemoryStore:
             current = self._candidate_status_locked(conn, candidate_id)
             if current is None:
                 raise KeyError(f"unknown extraction candidate: {candidate_id}")
+            latest = conn.execute(
+                "SELECT id,source_event_id FROM candidate_transitions "
+                "WHERE candidate_id=? ORDER BY rowid DESC LIMIT 1",
+                (candidate_id,),
+            ).fetchone()
+            if current == request_status:
+                assert latest is not None
+                existing = conn.execute(
+                    "SELECT * FROM events WHERE id=?", (latest["source_event_id"],)
+                ).fetchone()
+                assert existing is not None
+                return self._event_from_row(existing), str(latest["id"])
+            target = conn.execute(
+                "SELECT e.branch_id FROM extraction_candidates c "
+                "JOIN extraction_runs r ON r.id=c.run_id "
+                "JOIN events e ON e.id=r.event_id WHERE c.id=?",
+                (candidate_id,),
+            ).fetchone()
+            if target is None:
+                raise StoreIntegrityError("candidate has no source event")
             event = self._append_event_in_tx(
                 conn,
                 branch_id=branch_id,
@@ -4219,6 +4362,19 @@ class MemoryStore:
                 files=(),
             )
             transition_id = f"ctr_{uuid.uuid4().hex}"
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (event.id,)
+            ).fetchone()
+            assert source_row is not None
+            validate_transition(
+                CANDIDATE_RULE,
+                current=current,
+                target=request_status,
+                origin=self._event_origin_evidence(source_row),
+                source_visible=self._event_visible_locked(
+                    conn, source_row, str(target["branch_id"])
+                ),
+            )
             conn.execute(
                 "INSERT INTO candidate_transitions"
                 "(id, candidate_id, from_status, to_status, source_event_id, "
@@ -4228,7 +4384,7 @@ class MemoryStore:
                 (
                     transition_id, candidate_id, current, request_status,
                     event.id, "request_reducer", f"untrusted_{action}_request",
-                    origin_evidence_type, replacement_candidate_id,
+                    self._event_origin_evidence(source_row), replacement_candidate_id,
                     replacement_memory_id, _now(),
                 ),
             )
@@ -4244,19 +4400,8 @@ class MemoryStore:
         origin_evidence_type: str | None = None,
         replacement_candidate_id: str | None = None,
         replacement_memory_id: str | None = None,
-    ) -> str:
-        trusted = {
-            "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-            "external_trusted_ui",
-        }
-        boundary_statuses = {"confirmed", "rejected", "superseded"}
-        request_statuses = {
-            "confirmation_requested", "rejection_requested",
-            "supersession_requested", "acknowledgement_requested",
-        }
-        allowed = {
-            "auto", "quarantined", *boundary_statuses, *request_statuses
-        }
+    ) -> str | None:
+        allowed = set(CANDIDATE_RULE.flow)
         if to_status not in allowed:
             raise ValueError(f"unsupported candidate status: {to_status}")
         if to_status == "superseded" and not (
@@ -4268,18 +4413,32 @@ class MemoryStore:
             current = self._candidate_status_locked(conn, candidate_id)
             if current is None:
                 raise KeyError(f"unknown extraction candidate: {candidate_id}")
+            target = conn.execute(
+                "SELECT e.branch_id FROM extraction_candidates c "
+                "JOIN extraction_runs r ON r.id=c.run_id "
+                "JOIN events e ON e.id=r.event_id WHERE c.id=?",
+                (candidate_id,),
+            ).fetchone()
+            if target is None:
+                raise StoreIntegrityError("candidate has no source event")
             source_row = conn.execute(
                 "SELECT * FROM events WHERE id=?", (source_event_id,)
             ).fetchone()
             if source_row is None:
                 raise KeyError(f"unknown source event: {source_event_id}")
             derived_origin = self._event_origin_evidence(source_row)
-            if origin_evidence_type is not None and origin_evidence_type != derived_origin:
-                raise PermissionError("claimed origin evidence does not match source event")
-            if to_status in boundary_statuses and derived_origin not in trusted:
-                raise PermissionError(
-                    "trust-boundary transition requires logical-user or stronger origin evidence"
-                )
+            decision = validate_transition(
+                CANDIDATE_RULE,
+                current=current,
+                target=to_status,
+                origin=derived_origin,
+                source_visible=self._event_visible_locked(
+                    conn, source_row, str(target["branch_id"])
+                ),
+                delegated_enabled=self._delegation_enabled_locked(conn),
+            )
+            if not decision.changed:
+                return None
             conn.execute(
                 "INSERT INTO candidate_transitions"
                 "(id, candidate_id, from_status, to_status, source_event_id, "
@@ -4301,21 +4460,8 @@ class MemoryStore:
     # vocabulary: pending -> applied | contested; applied -> reverted |
     # contested. Consume-once: repeats are idempotent, conflicts fail closed.
 
-    _SETTLEMENT_STATUSES = {"pending", "applied", "reverted", "contested"}
-    _SETTLEMENT_FLOW = {
-        "pending": {"applied", "contested"},
-        "applied": {"reverted", "contested"},
-        "reverted": set(),
-        "contested": set(),
-    }
-    # task6.md 6C trust hardening: non-system settlement requires the cited
-    # source event to carry one of these derived origins. "local_operator"
-    # and "delegated_agent" derive only from internal settlement_requested
-    # events, which no public-API or MCP text can mint (H1 discipline).
-    _SETTLEMENT_TRUSTED_ORIGINS = {
-        "bootstrap_tofu", "host_logical_user", "signed_host_receipt",
-        "external_trusted_ui", "local_operator",
-    }
+    _SETTLEMENT_STATUSES = set(SETTLEMENT_FLOW)
+    _SETTLEMENT_FLOW = SETTLEMENT_FLOW
 
     @integrity_checked
     def create_settlement_candidate(
@@ -4384,7 +4530,13 @@ class MemoryStore:
                 "VALUES(?,?,NULL,'pending',?,?,?,?,NULL,NULL,?,?)",
                 (
                     f"ctr_{uuid.uuid4().hex}", candidate_id, source_event_id,
-                    actor, f"{kind}_detected", "internal", run_id, created_at,
+                    actor, f"{kind}_detected",
+                    self._event_origin_evidence(
+                        conn.execute(
+                            "SELECT * FROM events WHERE id=?", (source_event_id,)
+                        ).fetchone()
+                    ),
+                    run_id, created_at,
                 ),
             )
         return candidate_id, True, "pending"
@@ -4408,7 +4560,9 @@ class MemoryStore:
             raise ValueError(f"unsupported settlement status: {to_status}")
         with self._transaction() as conn:
             row = conn.execute(
-                "SELECT candidate_kind FROM extraction_candidates WHERE id=?",
+                "SELECT c.candidate_kind,e.branch_id FROM extraction_candidates c "
+                "JOIN extraction_runs r ON r.id=c.run_id "
+                "JOIN events e ON e.id=r.event_id WHERE c.id=?",
                 (candidate_id,),
             ).fetchone()
             if row is None:
@@ -4417,45 +4571,26 @@ class MemoryStore:
                 raise ValueError(
                     "extraction candidates settle through transition_candidate"
                 )
-            recorded_origin = "internal"
-            if actor != "system":
-                source_row = conn.execute(
-                    "SELECT * FROM events WHERE id=?", (source_event_id,)
-                ).fetchone()
-                if source_row is None:
-                    raise KeyError(f"unknown source event: {source_event_id}")
-                derived_origin = self._event_origin_evidence(source_row)
-                recorded_origin = derived_origin
-                if derived_origin == "delegated_agent":
-                    policy_row = conn.execute(
-                        "SELECT policy_json FROM policy_ledger "
-                        "ORDER BY version DESC LIMIT 1"
-                    ).fetchone()
-                    delegated = bool(
-                        policy_row is not None
-                        and json.loads(policy_row["policy_json"]).get(
-                            "agent_settlement_delegation_enabled", False
-                        )
-                    )
-                    if not delegated:
-                        raise PermissionError(
-                            "agent settlement requires explicit policy delegation "
-                            "(agent_settlement_delegation_enabled); use the local "
-                            "operator CLI or ask the user"
-                        )
-                elif derived_origin not in self._SETTLEMENT_TRUSTED_ORIGINS:
-                    raise PermissionError(
-                        "manual settlement requires a trusted origin "
-                        "(local operator CLI, host-verified user event, or "
-                        "policy-delegated agent)"
-                    )
+            source_row = conn.execute(
+                "SELECT * FROM events WHERE id=?", (source_event_id,)
+            ).fetchone()
+            if source_row is None:
+                raise KeyError(f"unknown source event: {source_event_id}")
+            recorded_origin = self._event_origin_evidence(source_row)
             current = self._candidate_status_locked(conn, candidate_id) or "pending"
-            if current == to_status:
-                return None  # idempotent repeat
-            if to_status not in self._SETTLEMENT_FLOW.get(current, set()):
-                raise ValueError(
-                    f"conflicting settlement: {current} -> {to_status} is not allowed"
-                )
+            decision = validate_transition(
+                SETTLEMENT_RULE,
+                current=current,
+                target=to_status,
+                origin=recorded_origin,
+                source_visible=self._event_visible_locked(
+                    conn, source_row, str(row["branch_id"])
+                ),
+                delegated_enabled=self._delegation_enabled_locked(conn),
+                system_actor=actor == "system",
+            )
+            if not decision.changed:
+                return None
             transition_id = f"ctr_{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO candidate_transitions"
@@ -4553,14 +4688,21 @@ class MemoryStore:
         key = self._normalized_key(content)
         with self._lock:
             rows = self._conn.execute(
-                "SELECT c.id, c.normalized_content, l.memory_id "
+                "SELECT c.id, c.normalized_content, l.memory_id, "
+                "(SELECT t.to_status FROM candidate_transitions t "
+                "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status "
                 "FROM extraction_candidates c "
                 "JOIN candidate_memory_links l ON l.candidate_id=c.id "
                 "WHERE c.memory_type=? ORDER BY c.created_at",
                 (memory_type,),
             ).fetchall()
         for row in rows:
-            if self._normalized_key(row["normalized_content"]) == key:
+            if (
+                row["status"] in {
+                    "auto", "confirmation_requested", "confirmed"
+                }
+                and self._normalized_key(row["normalized_content"]) == key
+            ):
                 return str(row["id"]), str(row["memory_id"])
         return None
 
@@ -4571,6 +4713,22 @@ class MemoryStore:
         *,
         source_event_id: str,
     ) -> None:
+        current = next(
+            (
+                item.current_status
+                for item in self.list_extraction_candidates()
+                if item.id == candidate_id
+            ),
+            None,
+        )
+        if current == "auto":
+            self.transition_candidate(
+                candidate_id,
+                "confirmation_requested",
+                source_event_id=source_event_id,
+                actor="explicit_marker",
+                rule_id="normalized_explicit_match_requested",
+            )
         self.transition_candidate(
             candidate_id,
             "confirmed",

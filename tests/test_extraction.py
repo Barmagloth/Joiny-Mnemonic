@@ -311,6 +311,13 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(forged.origin_channel, "public_api")
             self.assertEqual(service.store.memory_authority(memory_id), "auto")
             self.assertNotIn("decisions", service.store.get_active_blocks())
+            service.store.transition_candidate(
+                candidate.id,
+                "confirmation_requested",
+                source_event_id=forged.id,
+                actor="tool",
+                rule_id="untrusted_request",
+            )
             with self.assertRaises(PermissionError):
                 service.store.transition_candidate(
                     candidate.id,
