@@ -6,6 +6,7 @@ import unittest
 import uuid
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION
 from joiny_mnemonic.plugins import PluginRegistry
@@ -77,6 +78,53 @@ class SynonymEncoder:
                 vectors.append([0.0, 0.0, 1.0])
         return vectors
 
+
+class EncoderLifecycleTest(unittest.TestCase):
+    def test_closed_hub_client_is_reset_and_model_load_retried_once(self) -> None:
+        sentence_transformers = ModuleType("sentence_transformers")
+        huggingface_hub = ModuleType("huggingface_hub")
+        attempts: list[str] = []
+        resets: list[bool] = []
+
+        class FakeSentenceTransformer:
+            def __init__(
+                self, model_name: str, *, local_files_only: bool = False
+            ) -> None:
+                attempts.append(f"{model_name}:{local_files_only}")
+                if local_files_only:
+                    raise OSError("model is not cached")
+                if len(attempts) == 2:
+                    raise RuntimeError(
+                        "Cannot send a request, as the client has been closed."
+                    )
+
+            def encode(self, texts, *, normalize_embeddings):
+                self.normalized = normalize_embeddings
+                return [[1.0, 0.0] for _ in texts]
+
+        sentence_transformers.SentenceTransformer = FakeSentenceTransformer
+        huggingface_hub.close_session = lambda: resets.append(True)
+        with patch.dict(
+            sys.modules,
+            {
+                "sentence_transformers": sentence_transformers,
+                "huggingface_hub": huggingface_hub,
+            },
+        ):
+            encoder = semantic_module.SentenceTransformerEncoder("test-model")
+            vectors = encoder.encode(("first", "second"))
+
+        self.assertEqual(vectors, [[1.0, 0.0], [1.0, 0.0]])
+        self.assertEqual(
+            attempts,
+            [
+                "test-model:True",
+                "test-model:False",
+                "test-model:True",
+                "test-model:False",
+            ],
+        )
+        self.assertEqual(resets, [True])
 
 class PluginBehaviorTest(unittest.TestCase):
     def test_semantic_plugin_finds_unmarked_event_without_keyword_overlap(self) -> None:

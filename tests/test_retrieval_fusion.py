@@ -220,6 +220,46 @@ class FusionTest(unittest.TestCase):
             any("reranker:broken" in e for e in self.service.plugins.errors)
         )
 
+    def test_opaque_identifier_query_abstains_from_semantic_neighbours(self) -> None:
+        from joiny_mnemonic.models import RetrievalHit
+
+        unrelated = self._fact("Dataflow Explorer shows every redacted transformation.")
+
+        class SemanticNeighbour:
+            name = "semantic-neighbour"
+
+            def sync(self, records, events):
+                return None
+
+            def search(self, query, *, limit=20, filters=None):
+                return [
+                    RetrievalHit(
+                        id=unrelated.id,
+                        source_kind="memory",
+                        memory_type="fact",
+                        representation="semantic",
+                        content=unrelated.content,
+                        score=0.17,
+                        source_event_ids=unrelated.source_event_ids,
+                        files=(),
+                        created_at=unrelated.created_at,
+                    )
+                ]
+
+        self.service.plugins.semantic = {"semantic-neighbour": SemanticNeighbour()}
+        hits = self.service.search(
+            query="что было в коммите 0eebcfe", include_events=True, limit=5
+        )
+        self.assertEqual(hits, [])
+
+        source = self.store.append_event(
+            kind="message", role="assistant",
+            content="[FACT] CONFIRMED: dogfood fix is commit 0eebcfe",
+        )
+        hits = self.service.search(
+            query="что было в коммите 0eebcfe", include_events=True, limit=5
+        )
+        self.assertEqual([hit.id for hit in hits], [source.id])
     def test_graph_arm_fuses_when_plugin_matches_entities(self) -> None:
         class FakeGraphPlugin:
             name = "fake-graph"

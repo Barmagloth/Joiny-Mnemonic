@@ -514,6 +514,16 @@ class IntegrationTest(unittest.TestCase):
                 self.assertFalse(configured["event_ingestion"])
                 self.assertFalse(configured["hook_runtime_verified"])
 
+                install_hooks("codex", root)
+                codex_capabilities = service.capabilities("codex")
+                self.assertTrue(
+                    any(
+                        "reviews and trusts" in warning
+                        for warning in codex_capabilities["warnings"]
+                    ),
+                    codex_capabilities["warnings"],
+                )
+
                 configured_server = MCPServer(service)
                 configured_init = configured_server.handle(
                     {

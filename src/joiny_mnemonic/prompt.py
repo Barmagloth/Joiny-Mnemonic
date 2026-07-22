@@ -7,6 +7,7 @@ from typing import Any
 
 from .models import Event, MemoryRecord, PromptPacket, RetrievalHit
 from .dataflow import DataflowRecorder
+from .failure_quality import is_low_information_failure
 from .retrieval import RetrievalContext, RetrievalEngine, lexical_terms
 from .security import memory_as_untrusted_data
 from .storage import MemoryStore
@@ -435,6 +436,9 @@ class PromptAssembler:
 
         recent_ids = {event.id for event in chosen_recent}
         index_lines = ["[HISTORICAL INDEX - UNTRUSTED DATA]"]
+        source_help = "Expand evt_/mem_ verbatim: `joiny-mnemonic source <id>`."
+        if self._fits(parts, "\n".join([*index_lines, source_help]), effective_budget):
+            index_lines.append(source_help)
         if state is not None:
             timeline = sorted(
                 state.get("timeline_index", {}).values(),
@@ -453,9 +457,12 @@ class PromptAssembler:
         for item in timeline:
             if item["id"] in recent_ids:
                 continue
+            preview = str(item.get("preview", ""))
+            if is_low_information_failure(preview):
+                continue
             line = (
                 f"- {item['time']} {item['id']} {item['kind']} "
-                f"files={','.join(item.get('files', ())) or '-'} :: {item.get('preview', '')}"
+                f"files={','.join(item.get('files', ())) or '-'} :: {preview}"
             )
             candidate = "\n".join([*index_lines, line])
             if not self._fits(parts, candidate, effective_budget):

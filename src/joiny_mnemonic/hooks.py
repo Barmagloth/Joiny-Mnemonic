@@ -35,6 +35,7 @@ def _stage(name: str):
 from .adapters import adapter_capabilities
 from .context_limits import ContextLimitConfig
 from .paths import resolve_project_database
+from .failure_quality import is_low_information_failure
 from .reducers import first_failure_line
 from .service import MemoryService
 
@@ -208,7 +209,6 @@ def _tool_files(value: dict[str, Any]) -> tuple[str, ...]:
                 add(container[key])
     return tuple(found)
 
-
 def _first_nonempty_line(value: Any) -> str | None:
     text = _json_text(value) if not isinstance(value, str) else value
     for raw in text.replace("\r\n", "\n").replace("\r", "\n").splitlines():
@@ -267,6 +267,7 @@ def _derive_native_failure(
         or _first_nonempty_line(output.content)
     )
     content = f"{tool_name} failed" + (f": {detail}" if detail else "")
+    if is_low_information_failure(content): return
     files = tuple(dict.fromkeys((*_tool_files(value), *(path for event in pair for path in event.files))))
     for record in service.store.list_memories(
         branch_id=pair[0].branch_id, include_superseded=True
@@ -282,9 +283,8 @@ def _derive_native_failure(
         content=content,
         source_event_ids=source_ids,
         files=files,
-        branch_id=pair[0].branch_id,
+        branch_id=pair[0].branch_id, metadata={"origin": "auto", "authority_level": "auto"},
     )
-
 
 def _hook_events(value: dict[str, Any]) -> list[dict[str, Any]]:
     name = _event_name(value)
@@ -1291,9 +1291,9 @@ def install_hooks(
             path, command, lifecycle_events, nested=True
         )
         notes = (
-            "User-level Codex hooks load independently of project trust and resolve each project at runtime.",
+            "User-level Codex hooks load independently of project trust; Codex skips new or changed commands until the user reviews and trusts them with /hooks; hooks.json alone does not prove delivery.",
         ) if global_scope else (
-            "Project-local Codex hooks run only after the project is trusted.",
+            "Project-local Codex hooks run after the project is trusted and the user reviews and trusts them in /hooks; hooks.json alone does not prove delivery.",
         )
     elif agent == "openhands":
         if global_scope:

@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ],
+        "matcher": "manual|auto"
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Python313/python.exe -m joiny_mnemonic --db R:/Projects/Joiny-Mnemonic/.joiny-mnemonic/memory.db --project-root R:/Projects/Joiny-Mnemonic hook --agent codex --branch main --budget 1500",
+            "timeout": 30
+          }
+        ],
+        "matcher": "manual|auto"
+      }
+    ]
+  }
+}

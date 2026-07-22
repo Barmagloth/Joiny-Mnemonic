@@ -1126,8 +1126,8 @@ class MemoryService:
             )
         elif installation["configured"] and not runtime_verified:
             warnings.append(
-                f"{agent} hook configuration was detected, but this database has "
-                "not observed a hook delivery yet"
+                f"{agent} hook configuration was detected, but this database has not observed a hook delivery yet" +
+                ("; Codex skips new or changed commands until the user reviews and trusts them with /hooks" if agent == "codex" else "")
             )
         if installation["configured"] and database_matches is False:
             warnings.append(

@@ -157,6 +157,7 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         context = output["hookSpecificOutput"]["additionalContext"]
         self.assertIn("[MEMORY PACKET]", context)
         self.assertIn("[DURABLE MEMORY CAPTURE]", context)
+        self.assertIn("joiny-mnemonic source <id>", context)
         self.assertIn("Fact:", context)
         self.assertIn("Unmarked prose remains searchable", context)
 
@@ -199,7 +200,7 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         legacy_plugin.write_text("export const LlmMemoryPlugin = () => {}; // -m llm_memory", encoding="utf-8")
 
         claude_install = install_hooks("claude-code", root)
-        install_hooks("codex", root)
+        codex_install = install_hooks("codex", root)
         install_hooks("openhands", root)
         install_hooks("opencode", root)
 
@@ -233,6 +234,10 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertIn("PostCompact", codex_after["hooks"])
         codex = json.loads((root / ".codex" / "hooks.json").read_text(encoding="utf-8"))
         self.assertIn("UserPromptSubmit", codex["hooks"])
+        self.assertTrue(
+            any("reviews and trusts" in note for note in codex_install.notes),
+            codex_install.notes,
+        )
         # Regression (first live run): hosts execute hook commands through a
         # POSIX shell even on Windows, where unquoted backslashes are eaten as
         # escapes and every hook died with exit 127. Installed commands must

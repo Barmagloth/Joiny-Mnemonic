@@ -23,18 +23,48 @@ class SentenceTransformerEncoder:
     def __init__(self, model_name: str) -> None:
         self.model_name = model_name
         self._model: Any = None
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _closed_hub_client(exc: RuntimeError) -> bool:
+        return "client has been closed" in str(exc).casefold()
+
+    @staticmethod
+    def _reset_hub_client() -> None:
+        from huggingface_hub import close_session
+
+        close_session()
 
     def encode(self, texts: Sequence[str]) -> Sequence[Sequence[float]]:
-        if self._model is None:
-            try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError as exc:
-                raise RuntimeError(
-                    "install joiny-mnemonic-semantic-local with sentence-transformers"
-                ) from exc
-            self._model = SentenceTransformer(self.model_name)
-        return self._model.encode(list(texts), normalize_embeddings=True)
-
+        with self._lock:
+            for attempt in range(2):
+                try:
+                    if self._model is None:
+                        try:
+                            from sentence_transformers import SentenceTransformer
+                        except ImportError as exc:
+                            raise RuntimeError(
+                                "install joiny-mnemonic-semantic-local with "
+                                "sentence-transformers"
+                            ) from exc
+                        try:
+                            self._model = SentenceTransformer(
+                                self.model_name, local_files_only=True
+                            )
+                        except OSError as cache_miss:
+                            try:
+                                self._model = SentenceTransformer(self.model_name)
+                            except Exception as online_error:
+                                raise online_error from cache_miss
+                    return self._model.encode(
+                        list(texts), normalize_embeddings=True
+                    )
+                except RuntimeError as exc:
+                    if attempt or not self._closed_hub_client(exc):
+                        raise
+                    self._model = None
+                    self._reset_hub_client()
+        raise AssertionError("semantic encoder retry loop exhausted")
 
 def _fingerprint(*values: str) -> str:
     digest = hashlib.sha256()

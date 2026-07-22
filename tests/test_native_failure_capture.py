@@ -63,7 +63,49 @@ class NativeFailureCaptureTest(unittest.TestCase):
         self.assertEqual(failures[0].content, "Write failed: Permission denied")
         self.assertEqual(failures[0].source_event_ids, tuple(event.id for event in pair))
         self.assertEqual(failures[0].files, pair[0].files)
+        self.assertEqual(failures[0].metadata["origin"], "auto")
+        self.assertEqual(failures[0].metadata["authority_level"], "auto")
         self.assertEqual(self.service.store.get_active_blocks(), {})
+
+    def test_exit_code_only_failure_stays_canonical_but_not_durable(self) -> None:
+        process_hook(
+            self.service,
+            "claude-code",
+            {
+                "hook_event_name": "PostToolUseFailure",
+                "session_id": "native-low-information",
+                "tool_use_id": "call-low-information",
+                "tool_name": "PowerShell",
+                "tool_input": {"command": "rg missing"},
+                "tool_response": "Exit code 1",
+            },
+        )
+        pair = self.service.store.query_events(kinds=("tool_call", "tool_output"))
+        self.assertEqual(len(pair), 2)
+        self.assertEqual(pair[-1].content, "Exit code 1")
+        self.assertEqual(self.service.store.list_memories(memory_types=("failure",)), [])
+
+        legacy = self.service.derive_memory(
+            memory_type="failure",
+            content="PowerShell failed: Exit code 1",
+            source_event_ids=tuple(event.id for event in pair),
+        )
+        hits = self.service.search(
+            query="PowerShell failed Exit code 1",
+            include_events=False,
+            semantic=False,
+        )
+        self.assertNotIn(legacy.id, {hit.id for hit in hits})
+        self.assertEqual(
+            tuple(event.id for event in self.service.exact_source(legacy.id)),
+            tuple(event.id for event in pair),
+        )
+        packet = self.service.prompts.assemble(
+            token_budget=1500,
+            recent_event_count=0,
+            retrieval_limit=0,
+        )
+        self.assertNotIn("derived failure: PowerShell failed: Exit code 1", packet.text)
 
     def test_reducer_line_then_first_output_then_generic_fallback(self) -> None:
         cases = (

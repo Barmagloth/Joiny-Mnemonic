@@ -222,6 +222,145 @@ events; корпус начнёт наполняться следующими д
 
 ## Следующий шаг
 
-Dogfood публичного Workstream lifecycle и observation-only сбор финальных
-тегов готовы. Продолжать собирать реальные `Stop`-события обоих хостов; этапы
+Dogfood публичного Workstream lifecycle готов. Observation-only observer и грамматика
+финальных тегов готовы, но автоматическая доставка Codex `Stop`-событий ещё не
+подтверждена живым событием; этапы
 2–6, материализация финализаций и выбор экстрактора не начинались.
+
+## Поправка dogfood-проверки 2026-07-22
+
+Предыдущее утверждение о включённом автоматическом Codex-capture было неверным.
+Исполняемые проверки установили:
+
+- исходная строка Codex `[FACT] CONFIRMED: ... 0eebcfe` отсутствует среди
+  assistant `Stop`-событий. Позднее Claude Code tool-output события внесли
+  буквальные упоминания `0eebcfe`; это отдельные источники, не тот Codex-факт;
+- observation-only observer видит **0** assistant `Stop`-событий Codex;
+- до настройки отсутствовал `.codex/hooks.json`; после установки проектной
+  конфигурации capability показывает `hooks_configured: true`, но одновременно
+  `event_ingestion: false` и `hook_runtime_verified: false`;
+- следовательно, наличие конфигурационного файла не считается доказательством
+  доставки. Нужен следующий реально доставленный host event.
+- текущий observer-срез после этой диагностики видит **2** настоящих
+  `claude-code` assistant `Stop`-события и **7** валидных тегов; Codex
+  `Stop`-событий всё ещё **0**. Это подтверждает Claude Code delivery, но не Codex.
+
+Поиск по `0eebcfe` выявил независимый дефект: semantic arm возвращал ближайшие
+элементы даже при отсутствии точного идентификатора, а cross-encoder только
+переставлял их. Сырые rerank-score около `-11` подтверждали нерелевантность,
+но модельно-зависимый порог не был частью контракта. Исправление
+детерминированное: git-хэши и `evt_`/`mem_`/`op_`/`task_` идентификаторы в
+запросе теперь являются точными лексическими ограничениями. Кандидат без
+идентификатора отбрасывается.
+
+Проверки:
+
+- `python -m unittest tests.test_retrieval_fusion -v` — **11/11 passed**;
+- реальный `search "0eebcfe" --limit 10` на проектной БД — пустая выдача;
+- регрессионный тест доказывает обе стороны: отсутствующий ID → `[]`, событие
+  с ID → возвращается ровно это событие;
+- полный suite в Windows restricted-token sandbox: инфраструктурный сбой
+  `%TEMP%` (`PermissionError`), не дефект продукта;
+- повторный полный suite вне sandbox: **304/304 passed**, **350.105 s**;
+- contract gate: **PASS**;
+- complexity gate: **PASS**;
+- `git diff --check` — ошибок нет.
+
+Дэшборд перезапущен на `http://127.0.0.1:8766/` с исправленным retrieval-кодом.
+## Codex hook trust audit 2026-07-22
+
+После первого ответа с установленным `.codex/hooks.json` живой Codex `Stop`
+снова не появился. Проверка свежего официального Codex manual и локального
+Codex CLI `0.144.3` установила недостающую границу:
+
+- lifecycle hooks — stable feature текущего Codex;
+- новые или изменённые command hooks не запускаются до пользовательского
+  review/trust точного определения;
+- проектный hook дополнительно требует trusted project layer;
+- интерактивный `/hooks` показал: **6 installed, 0 active, 6 review**;
+- review ожидают `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`,
+  `PreCompact`, `PostCompact`;
+- автоматический `--dangerously-bypass-hook-trust` не использовался и trust за
+  пользователя не подтверждался.
+
+Диагностика продукта усилена: `install-hooks codex` теперь прямо сообщает, что
+`hooks.json` доказывает только конфигурацию и требует `/hooks` review/trust;
+`capabilities --agent codex` выдаёт тот же actionable warning, пока реальной
+доставки нет. Focused-набор текущего дерева: **38/38 passed**; полный suite
+вне Windows restricted-token sandbox: **304/304 passed**, **349.806 s**;
+contract gate и frozen complexity gate: **PASS**.
+
+Следующий обязательный acceptance-шаг требует явного пользовательского trust
+этих шести hook definitions, затем нового Codex turn и проверки появления
+assistant `Stop` в observation-only observer. До этого Codex dogfood не считается
+подтверждённым.
+## Codex dogfood подтверждён 2026-07-22
+
+Пользователь явно разрешил доверять ровно шести command hooks из
+`.codex/hooks.json`: `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `Stop`,
+`PreCompact`, `PostCompact`. В интерактивном Codex review выбрано
+`Trust all and continue`; автоматический `--dangerously-bypass-hook-trust` не
+использовался. Живой интерфейс после review выполнил `SessionStart` и
+`UserPromptSubmit`, что подтвердило применение trust.
+
+Затем настоящий `codex exec` выполнил отдельный read-only turn и вернул ровно:
+
+`[FACT] CONFIRMED: CODEX_HOOK_DOGFOOD_20260722_A captured a trusted Codex Stop event.`
+
+Codex CLI сообщил успешное выполнение `SessionStart`, `UserPromptSubmit` и
+`Stop`. Сохранённый Stop имеет следующие доказуемые атрибуты:
+
+- event: `evt_fc1f0db11e564d8fa31cd9d192a0cfec`, seq `151`;
+- `kind=message`, `role=assistant`;
+- `origin_channel=host_hook`, `origin_adapter=codex`;
+- сохранённый source payload содержит `hook_event_name=Stop` и исходный
+  `last_assistant_message` с уникальным маркером;
+- session: `019f8730-8876-72c1-9f63-738e8d0343f0`.
+
+Исполняемые проверки после turn:
+
+- `python scripts/finalization_observe.py --db .joiny-mnemonic/memory.db`:
+  Codex — **1 Stop event, 1 event with valid tags, 1 valid tag**;
+- тот же observer вернул `observation_only: true` и `materialized: false`;
+- прямой запрос `memory_records` не нашёл ни provenance-ссылки на этот event,
+  ни materialized-копии уникального маркера;
+- `python -m joiny_mnemonic --db .joiny-mnemonic/memory.db --project-root . capabilities --agent codex`:
+  `event_ingestion=true`, `hook_runtime_verified=true`,
+  `hook_database_matches=true`, warnings отсутствуют;
+- точный лексический поиск `CODEX_HOOK_DOGFOOD_20260722_A` вернул только две
+  строки, где маркер действительно присутствует: входной `UserPromptSubmit`
+  и выходной assistant `Stop`; нерелевантных semantic-кандидатов нет.
+
+Итог: Codex command-hook capture и observation-only сбор финальных тегов готовы
+к dogfood. Этапы 2–6, extractor и материализация финализаций не начинались.
+
+### Финальная перепроверка после живого Codex turn
+
+После runtime-проверки код продукта не изменялся. Повторно выполнены:
+
+- `python scripts/stage1_gates.py all` — **PASS**;
+- focused-набор `test_consolidation_and_hooks`, `test_dataflow`,
+  `test_integrations`, `test_plugins_and_integrity`,
+  `test_retrieval_fusion` — **49/49 passed**, **87.716 s**;
+- `git diff --check` — ошибок нет, только предупреждения Git о будущей
+  нормализации LF/CRLF.
+
+Последний полный suite на том же коде продукта: **304/304 passed**,
+**349.806 s**. После него менялись только данный отчёт и локальное runtime
+trust-состояние Codex.
+
+## Исправление текущих residual risks 2026-07-22
+
+Закрыты два текущих dogfood-дефекта из `stage1-audit-residual-risks.md` без
+перехода к этапам 2–6:
+
+- Historical Index packet содержит budget-aware подсказку
+  `joiny-mnemonic source <id>`;
+- generic `Exit code N` больше не становится durable failure-memory;
+  содержательные автоматические failures имеют `auto` authority;
+- существующие append-only generic failure-записи сохранены, но исключены из
+  retrieval и Historical Index.
+
+Реальная БД возвращает `[]` для generic failure-поиска без events/semantic.
+Focused tests: **26/26**. Полный suite: **305/305**, **343.244 s**.
+Contract и frozen complexity gates: **PASS**; baseline не пересчитывался.

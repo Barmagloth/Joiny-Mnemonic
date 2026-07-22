@@ -109,6 +109,16 @@ class DataflowTest(unittest.TestCase):
         )
         self.assertIn("Автообновление", response.text)
         self.assertIn("Решение маршрутизации (почему)", response.text)
+        self.assertIn(
+            'function showEmpty(message="В этой ветке операций пока нет.")',
+            response.text,
+        )
+        self.assertIn('if(!state.selected){showEmpty();return;}', response.text)
+        self.assertIn('return "начало";', response.text)
+        self.assertIn('button.setAttribute("aria-label"', response.text)
+        self.assertNotIn(
+            'button.setAttribute("role","listitem")', response.text
+        )
 
         rejected = client.post(
             "/v1/events",

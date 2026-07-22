@@ -20,7 +20,7 @@
   <main>
     <aside aria-label="Операции">
       <div class="section-head"><h2>Операции</h2><span id="operation-count"></span></div>
-      <div id="operations" role="list"></div>
+      <div id="operations"></div>
     </aside>
     <section class="detail" aria-live="polite">
       <div id="empty">Запустите операцию или выберите её в списке.</div>
@@ -87,6 +87,14 @@
   function displayTime(value) { const date=new Date(value); return Number.isNaN(date.valueOf())?value:date.toLocaleTimeString(); }
   function operationName(value) { return operationNames[value]||value; }
   function stageName(value) { return stageNames[value]||value; }
+  function showEmpty(message="В этой ветке операций пока нет.") {
+    state.selected=null; state.currentOperation=null;
+    $("empty").textContent=message; $("empty").hidden=false; $("selected").hidden=true;
+  }
+  function entryStatus(entry,index,operationStatus) {
+    if(index===0&&entry.stage==="operation"&&entry.status==="started"&&operationStatus!=="started")return "начало";
+    return statusNames[entry.status]||entry.status;
+  }
   function countOf(value,key) { const item=value&&value[key]; return Array.isArray(item)?item.length:(item&&typeof item==="object"?Object.keys(item).length:0); }
   function why(entry,index,total) {
     const d=entry.decision||{}, o=entry.output||{};
@@ -118,7 +126,7 @@
   function renderOperations() {
     const list=$("operations"); list.replaceChildren(); $("operation-count").textContent=state.operations.length;
     for(const op of state.operations) {
-      const button=el("button",`op ${op.operation_id===state.selected?"selected":""}`); button.type="button"; button.setAttribute("role","listitem"); button.addEventListener("click",()=>selectOperation(op.operation_id));
+      const button=el("button",`op ${op.operation_id===state.selected?"selected":""}`); button.type="button"; button.setAttribute("aria-label",`${operationName(op.operation_name)} · ${statusNames[op.status]||op.status}`); button.addEventListener("click",()=>selectOperation(op.operation_id));
       button.append(el("span","op-name",operationName(op.operation_name)),el("span",`badge ${op.status}`,statusNames[op.status]||op.status),el("span","op-source",`${op.source} / ветка ${op.branch_id}`),el("span","op-time",displayTime(op.started_at)),el("span","op-id",`этапов: ${op.entry_count} \u00b7 ${op.operation_id.slice(0,15)}\u2026`)); list.append(button);
     }
   }
@@ -135,8 +143,8 @@
     const steps=$("steps"); steps.replaceChildren();
     for(const [index,entry] of op.entries.entries()) {
       const item=el("li",`step ${entry.status}`); item.append(el("span","dot")); const details=document.createElement("details"); const summary=document.createElement("summary");
-      details.dataset.entryId=entry.id; details.open=openEntries.has(entry.id); const stage=el("span","stage"); stage.append(el("strong","",`${index+1}. ${stageName(entry.stage)}`),el("code","",entry.stage),el("span","why",why(entry,index,op.entries.length))); summary.append(stage,el("span","duration",entry.duration_ms==null?(statusNames[entry.status]||entry.status):`${entry.duration_ms.toFixed(3)} мс`),el("span","seq",`журнал #${entry.seq}`)); details.append(summary);
-      const values=el("div","values"); addValue(values,"Получено этим этапом",entry.input); addValue(values,"Создано / передано дальше",entry.output); addValue(values,"Решение маршрутизации (почему)",entry.decision); addValue(values,"Связанные записи (ID)",entry.refs); addValue(values,"Ошибка",entry.error); details.append(values); item.append(details); if(index<op.entries.length-1)item.append(el("div","handoff",`\u2193 Завершение разрешило этап ${index+2}: ${stageName(op.entries[index+1].stage)}`)); steps.append(item);
+      details.dataset.entryId=entry.id; details.open=openEntries.has(entry.id); const stage=el("span","stage"); stage.append(el("strong","",`${index+1}. ${stageName(entry.stage)}`),el("code","",entry.stage),el("span","why",why(entry,index,op.entries.length))); summary.append(stage,el("span","duration",entry.duration_ms==null?entryStatus(entry,index,op.status):`${entry.duration_ms.toFixed(3)} мс`),el("span","seq",`журнал #${entry.seq}`)); details.append(summary);
+      const values=el("div","values"); addValue(values,"Получено этим этапом",entry.input); addValue(values,"Создано / передано дальше",entry.output); addValue(values,"Решение маршрутизации (почему)",entry.decision); addValue(values,"Связанные записи (ID)",entry.refs); addValue(values,"Ошибка",entry.error); details.append(values); item.append(details); if(index<op.entries.length-1){const transition=index===0&&entry.stage==="operation"?"Старт операции разрешил":"Завершение разрешило"; item.append(el("div","handoff",`\u2193 ${transition} этап ${index+2}: ${stageName(op.entries[index+1].stage)}`));} steps.append(item);
     }
   }
   async function selectOperation(id) { state.selected=id; renderOperations(); try { renderOperation(await request(`/v1/dataflow/operations/${encodeURIComponent(id)}`)); } catch(error) { $("action-result").textContent=error.message; } }
@@ -145,7 +153,7 @@
     try {
       const [status,operations]=await Promise.all([request("/v1/dataflow/status"),request(`/v1/dataflow/operations${suffix}`)]); state.operations=operations;
       $("status").textContent=`${status.database} \u00b7 регистратор: ${status.recorder_errors.length?"есть ошибки":"исправен"} \u00b7 внешних приёмников: ${status.external_sinks}`; renderOperations();
-      if(!state.selected&&operations.length)state.selected=operations[0].operation_id; const selectedSummary=operations.find(item=>item.operation_id===state.selected); const unchanged=state.currentOperation&&selectedSummary&&state.currentOperation.last_seq===selectedSummary.last_seq; if(state.selected&&(!unchanged||force))await selectOperation(state.selected);
+      const selectedSummary=operations.find(item=>item.operation_id===state.selected); if(!selectedSummary)state.selected=operations.length?operations[0].operation_id:null; if(!state.selected){showEmpty();return;} const nextSummary=operations.find(item=>item.operation_id===state.selected); const unchanged=state.currentOperation&&nextSummary&&state.currentOperation.last_seq===nextSummary.last_seq; if(!unchanged||force)await selectOperation(state.selected);
     } catch(error) { $("status").textContent=`Нет подключения \u00b7 ${error.message}`; }
   }
   async function run(path,body) {
@@ -156,7 +164,7 @@
   $("append").addEventListener("click",()=>run("/v1/events",{kind:"message",role:"user",content:$("payload").value,branch_id:$("branch").value.trim()||"main",payload:{},files:[]}));
   $("search").addEventListener("click",()=>run("/v1/search",{query:$("payload").value,branch_id:$("branch").value.trim()||"main",limit:10,exact:false,include_events:true,semantic:true}));
   $("resume").addEventListener("click",()=>run("/v1/resume",{query:$("payload").value,branch_id:$("branch").value.trim()||"main",token_budget:1500}));
-  $("refresh").addEventListener("click",()=>refresh(true)); $("branch").addEventListener("change",()=>{state.selected=null;state.currentOperation=null;refresh(true);});
+  $("refresh").addEventListener("click",()=>refresh(true)); $("branch").addEventListener("change",()=>{showEmpty("Загрузка операций ветки\u2026");refresh(true);});
   $("live").addEventListener("change",event=>{clearInterval(state.timer);state.timer=event.target.checked?setInterval(refresh,1500):null;});
   state.timer=setInterval(refresh,1500); refresh();
 })();

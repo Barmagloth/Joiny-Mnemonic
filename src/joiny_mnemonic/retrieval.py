@@ -9,14 +9,30 @@ from typing import Any, Sequence
 from . import temporal
 from .models import Event, MemoryRecord, RetrievalHit
 from .plugins import PluginRegistry
+from .failure_quality import is_low_information_failure
 from .storage import MemoryStore
 
 
 WORD = re.compile(r"[\w./:-]+", re.UNICODE)
+EXACT_IDENTIFIER = re.compile(
+    r"(?<![0-9A-Za-z_])(?:[0-9a-fA-F]{7,64}|(?:evt|mem|op|task)_[0-9A-Za-z]+)(?![0-9A-Za-z_])"
+)
 
 
 def lexical_terms(value: str) -> set[str]:
     return {item.casefold() for item in WORD.findall(value) if len(item) > 1}
+
+
+def exact_identifiers(value: str) -> tuple[str, ...]:
+    """Opaque ids are lexical constraints, never semantic suggestions."""
+    return tuple(dict.fromkeys(match.casefold() for match in EXACT_IDENTIFIER.findall(value)))
+
+
+def _hit_contains_identifiers(hit: RetrievalHit, identifiers: tuple[str, ...]) -> bool:
+    searchable = "\n".join(
+        (hit.id, hit.content, *hit.source_event_ids, *hit.files)
+    ).casefold()
+    return all(identifier in searchable for identifier in identifiers)
 
 
 def _lexical_relevance(query: str, content: str) -> float:
@@ -580,7 +596,16 @@ class RetrievalEngine:
             key = (hit.source_kind, hit.id)
             if key not in deduplicated or hit.score > deduplicated[key].score:
                 deduplicated[key] = hit
-        selected = list(deduplicated.values())
+        selected = [
+            hit for hit in deduplicated.values()
+            if not is_low_information_failure(hit.content)
+        ]
+        identifiers = exact_identifiers(context.query)
+        if identifiers:
+            selected = [
+                hit for hit in selected
+                if _hit_contains_identifiers(hit, identifiers)
+            ]
         if context.temporal_active:
             selected = self._apply_temporal_controls(selected, context)
         ordered = sorted(
@@ -785,6 +810,7 @@ class RetrievalEngine:
             and (not context.file or context.file in record.files)
             and (not context.since or record.created_at >= context.since)
             and (not context.until or record.created_at <= context.until)
+            and not is_low_information_failure(record.content)
         ]
         hits = [self._memory_hit(record, context) for record in selected]
         if context.query:
