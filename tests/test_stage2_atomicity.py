@@ -454,10 +454,26 @@ class Stage2AtomicityTest(unittest.TestCase):
         pending = self.service.projection_failures.pending()
         self.assertEqual(len(pending), 2)
         self.assertTrue(all(item["retryable"] for item in pending))
+        first_keys = {item["failure_key"] for item in pending}
+        self.service.projection_failures.project_memory(record)
+        self.assertEqual(
+            {item["failure_key"] for item in self.service.projection_failures.pending()},
+            first_keys,
+        )
         plugin.failing = False
         result = self.service.projection_failures.retry()
         self.assertEqual(result, {"pending": 2, "recovered": 2, "failed": 0})
         self.assertEqual(self.service.projection_failures.pending(), ())
+        plugin.failing = True
+        self.service.projection_failures.project_memory(record)
+        second_keys = {
+            item["failure_key"] for item in self.service.projection_failures.pending()
+        }
+        self.assertEqual(len(second_keys), 2)
+        self.assertTrue(first_keys.isdisjoint(second_keys))
+        self.assertEqual(
+            len(self.store.events_by_operation("derived_projection_failed")), 4
+        )
 
     def test_settlement_changes_workstream_obligations(self) -> None:
         task = self.service.tasks.start("settled-obligation", "Settled obligation")

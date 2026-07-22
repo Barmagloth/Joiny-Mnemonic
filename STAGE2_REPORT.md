@@ -73,3 +73,12 @@
 из сохранённого source event, а exact-ID abstention не должен принимать дату
 или hex-похожее обычное слово за opaque ID. Их обязательные регрессии уже
 закреплены в `ROADMAP.md` до начала зачётного dogfood-периода.
+
+## Post-acceptance hardening
+
+Повторный отказ той же derived-системы по той же immutable-цели после
+успешного recovery теперь открывает новое поколение failure receipt. Повторная
+доставка, пока текущее поколение остаётся pending, по-прежнему дедуплицируется.
+Регрессия failure → duplicate failure → recovery → failure закреплена в
+`test_jm_inv_008_projection_failure_is_durable_and_retryable`.
+Полный suite после hardening: 317/317, PASS за 326.612 с.

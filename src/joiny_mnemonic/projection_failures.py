@@ -21,6 +21,27 @@ class ProjectionFailureManager:
     def _key(system: str, target_kind: str, target_id: str) -> str:
         return f"{system}:{target_kind}:{target_id}"
 
+    def _episode_key(self, base_key: str, branch_id: str) -> str:
+        failure_keys = [
+            str(event.payload.get("failure_key"))
+            for event in self.store.events_by_operation(
+                _FAILURE_OPERATION, branch_id=branch_id
+            )
+            if str(event.payload.get("failure_key")) == base_key
+            or str(event.payload.get("failure_key")).startswith(f"{base_key}#")
+        ]
+        recovered = {
+            str(event.payload.get("failure_key"))
+            for event in self.store.events_by_operation(
+                _RECOVERY_OPERATION, branch_id=branch_id
+            )
+        }
+        pending = [key for key in failure_keys if key not in recovered]
+        if pending:
+            return pending[-1]
+        generations = len(tuple(dict.fromkeys(failure_keys)))
+        return base_key if generations == 0 else f"{base_key}#{generations + 1}"
+
     def record(
         self,
         *,
@@ -30,7 +51,9 @@ class ProjectionFailureManager:
         branch_id: str,
         error: Exception | str,
     ) -> None:
-        key = self._key(system, target_kind, target_id)
+        key = self._episode_key(
+            self._key(system, target_kind, target_id), branch_id
+        )
         error_type = type(error).__name__ if isinstance(error, Exception) else "Error"
         error_text = str(error)
         self.store.append_internal_events_once(
