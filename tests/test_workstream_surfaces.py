@@ -168,6 +168,80 @@ class WorkstreamSurfaceTest(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_obligation_override_is_reachable_on_all_status_surfaces(self) -> None:
+        database = RUNTIME_ROOT / f"workstream-override-{uuid.uuid4().hex}.db"
+        self.addCleanup(lambda: database.unlink(missing_ok=True))
+        with MemoryService(database, project_root=RUNTIME_ROOT) as service:
+            task = service.tasks.start("CLI-OVERRIDE", "CLI override")
+            source = self._host_user(service, task.task_key, "keep CLI obligation")
+            service.store.set_active_block(
+                "open_tasks", "- CLI obligation",
+                branch_id=task.branch_id, source_event_ids=(source.id,),
+            )
+            obligation_id = service.tasks.obligations(task.task_key)[0]["id"]
+        completed = self._run_cli(
+            database,
+            "task-status", "CLI-OVERRIDE", "completed",
+            "--override-obligation", obligation_id,
+            "--override-reason", "accepted by operator",
+        )
+        self.assertEqual(completed["status"], "completed")
+
+        with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
+            task = service.tasks.start("MCP-OVERRIDE", "MCP override")
+            source = self._host_user(service, task.task_key, "keep MCP obligation")
+            service.store.set_active_block(
+                "open_tasks", "- MCP obligation",
+                branch_id=task.branch_id, source_event_ids=(source.id,),
+            )
+            obligation_id = service.tasks.obligations(task.task_key)[0]["id"]
+            evidence = self._host_user(service, task.task_key, "complete MCP")
+            completed = MCPServer(service)._call_tool(
+                "memory_task_status",
+                {
+                    "task_key": task.task_key,
+                    "status": "completed",
+                    "source_event_id": evidence.id,
+                    "override_obligations": [obligation_id],
+                    "override_reason": "accepted over MCP",
+                },
+            )
+            self.assertEqual(completed.status, "completed")
+
+        with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
+            task = service.tasks.start("HTTP-OVERRIDE", "HTTP override")
+            source = self._host_user(service, task.task_key, "keep HTTP obligation")
+            service.store.set_active_block(
+                "open_tasks", "- HTTP obligation",
+                branch_id=task.branch_id, source_event_ids=(source.id,),
+            )
+            obligation_id = service.tasks.obligations(task.task_key)[0]["id"]
+            evidence = self._host_user(service, task.task_key, "complete HTTP")
+            server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{server.server_port}/v1/tasks/"
+                    f"{task.task_key}/status",
+                    data=json.dumps({
+                        "status": "completed",
+                        "source_event_id": evidence.id,
+                        "override_obligations": [obligation_id],
+                        "override_reason": "accepted over HTTP",
+                    }).encode(),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    completed = json.load(response)
+                self.assertEqual(completed["status"], "completed")
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
+
 
 if __name__ == "__main__":
     unittest.main()

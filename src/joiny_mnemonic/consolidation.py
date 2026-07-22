@@ -187,12 +187,17 @@ class EvidenceConsolidator:
                 )
                 if matched is not None:
                     candidate_id, memory_id = matched
-                    service.store.confirm_candidate_match(
+                    materialized = memory_id is None
+                    memory_id = service.store.confirm_candidate_match(
                         candidate_id,
                         memory_id,
                         source_event_id=event.id,
                     )
                     record = service.store.get_memory(memory_id)
+                    if materialized:
+                        service.store.after_commit(
+                            lambda record=record: service.projection_failures.project_memory(record)
+                        )
             record = record or next(
                 (
                     item for item in existing_records

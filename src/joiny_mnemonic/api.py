@@ -261,6 +261,8 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         session_id=body.get("session_id"),
                         metadata=body.get("metadata"),
                         source_event_id=body.get("source_event_id"),
+                        override_obligations=body.get("override_obligations"),
+                        override_reason=body.get("override_reason", ""),
                     )
                 elif path.startswith("/v1/tasks/") and path.endswith("/reopen"):
                     task_key = path.split("/")[-2]

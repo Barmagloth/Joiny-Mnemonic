@@ -14,6 +14,16 @@ def integrity_checked(method: Any) -> Any:
 
     return wrapped
 
+
+def atomic_write(method: Any) -> Any:
+    @functools.wraps(method)
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 

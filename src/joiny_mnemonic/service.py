@@ -22,6 +22,7 @@ from .plugins import PluginContext, PluginRegistry
 from .paths import resolve_project_database
 from .precheck import PrecheckReport, PrecheckService
 from .prompt import PromptAssembler
+from .projection_failures import ProjectionFailureManager
 from .reducers import ReductionBundle, ToolOutputReducer, materialize_view
 from .retrieval import RetrievalContext, RetrievalEngine
 from . import temporal
@@ -141,6 +142,7 @@ class MemoryService:
         self.reconciler = StateReconciler(self)
         self.settlement = SettlementSurface(self)
         self.plugin_errors = self.plugins.errors
+        self.projection_failures = ProjectionFailureManager(self)
 
     def _sync_extraction_policy(self) -> bool:
         active = self.store.active_policy()
@@ -386,7 +388,9 @@ class MemoryService:
                 output_value={"accepted_fields": sorted(values)},
                 decision={"ignored_untrusted_fields": sorted(ignored)},
             )
-            event = self.store.append_event(**values)
+            with self.store._transaction():
+                event = self.store.append_event(**values)
+                consolidation = self.consolidator.consolidate_event(self, event)
             flow.step(
                 "security.redaction", input_value={
                     "content_bytes": len(str(values.get("content", "")).encode("utf-8")),
@@ -404,7 +408,6 @@ class MemoryService:
                 refs={"event_id": event.id, "seq": event.seq, "chain_hash": event.chain_hash},
                 decision={"committed": True, "journal_mode": self.store.journal_mode},
             )
-            consolidation = self.consolidator.consolidate_event(self, event)
             flow.step(
                 "consolidation", input_value={"event_id": event.id},
                 output_value=consolidation,
@@ -414,9 +417,8 @@ class MemoryService:
                     "block_ids": consolidation.block_ids,
                 },
             )
-            self.extraction.notify()
-            flow.step("extraction.wakeup", decision={"notified": True})
-            witness = self.checkpoint_witness()
+            notified, witness = self.projection_failures.maintain_event(event)
+            flow.step("extraction.wakeup", decision={"notified": notified})
             flow.step("integrity.witness", output_value=witness)
             flow.complete(output_value=event, refs={"event_id": event.id})
             return event
@@ -537,16 +539,7 @@ class MemoryService:
     def derive_memory(self, **values: Any) -> MemoryRecord:
         values.setdefault("metadata", {"origin": "explicit", "authority_level": "confirmed"})
         record = self.store.derive_memory(**values)
-        for plugin in self.plugins.semantic.values():
-            try:
-                plugin.index(record)
-            except Exception as exc:
-                self.plugin_errors.append(f"semantic:{plugin.name}: {exc}")
-        for plugin in self.plugins.knowledge_graph.values():
-            try:
-                plugin.project(record)
-            except Exception as exc:
-                self.plugin_errors.append(f"knowledge_graph:{plugin.name}: {exc}")
+        self.store.after_commit(lambda: self.projection_failures.project_memory(record))
         return record
 
     def search(self, **values: Any) -> list[RetrievalHit]:

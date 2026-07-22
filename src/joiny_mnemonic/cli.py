@@ -440,9 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     usage = commands.add_parser("usage")
     usage.add_argument("--branch", default="main")
     usage.add_argument("--session")
-
     commands.add_parser("context-profiles")
-
     budget_policy = commands.add_parser("budget-policy")
     budget_policy.add_argument("--branch", default="main")
     budget_policy.add_argument("--agent")
@@ -455,25 +453,24 @@ def build_parser() -> argparse.ArgumentParser:
     budget_policy.add_argument("--handoff-ratio", type=float)
     budget_policy.add_argument("--hard-limit-ratio", type=float)
     budget_policy.add_argument("--min-action-events", type=int)
-
     governor = commands.add_parser("governor")
     governor.add_argument("--branch", default="main")
     governor.add_argument("--session")
     governor.add_argument("--agent")
     governor.add_argument("--apply", action="store_true")
-
     task_start = commands.add_parser("task-start")
     task_start.add_argument("key")
     task_start.add_argument("title")
     task_start.add_argument("--parent-branch", default="main")
     task_start.add_argument("--parent-task")
     task_start.add_argument("--session")
-
     task_status = commands.add_parser("task-status")
     task_status.add_argument("key")
     task_status.add_argument("status", choices=["active", "blocked", "completed", "cancelled"])
     task_status.add_argument("--note", default="")
     task_status.add_argument("--session")
+    task_status.add_argument("--override-obligation", action="append", default=[])
+    task_status.add_argument("--override-reason", default="")
     task_reopen = commands.add_parser("task-reopen")
     task_reopen.add_argument("key")
     task_reopen.add_argument("--reason", required=True)
@@ -879,7 +876,10 @@ def run(args: argparse.Namespace) -> int:
             ))
         elif args.command == "task-status":
             _print(service.tasks.set_status_as_operator(
-                args.key, args.status, note=args.note, session_id=args.session))
+                args.key, args.status, note=args.note, session_id=args.session,
+                override_obligations=args.override_obligation,
+                override_reason=args.override_reason,
+            ))
         elif args.command == "task-reopen":
             _print(service.tasks.reopen_as_operator(
                 args.key, reason=args.reason, session_id=args.session))

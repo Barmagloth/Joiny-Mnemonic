@@ -349,10 +349,10 @@ Codex CLI сообщил успешное выполнение `SessionStart`, `
 **349.806 s**. После него менялись только данный отчёт и локальное runtime
 trust-состояние Codex.
 
-## Исправление текущих residual risks 2026-07-22
+## Коррекция статуса residual risks 2026-07-22
 
-Закрыты два текущих dogfood-дефекта из `stage1-audit-residual-risks.md` без
-перехода к этапам 2–6:
+Без перехода к этапам 2–6 полностью закрыты recall-подсказка и шум
+derived-failure:
 
 - Historical Index packet содержит budget-aware подсказку
   `joiny-mnemonic source <id>`;
@@ -364,3 +364,14 @@ trust-состояние Codex.
 Реальная БД возвращает `[]` для generic failure-поиска без events/semantic.
 Focused tests: **26/26**. Полный suite: **305/305**, **343.244 s**.
 Contract и frozen complexity gates: **PASS**; baseline не пересчитывался.
+
+Оставшаяся половина первого dogfood-chip не закрыта: `storage.derive_memory`
+по-прежнему создаёт derived event без `session_id` и `origin_adapter`. Эти поля
+должны браться из сохранённого source event и не могут приниматься как
+доказательство provenance/trust от вызывающего кода.
+
+Отдельно зафиксирован острый край retrieval: текущий `EXACT_IDENTIFIER`
+считает opaque ID любые 7+ hex-символов, поэтому даты вроде `20260717` и
+hex-похожие слова могут включить fail-closed abstention и обнулить иначе
+релевантную выдачу. Новых регрессий в проверенном suite не обнаружено, но оба
+открытых пункта теперь являются обязательными dogfood-регрессиями Roadmap 8.0.

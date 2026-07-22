@@ -38,6 +38,7 @@ from .paths import resolve_project_database
 from .failure_quality import is_low_information_failure
 from .reducers import first_failure_line
 from .service import MemoryService
+from .transactions import atomic_service_write
 
 
 def _json_text(value: Any) -> str:
@@ -338,6 +339,7 @@ def _context_output(agent: str, event_name: str, context: str) -> dict[str, Any]
     return {"additionalContext": context}
 
 
+@atomic_service_write
 def process_hook(
     service: MemoryService,
     agent: str,
@@ -491,8 +493,7 @@ def process_hook(
         reconcile_summary = service.reconciler.reconcile(branch_id=branch_id)
     flow.step("hook.reconcile", output_value=reconcile_summary)
     with _stage("maintenance"):
-        service.extraction.notify(detached=True)
-        service.checkpoint_witness()
+        service.store.after_commit(lambda: service.projection_failures.maintain_event(events[-1], detached=True))
         decision = service.governor.evaluate_and_apply(
             branch_id=branch_id,
             session_id=session_id,
@@ -502,9 +503,8 @@ def process_hook(
     flow.step(
         "hook.maintenance",
         output_value={"governor": decision, "witness": service._witness_status},
-        decision={"extraction_notified": True},
+        decision={"derived_maintenance_scheduled": True},
     )
-
     if event_name == "PreToolUse":
         stored = events[-1].payload.get("_joiny_precheck")
         if isinstance(stored, dict):

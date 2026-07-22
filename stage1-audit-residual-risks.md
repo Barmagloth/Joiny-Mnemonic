@@ -1,6 +1,6 @@
 ---
 name: stage1-audit-residual-risks
-description: Итог аудита этапа 1 Roadmap (2026-07-22) — принят; два названных остаточных риска для этапов 3/5 и миграции
+description: Итог аудита этапа 1 Roadmap (2026-07-22) — принят; актуальный реестр остаточных dogfood-рисков
 metadata:
   node_type: memory
   type: project
@@ -25,9 +25,9 @@ Observation-only dogfood финализационных тегов запуще�
 
 2026-07-22, проверка первых реальных событий (закрыт открытый эмпирический пункт): первый настоящий Stop от Claude Code записан (seq 45, ses_b361f98f, `hook_event_name: "Stop"`), `content` НЕ пустой — полное финальное сообщение ассистента с кириллицей без искажений и с финализационными тегами verbatim. Записанное ранее утверждение «Claude Code снапшотит hooks при старте, установочная сессия не захватывается» ОПРОВЕРГНУТО: установочная сессия захватывалась с момента одобрения settings (события с 23:26:17, включая её Stop). Замеченный шум dogfood: derive_memory создаёт failure-память «Bash/PowerShell failed: Exit code 1» из любых разведочных команд с ненулевым exit (authority_level=confirmed), эти derived-события теряют session_id/origin_adapter (None) и затем ретривятся в промпты как мусор.
 
-## Статус текущих dogfood-дефектов — исправлено 2026-07-22
+## Статус текущих dogfood-дефектов — частично исправлено 2026-07-22
 
-Текущие, не отложенные к этапам 3/5 или миграции, пункты закрыты:
+Полностью закрыты recall-подсказка и качество materialized failure:
 
 - MEMORY PACKET теперь рядом с Historical Index рекламирует budget-aware путь
   `joiny-mnemonic source <id>` для verbatim-разворачивания `evt_`/`mem_`;
@@ -42,8 +42,23 @@ Observation-only dogfood финализационных тегов запуще�
   `--no-events --no-semantic` возвращает `[]`; packet содержит подсказку
   `source <id>` и не содержит generic derived-failure строк.
 
-Остаются отложенными согласно Roadmap: semantic binding trusted evidence к
-конкретному Workstream и миграционный контракт для legacy Stop без
+Открыто: `storage.derive_memory` по-прежнему пишет derived event с
+`session_id=None` и `origin_adapter=None`. Исправление обязано восстановить оба
+поля из сохранённого source event; переданное вызывающим кодом значение не
+является provenance или trust. Требуемая регрессия:
+`tests.test_native_failure_capture.NativeFailureCaptureTest.test_derived_event_inherits_saved_source_trace_context`
+(пока отсутствует).
+
+Открыт отдельный острый край retrieval: `EXACT_IDENTIFIER` принимает любые 7+
+hex-символов. Поэтому дата `20260717` и hex-похожие обычные слова могут включить
+exact-ID abstention и скрыть релевантные результаты. Требуемая новая регрессия
+`FusionTest.test_dates_and_hex_words_do_not_activate_exact_identifier_abstention`
+пока отсутствует; существующая
+`FusionTest.test_opaque_identifier_query_abstains_from_semantic_neighbours`
+сохраняет fail-closed для настоящего отсутствующего opaque ID.
+
+Также остаются отложенными согласно Roadmap: semantic binding trusted evidence
+к конкретному Workstream и миграционный контракт для legacy Stop без
 `_joiny_origin_adapter`.
 
 Проверки: focused **26/26**, полный suite **305/305** за **343.244 s**,

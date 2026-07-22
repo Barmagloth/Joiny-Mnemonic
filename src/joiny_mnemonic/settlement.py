@@ -15,6 +15,7 @@ settlement is audit evidence, never OS authority.
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import TYPE_CHECKING, Any
 
 from .consolidation import EvidenceConsolidator
@@ -35,6 +36,15 @@ def _normalized(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
+def _atomic(method: Any) -> Any:
+    @wraps(method)
+    def wrapped(self: "SettlementSurface", *args: Any, **kwargs: Any) -> Any:
+        with self.store._transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
 class SettlementSurface:
     """Manual show/settle verbs over the candidate ledger."""
 
@@ -52,6 +62,7 @@ class SettlementSurface:
             and active["policy"].get("agent_settlement_delegation_enabled", False)
         )
 
+    @_atomic
     def settle(
         self,
         candidate_id: str,

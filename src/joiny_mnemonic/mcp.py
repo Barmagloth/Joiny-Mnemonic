@@ -388,6 +388,10 @@ TOOLS: tuple[dict[str, Any], ...] = (
             "status": {"type": "string", "enum": ["active", "blocked", "completed", "cancelled"]},
             "note": {"type": "string"},
             "source_event_id": {"type": ["string", "null"]},
+            "override_obligations": {
+                "type": "array", "items": {"type": "string"},
+            },
+            "override_reason": {"type": "string"},
         }, ["task_key", "status"]),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False},
     },
@@ -588,6 +592,8 @@ class MCPServer:
                 arguments["status"],
                 note=arguments.get("note", ""),
                 source_event_id=arguments.get("source_event_id"),
+                override_obligations=arguments.get("override_obligations"),
+                override_reason=arguments.get("override_reason", ""),
             )
         if name == "memory_task_reopen":
             return self.service.tasks.reopen(

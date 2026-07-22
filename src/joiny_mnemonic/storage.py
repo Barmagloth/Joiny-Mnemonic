@@ -11,10 +11,9 @@ import time
 import uuid
 import zlib
 from collections.abc import Sequence
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .models import (
     ActiveBlock, Artifact, BudgetPolicy, Event, ExtractionCandidate, MemoryRecord, MemoryType,
@@ -26,8 +25,10 @@ from .provenance import (
     EXTERNAL_UNTRUSTED,
     origin_evidence_type,
 )
+from .candidate_confirmation import CandidateConfirmationMixin
 from .dataflow_storage import DataflowStorageMixin
 from .task_storage import TaskStorageMixin
+from .transactions import TransactionMixin
 from .storage_support import integrity_checked, json_text as _json, now as _now
 from .policy_contract import policy_activation_allowed
 from .transition_rules import (
@@ -768,7 +769,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, 
 """
 
 
-class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
+class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageMixin, TaskStorageMixin):
     """Durable SQLite event store with immutable canonical and derived records."""
 
     MAX_ACTIVE_BYTES = 3000
@@ -780,6 +781,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.redactor = redactor or SecretRedactor()
         self._lock = threading.RLock()
+        self._init_transactions()
         self._verified_data_version: int | None = None
         self._verified_schema_version: int | None = None
         target = ":memory:" if self._in_memory else str(self.path)
@@ -1196,18 +1198,6 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
-    @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                yield self._conn
-            except BaseException:
-                self._conn.rollback()
-                raise
-            else:
-                self._conn.commit()
 
     def create_branch(
         self, branch_id: str, *, parent_id: str = "main", fork_event_seq: int | None = None
@@ -4507,72 +4497,6 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             for row in rows
             if kind is None or str(row["candidate_kind"]) == kind
         ]
-
-    @integrity_checked
-    def find_auto_candidate_match(
-        self, memory_type: str, content: str
-    ) -> tuple[str, str] | None:
-        key = self._normalized_key(content)
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT c.id, c.normalized_content, l.memory_id, "
-                "(SELECT t.to_status FROM candidate_transitions t "
-                "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status "
-                "FROM extraction_candidates c "
-                "JOIN candidate_memory_links l ON l.candidate_id=c.id "
-                "WHERE c.memory_type=? ORDER BY c.created_at",
-                (memory_type,),
-            ).fetchall()
-        for row in rows:
-            if (
-                row["status"] in {
-                    "auto", "confirmation_requested", "confirmed"
-                }
-                and self._normalized_key(row["normalized_content"]) == key
-            ):
-                return str(row["id"]), str(row["memory_id"])
-        return None
-
-    def confirm_candidate_match(
-        self,
-        candidate_id: str,
-        memory_id: str,
-        *,
-        source_event_id: str,
-    ) -> None:
-        current = next(
-            (
-                item.current_status
-                for item in self.list_extraction_candidates()
-                if item.id == candidate_id
-            ),
-            None,
-        )
-        if current == "auto":
-            self.transition_candidate(
-                candidate_id,
-                "confirmation_requested",
-                source_event_id=source_event_id,
-                actor="explicit_marker",
-                rule_id="normalized_explicit_match_requested",
-            )
-        self.transition_candidate(
-            candidate_id,
-            "confirmed",
-            source_event_id=source_event_id,
-            actor="explicit_marker",
-            rule_id="normalized_explicit_match",
-        )
-        with self._transaction() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO candidate_memory_links"
-                "(id, candidate_id, memory_id, relation, source_event_id, created_at) "
-                "VALUES(?,?,?,?,?,?)",
-                (
-                    f"cml_{uuid.uuid4().hex}", candidate_id, memory_id,
-                    "confirmed_as", source_event_id, _now(),
-                ),
-            )
 
     @integrity_checked
     def memory_authority(self, memory_id: str) -> str:

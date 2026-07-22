@@ -77,13 +77,13 @@
 | ID | Инвариант | Чем должен доказываться |
 |---|---|---|
 | `JM-INV-001` | Переход, отсутствующий в таблице переходов, не записывает состояние | тестами разрешённых и запрещённых переходов этапа 1 |
-| `JM-INV-002` | Составная операция записывается полностью либо не записывается совсем | тестами сбоев внутри транзакции этапа 2 |
+| `JM-INV-002` | Составная операция записывается полностью либо не записывается совсем | `tests.test_stage2_atomicity.Stage2AtomicityTest` (`test_jm_inv_002_*` и rollback host event) |
 | `JM-INV-003` | CLI, MCP, HTTP и хуки проходят один прикладной путь изменения | проверками поверхностей этапа 3 |
 | `JM-INV-004` | Доверие вычисляется из сохранённого исходного события, а не принимается от вызывающего кода | trust-тестами этапа 1 |
 | `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | host E2E этапа 5 |
 | `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | lineage-тестами этапов 4 и 5 |
 | `JM-INV-007` | `PASSED` относится только к фактически испытанной системе и неизменяемому артефакту | проверкой идентичности этапа 6 |
-| `JM-INV-008` | Ошибка производной системы видима и не отменяет уже записанное каноническое событие | тестами отказа проекций этапа 2 |
+| `JM-INV-008` | Ошибка производной системы видима и не отменяет уже записанное каноническое событие | `tests.test_stage2_atomicity.Stage2AtomicityTest.test_jm_inv_008_event_survives_extraction_and_witness_failures` и `test_jm_inv_008_projection_failure_is_durable_and_retryable` |
 
 В ходе реализации колонка «Чем должен доказываться» дополняется точным путём к
 тесту или исполняемому gate. Проза, комментарий и ручное обещание доказательством
@@ -335,6 +335,21 @@ override_reason="непустая причина"
 - Для `JM-INV-002` и `JM-INV-008` указаны точные исполняемые проверки, включая видимый отказ производной системы после успешной канонической записи.
 - Полный набор тестов проходит.
 
+Исполняемые проверки этапа 2:
+
+- fault-injection всех составных действий, `JM-INV-002` и `JM-INV-008`:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python -m unittest tests.test_stage2_atomicity -v`;
+- одинаковая доступность exact obligation override через CLI, MCP и HTTP:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python -m unittest tests.test_workstream_surfaces.WorkstreamSurfaceTest.test_obligation_override_is_reachable_on_all_status_surfaces -v`;
+- focused regression suite:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 python -m unittest tests.test_stage2_atomicity tests.test_workstream_surfaces tests.test_stage1_transitions tests.test_settlement tests.test_settlement_surfaces tests.test_consolidation_and_hooks tests.test_failure_lesson tests.test_native_failure_capture -v`;
+- contract/complexity gates: `python scripts/stage1_gates.py all`;
+- полный suite:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 python -m unittest discover -s tests -v`.
+
+Результат приёмки 2026-07-22: fault-suite 11/11, focused suite 69/69,
+полный suite 317/317; contract/complexity gates проходят без изменения baseline.
+
 ## 6. Этап 3 — единый путь изменения данных
 
 CLI, MCP, HTTP и хуки вызывают только прикладной слой.
@@ -425,6 +440,29 @@ CLI, MCP, HTTP и хуки вызывают только прикладной с
 
 Исполняемая проверка неизменности базы и hostile-грамматики:
 `tests/test_finalization_observer.py`.
+
+Dogfood до зачётного периода обязан закрыть два уже обнаруженных дефекта:
+
+1. Производное событие, созданное `derive_memory`, сохраняет trace-контекст
+   своего сохранённого source event: `session_id` и `origin_adapter`. Эти поля
+   разрешено вычислять только из сохранённого источника; значения от CLI, MCP,
+   HTTP, hook или внутреннего вызывающего кода не являются provenance или
+   доказательством trust. Для единственного source event потеря любого из этих
+   полей является ошибкой атрибуции.
+2. Exact-ID abstention в retrieval срабатывает только при доказанном opaque ID.
+   Даты вида `20260717` и hex-похожие обычные слова сами по себе не превращают
+   запрос в exact-ID lookup и не могут обнулить релевантную выдачу. Настоящий
+   отсутствующий opaque ID по-прежнему должен давать пустой результат вместо
+   семантически похожего шума.
+
+До начала зачётного периода оба пункта закрепляются исполняемыми регрессиями:
+
+- атрибуция derived event:
+  `python -m unittest tests.test_native_failure_capture.NativeFailureCaptureTest.test_derived_event_inherits_saved_source_trace_context`;
+- дата и hex-похожее слово не активируют abstention:
+  `python -m unittest tests.test_retrieval_fusion.FusionTest.test_dates_and_hex_words_do_not_activate_exact_identifier_abstention`;
+- настоящий отсутствующий opaque ID остаётся fail-closed:
+  `python -m unittest tests.test_retrieval_fusion.FusionTest.test_opaque_identifier_query_abstains_from_semantic_neighbours`.
 
 Команда наблюдения:
 
@@ -611,6 +649,9 @@ agent_finalized
 После этапа 1 Joiny-Mnemonic используется при разработке этого репозитория.
 
 Зачётный период начинается после этапа 5.
+
+Он не начинается, пока открыты зафиксированные в разделе 8.0 дефекты
+атрибуции derived events или классификации exact identifiers.
 
 Условия зачётного периода:
 
