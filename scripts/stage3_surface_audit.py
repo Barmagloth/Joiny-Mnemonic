@@ -244,14 +244,19 @@ def _expression_kind(
         if (
             isinstance(node.func, ast.Attribute)
             and node.func.attr in {"get", "pop"}
-            and _expression_kind(node.func.value, aliases, bindings) == "owner_dict"
         ):
+            container_kind = _expression_kind(node.func.value, aliases, bindings)
             attribute = _constant_string(node.args[0]) if node.args else None
-            if attribute in {None, "store"}:
+            if container_kind == "owner_dict" and attribute in {None, "store"}:
                 return "store"
+            if container_kind == "handler_dict" and attribute in {None, "service"}:
+                return "owner"
         if resolved == "builtins.vars" and node.args:
-            if _expression_kind(node.args[0], aliases, bindings) == "owner":
+            target_kind = _expression_kind(node.args[0], aliases, bindings)
+            if target_kind == "owner":
                 return "owner_dict"
+            if target_kind == "handler":
+                return "handler_dict"
         if resolved == "operator.attrgetter":
             attribute = _constant_string(node.args[0]) if node.args else None
             if attribute in {None, "store"}:
@@ -323,17 +328,20 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                 elif node.level >= 2:
                     imported_module = f"__foreign_relative_{node.level}__.{node.module or ''}"
                 for item in node.names:
+                    local_name = item.asname or item.name
+                    last_bindings[(module, local_name)] = node
                     if imported_module:
-                        module_imports[item.asname or item.name] = (
+                        module_imports[local_name] = (
                             imported_module, item.name,
                         )
                     else:
-                        module_imports[item.asname or item.name] = (
+                        module_imports[local_name] = (
                             f"joiny_mnemonic.{item.name}", None,
                         )
             elif isinstance(node, ast.Import):
                 for item in node.names:
                     local_name = item.asname or item.name.split(".")[0]
+                    last_bindings[(module, local_name)] = node
                     module_imports[local_name] = (
                         item.name, None,
                     )
@@ -461,6 +469,30 @@ def declared_store_reads(root: Path) -> frozenset[str]:
     mro_order = linearize(memory_key)
     effective: set[str] = set()
     declarations: set[str] = set()
+
+    def class_local_bound_before(
+        class_node: ast.ClassDef, member: ast.AST, name: str
+    ) -> bool:
+        bound: set[str] = set()
+        for statement in class_node.body:
+            if statement is member:
+                break
+            if isinstance(statement, ast.Delete):
+                for target in statement.targets:
+                    bound.difference_update(_bound_target_names(target))
+                continue
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(statement.name)
+            elif isinstance(statement, ast.Assign):
+                for target in statement.targets:
+                    bound.update(_bound_target_names(target))
+            elif isinstance(statement, (ast.AnnAssign, ast.AugAssign)):
+                bound.update(_bound_target_names(statement.target))
+            elif isinstance(statement, (ast.Import, ast.ImportFrom)):
+                for item in statement.names:
+                    bound.add(item.asname or item.name.split(".")[0])
+        return name in bound
+
     for class_key in mro_order:
         if unresolved_base and class_key != memory_key:
             break
@@ -500,8 +532,11 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             canonical = False
             for decorator in member.decorator_list:
                 if isinstance(decorator, ast.Name):
-                    canonical = class_imports.get(decorator.id) == (
+                    canonical = (
+                        not class_local_bound_before(node, member, decorator.id)
+                        and class_imports.get(decorator.id) == (
                         "joiny_mnemonic.storage_support", "store_read",
+                        )
                     )
                 elif isinstance(decorator, ast.Attribute) and isinstance(
                     decorator.value, ast.Name
@@ -586,6 +621,7 @@ def calls_in_source(
             while parent not in scope_data:
                 parent = parents.get(parent)
             parent_aliases, parent_bindings = context_at(parent)
+            definition_aliases, definition_bindings = context_at(parent, scope)
             default_aliases: dict[str, str] = {}
             default_bindings: dict[str, str] = {}
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -601,10 +637,12 @@ def calls_in_source(
                     if default is not None
                 )
                 for argument, default in defaults:
-                    resolved = _resolved_name(default, parent_aliases)
+                    resolved = _resolved_name(default, definition_aliases)
                     if resolved in TRANSFERABLE_CALLABLES:
                         default_aliases[argument.arg] = resolved
-                    kind = _expression_kind(default, parent_aliases, parent_bindings)
+                    kind = _expression_kind(
+                        default, definition_aliases, definition_bindings
+                    )
                     if kind is not None:
                         default_bindings[argument.arg] = kind
             scope_data[scope] = (

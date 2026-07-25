@@ -84,6 +84,10 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service):\n    getattr(service, '__dict__')['store'].future_write()\n",
             "def route(service):\n    object.__getattribute__(service, '__dict__')['store'].future_write()\n",
             "class Handler:\n    def route(self):\n        getattr(self, '__dict__')['service'].store.future_write()\n",
+            "def route(service):\n    ga = getattr\n    def inner(get=ga, svc=service):\n        get(svc, 'store').future_write()\n    ga = None\n    service = None\n    inner()\n",
+            "def route(service):\n    ga = getattr\n    inner = lambda get=ga, svc=service: get(svc, 'store').future_write()\n    ga = None\n    service = None\n    inner()\n",
+            "class Handler:\n    def route(self):\n        vars(self)['service'].store.future_write()\n",
+            "class Handler:\n    def route(self):\n        self.__dict__.get('service').store.future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -132,9 +136,11 @@ def route(service):
         shadow = ROOT / "tests" / "fixtures" / "stage3_decorator_shadow"
         foreign = ROOT / "tests" / "fixtures" / "stage3_foreign_decorator"
         late = ROOT / "tests" / "fixtures" / "stage3_decorator_late_import"
+        class_shadow = ROOT / "tests" / "fixtures" / "stage3_class_decorator_shadow"
         self.assertEqual(declared_store_reads(shadow), frozenset())
         self.assertEqual(declared_store_reads(foreign), frozenset())
         self.assertEqual(declared_store_reads(late), frozenset())
+        self.assertEqual(declared_store_reads(class_shadow), frozenset())
 
     def test_mro_resolves_relative_and_fully_qualified_module_imports(self) -> None:
         relative = ROOT / "tests" / "fixtures" / "stage3_mro_module_import"
@@ -154,7 +160,9 @@ def route(service):
         fixture = ROOT / "tests" / "fixtures" / "stage3_last_memory_store"
         self.assertEqual(declared_store_reads(fixture), frozenset())
         assignment = ROOT / "tests" / "fixtures" / "stage3_last_memory_assignment"
+        imported = ROOT / "tests" / "fixtures" / "stage3_last_memory_import"
         self.assertEqual(declared_store_reads(assignment), frozenset())
+        self.assertEqual(declared_store_reads(imported), frozenset())
 
     def test_deleted_override_does_not_hide_effective_base_method(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "stage3_deleted_override"
