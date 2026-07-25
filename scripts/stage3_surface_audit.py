@@ -17,6 +17,8 @@ PUBLIC_SURFACES = (
 
 REFLECTION_NAMES = {
     "delattr": "builtins.delattr",
+    "eval": "builtins.eval",
+    "exec": "builtins.exec",
     "getattr": "builtins.getattr",
     "setattr": "builtins.setattr",
     "vars": "builtins.vars",
@@ -62,6 +64,16 @@ def _resolved_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
 
 def _reflection_aliases(tree: ast.AST) -> dict[str, str]:
     aliases = dict(REFLECTION_NAMES)
+    shadowed = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    shadowed.update(
+        node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)
+    )
+    for name in shadowed:
+        aliases.pop(name, None)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for item in node.names:
@@ -76,8 +88,9 @@ def _reflection_aliases(tree: ast.AST) -> dict[str, str]:
         for assignment in assignments:
             resolved = _resolved_name(assignment.value, aliases)
             if resolved not in {
-                "builtins.delattr", "builtins.getattr", "builtins.setattr",
-                "builtins.vars", "operator.attrgetter",
+                "builtins.delattr", "builtins.eval", "builtins.exec",
+                "builtins.getattr", "builtins.setattr", "builtins.vars",
+                "operator.attrgetter",
             }:
                 continue
             for target in assignment.targets:
@@ -87,112 +100,155 @@ def _reflection_aliases(tree: ast.AST) -> dict[str, str]:
     return aliases
 
 
-def _owner_aliases(tree: ast.AST) -> frozenset[str]:
-    owners = {"service"}
-    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
-    changed = True
-    while changed:
-        changed = False
-        for assignment in assignments:
-            if not isinstance(assignment.value, ast.Name) or assignment.value.id not in owners:
-                continue
-            for target in assignment.targets:
-                if isinstance(target, ast.Name) and target.id not in owners:
-                    owners.add(target.id)
-                    changed = True
-    return frozenset(owners)
-
-
 def _constant_string(node: ast.expr | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
 
 
-def _is_owner(node: ast.expr, owners: frozenset[str]) -> bool:
-    return isinstance(node, ast.Name) and node.id in owners
-
-
-def _is_store_expression(
-    node: ast.expr, aliases: dict[str, str], owners: frozenset[str]
-) -> bool:
-    if isinstance(node, ast.Attribute) and node.attr == "store":
-        return True
+def _expression_kind(
+    node: ast.expr, aliases: dict[str, str], bindings: dict[str, str]
+) -> str | None:
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id)
+    if isinstance(node, ast.Attribute):
+        if node.attr == "service":
+            return "owner"
+        value_kind = _expression_kind(node.value, aliases, bindings)
+        if value_kind == "owner" and node.attr == "store":
+            return "store"
+        if value_kind == "owner" and node.attr == "__dict__":
+            return "owner_dict"
+        if value_kind == "owner" and node.attr == "__getattribute__":
+            return "owner_getter"
+        if value_kind == "store":
+            return "store_member"
     if isinstance(node, ast.Call):
         resolved = _resolved_name(node.func, aliases)
         if resolved == "builtins.getattr" and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
-            return (
-                attribute == "store"
-                or _is_store_expression(node.args[0], aliases, owners)
-                or (_is_owner(node.args[0], owners) and attribute is None)
-            )
-        if (
-            isinstance(node.func, ast.Attribute)
-            and node.func.attr == "__getattribute__"
-            and _is_owner(node.func.value, owners)
-        ):
+            target_kind = _expression_kind(node.args[0], aliases, bindings)
+            if target_kind == "owner" and attribute in {None, "store"}:
+                return "store"
+            if target_kind == "store":
+                return "store_member"
+        function_kind = _expression_kind(node.func, aliases, bindings)
+        if function_kind == "owner_getter":
             attribute = _constant_string(node.args[0]) if node.args else None
-            return attribute in {None, "store"}
+            if attribute in {None, "store"}:
+                return "store"
+        if function_kind == "store_getter" and node.args:
+            if _expression_kind(node.args[0], aliases, bindings) == "owner":
+                return "store"
         if (
             isinstance(node.func, ast.Attribute)
             and node.func.attr == "get"
-            and isinstance(node.func.value, ast.Attribute)
-            and node.func.value.attr == "__dict__"
-            and _is_owner(node.func.value.value, owners)
+            and _expression_kind(node.func.value, aliases, bindings) == "owner_dict"
         ):
             attribute = _constant_string(node.args[0]) if node.args else None
-            return attribute in {None, "store"}
-        if (
-            isinstance(node.func, ast.Call)
-            and _resolved_name(node.func.func, aliases) == "operator.attrgetter"
-            and node.args
-            and _is_owner(node.args[0], owners)
-        ):
-            attribute = _constant_string(node.func.args[0]) if node.func.args else None
-            return attribute in {None, "store"}
+            if attribute in {None, "store"}:
+                return "store"
+        if resolved == "builtins.vars" and node.args:
+            if _expression_kind(node.args[0], aliases, bindings) == "owner":
+                return "owner_dict"
+        if resolved == "operator.attrgetter":
+            attribute = _constant_string(node.args[0]) if node.args else None
+            if attribute in {None, "store"}:
+                return "store_getter"
     if isinstance(node, ast.Subscript):
         attribute = _constant_string(node.slice)
-        if isinstance(node.value, ast.Attribute) and node.value.attr == "__dict__":
-            return _is_owner(node.value.value, owners) and attribute in {None, "store"}
         if (
-            isinstance(node.value, ast.Call)
-            and _resolved_name(node.value.func, aliases) == "builtins.vars"
-            and node.value.args
+            _expression_kind(node.value, aliases, bindings) == "owner_dict"
+            and attribute in {None, "store"}
         ):
-            return _is_owner(node.value.args[0], owners) and attribute in {None, "store"}
-    return False
+            return "store"
+    return None
+
+
+def _value_bindings(tree: ast.AST, aliases: dict[str, str]) -> dict[str, str]:
+    bindings = {"service": "owner"}
+    assignments: list[tuple[list[ast.expr], ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            assignments.append((list(node.targets), node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assignments.append(([node.target], node.value))
+    changed = True
+    while changed:
+        changed = False
+        for targets, value in assignments:
+            kind = _expression_kind(value, aliases, bindings)
+            if kind is None:
+                continue
+            for target in targets:
+                if isinstance(target, ast.Name) and bindings.get(target.id) != kind:
+                    bindings[target.id] = kind
+                    changed = True
+    return bindings
 
 
 def declared_store_reads(root: Path) -> frozenset[str]:
-    classes: dict[str, list[tuple[ast.ClassDef, str]]] = {}
+    classes: dict[tuple[str, str], list[tuple[ast.ClassDef, str]]] = {}
+    imports: dict[str, dict[str, tuple[str, str | None]]] = {}
     for source_path in sorted((root / "src/joiny_mnemonic").glob("*.py")):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         relative = source_path.relative_to(root).as_posix()
+        module = source_path.stem
+        module_imports: dict[str, tuple[str, str | None]] = {}
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
-                classes.setdefault(node.name, []).append((node, relative))
-    memory_stores = classes.get("MemoryStore", [])
+                classes.setdefault((module, node.name), []).append((node, relative))
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_module = node.module.split(".")[-1]
+                for item in node.names:
+                    module_imports[item.asname or item.name] = (
+                        imported_module, item.name,
+                    )
+            elif isinstance(node, ast.Import):
+                for item in node.names:
+                    imported_module = item.name.split(".")[-1]
+                    module_imports[item.asname or imported_module] = (
+                        imported_module, None,
+                    )
+        imports[module] = module_imports
+    memory_keys = [key for key in classes if key[1] == "MemoryStore"]
+    memory_stores = [item for key in memory_keys for item in classes[key]]
     if not memory_stores:
         raise ValueError("MemoryStore declaration not found")
     if len(memory_stores) != 1:
         raise ValueError("MemoryStore declaration is ambiguous")
-    mro: dict[str, tuple[ast.ClassDef, str]] = {}
-    pending = [memory_stores[0]]
+    memory_key = memory_keys[0]
+    mro: dict[tuple[str, str], tuple[ast.ClassDef, str]] = {}
+    pending = [(memory_key, memory_stores[0])]
     while pending:
-        declaration = pending.pop()
+        key, declaration = pending.pop()
         node, relative = declaration
-        if node.name in mro:
+        if key in mro:
             continue
-        mro[node.name] = declaration
+        mro[key] = declaration
+        module, _ = key
         for base in node.bases:
-            base_name = _decorator_name(base)
-            candidates = classes.get(str(base_name), [])
+            base_key: tuple[str, str] | None = None
+            if isinstance(base, ast.Name):
+                imported = imports[module].get(base.id)
+                if imported and imported[1]:
+                    base_key = (imported[0], str(imported[1]))
+                else:
+                    base_key = (module, base.id)
+            elif isinstance(base, ast.Attribute) and isinstance(base.value, ast.Name):
+                imported = imports[module].get(base.value.id)
+                if imported and imported[1] is None:
+                    base_key = (imported[0], base.attr)
+            if base_key is None:
+                continue
+            candidates = classes.get(base_key, [])
             if len(candidates) > 1:
-                raise ValueError(f"store base class is ambiguous: {base_name}")
+                raise ValueError(
+                    f"store base class is ambiguous: {base_key[0]}.{base_key[1]}"
+                )
             if candidates:
-                pending.append(candidates[0])
+                pending.append((base_key, candidates[0]))
     declarations: dict[str, str] = {}
-    for class_name in sorted(mro):
-        node, relative = mro[class_name]
+    for class_key in sorted(mro):
+        node, relative = mro[class_key]
         for member in node.body:
             if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -210,11 +266,12 @@ def declared_store_reads(root: Path) -> frozenset[str]:
 
 
 def calls_in_source(
-    source: str, *, path: str, read_methods: frozenset[str] = frozenset()
+    source: str, *, path: str, read_methods: frozenset[str] = frozenset(),
+    _depth: int = 0,
 ) -> tuple[DirectStoreWrite, ...]:
     tree = ast.parse(source, filename=path)
     aliases = _reflection_aliases(tree)
-    owners = _owner_aliases(tree)
+    bindings = _value_bindings(tree, aliases)
     parents = {
         child: parent
         for parent in ast.walk(tree)
@@ -222,8 +279,20 @@ def calls_in_source(
     }
     writes: list[DirectStoreWrite] = []
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Call, ast.Subscript)) and _is_store_expression(
-            node, aliases, owners
+        if isinstance(node, ast.Call) and _resolved_name(node.func, aliases) in {
+            "builtins.eval", "builtins.exec",
+        }:
+            literal = _constant_string(node.args[0]) if node.args else None
+            if literal is not None and _depth < 3 and calls_in_source(
+                literal, path=path, read_methods=read_methods, _depth=_depth + 1
+            ):
+                writes.append(
+                    DirectStoreWrite(path, node.lineno, "<literal_dynamic_store_access>")
+                )
+            continue
+        if (
+            isinstance(node, (ast.Call, ast.Subscript))
+            and _expression_kind(node, aliases, bindings) in {"store", "store_member"}
         ):
             writes.append(
                 DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
@@ -236,9 +305,11 @@ def calls_in_source(
             }
             and node.args
             and (
-                _is_store_expression(node.args[0], aliases, owners)
+                _expression_kind(node.args[0], aliases, bindings) in {
+                    "store", "store_member",
+                }
                 or (
-                    _is_owner(node.args[0], owners)
+                    _expression_kind(node.args[0], aliases, bindings) == "owner"
                     and (
                         len(node.args) < 2
                         or _constant_string(node.args[1]) in {None, "store"}
@@ -250,7 +321,11 @@ def calls_in_source(
                 DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
             )
             continue
-        if not isinstance(node, ast.Attribute) or node.attr != "store":
+        if (
+            not isinstance(node, ast.Attribute)
+            or node.attr != "store"
+            or _expression_kind(node.value, aliases, bindings) != "owner"
+        ):
             continue
         parent = parents.get(node)
         if not isinstance(parent, ast.Attribute) or parent.value is not node:

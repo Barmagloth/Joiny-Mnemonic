@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.stage3_surface_audit import (
@@ -46,6 +45,13 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "import operator\ndef route(service):\n    operator.attrgetter('store')(service).future_write()\n",
             "import builtins as bi\ndef route(service):\n    svc = service\n    ga = bi.getattr\n    ga(svc, 'store').future_write()\n",
             "from operator import attrgetter as ag\ndef route(service):\n    pick = ag\n    pick('store')(service).future_write()\n",
+            "def route(service):\n    d = vars(service)\n    d['store'].future_write()\n",
+            "def route(service):\n    vars(service).get('store').future_write()\n",
+            "def route(service):\n    d = service.__dict__\n    d['store'].future_write()\n",
+            "def route(service):\n    ga = service.__getattribute__\n    ga('store').future_write()\n",
+            "import operator\ndef route(service):\n    pick = operator.attrgetter('store')\n    pick(service).future_write()\n",
+            "def route(service):\n    eval('service.store.future_write()')\n",
+            "def route(service):\n    exec('service.store.future_write()')\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -55,28 +61,25 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
         source = """
 def route(request):
     getattr(request, 'method', None)
+    getattr(request, 'store', None)
+    request.store
     vars(request)
     setattr(request, 'method', 'GET')
     eval('1 + 1')
     exec('answer = 2')
 """
         self.assertEqual(calls_in_source(source, path="fixture.py"), ())
+        shadowed = """
+def getattr(obj, field):
+    return None
+def route(request):
+    return getattr(request, 'store')
+"""
+        self.assertEqual(calls_in_source(shadowed, path="fixture.py"), ())
 
     def test_unrelated_duplicate_classes_do_not_ambiguate_store_mro(self) -> None:
-        with TemporaryDirectory(dir=ROOT / "tests" / "runtime") as directory:
-            root = Path(directory)
-            package = root / "src" / "joiny_mnemonic"
-            package.mkdir(parents=True)
-            (package / "storage.py").write_text(
-                "class Base:\n"
-                "    @store_read\n"
-                "    def lookup(self): pass\n"
-                "class MemoryStore(Base): pass\n",
-                encoding="utf-8",
-            )
-            (package / "one.py").write_text("class Duplicate: pass\n", encoding="utf-8")
-            (package / "two.py").write_text("class Duplicate: pass\n", encoding="utf-8")
-            self.assertEqual(declared_store_reads(root), frozenset({"lookup"}))
+        fixture = ROOT / "tests" / "fixtures" / "stage3_mro"
+        self.assertEqual(declared_store_reads(fixture), frozenset({"lookup"}))
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)
