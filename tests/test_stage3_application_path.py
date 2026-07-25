@@ -75,6 +75,15 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service):\n    ga = getattr\n    ga(service, 'store').future_write()\n    ga = None\n",
             "class Handler:\n    def route(self):\n        getattr(self, 'service').store.future_write()\n",
             "class Handler:\n    def route(self):\n        self.__dict__['service'].store.future_write()\n",
+            "def outer(service):\n    def route():\n        svc.store.future_write()\n    svc = service\n    route()\n",
+            "def route(service):\n    (ga := getattr)(service, 'store').future_write()\n",
+            "def route(service):\n    (ga := object.__getattribute__)(service, 'store').future_write()\n",
+            "def route(service):\n    (svc := service).store.future_write()\n",
+            "class Handler:\n    def route(self):\n        this = self\n        this.service.store.future_write()\n",
+            "class Handler:\n    def route(self):\n        this = self\n        getattr(this, 'service').store.future_write()\n",
+            "def route(service):\n    getattr(service, '__dict__')['store'].future_write()\n",
+            "def route(service):\n    object.__getattribute__(service, '__dict__')['store'].future_write()\n",
+            "class Handler:\n    def route(self):\n        getattr(self, '__dict__')['service'].store.future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -122,8 +131,10 @@ def route(service):
         self.assertEqual(declared_store_reads(fixture), frozenset())
         shadow = ROOT / "tests" / "fixtures" / "stage3_decorator_shadow"
         foreign = ROOT / "tests" / "fixtures" / "stage3_foreign_decorator"
+        late = ROOT / "tests" / "fixtures" / "stage3_decorator_late_import"
         self.assertEqual(declared_store_reads(shadow), frozenset())
         self.assertEqual(declared_store_reads(foreign), frozenset())
+        self.assertEqual(declared_store_reads(late), frozenset())
 
     def test_mro_resolves_relative_and_fully_qualified_module_imports(self) -> None:
         relative = ROOT / "tests" / "fixtures" / "stage3_mro_module_import"
@@ -134,9 +145,19 @@ def route(service):
         self.assertEqual(declared_store_reads(foreign), frozenset())
         nested = ROOT / "tests" / "fixtures" / "stage3_mro_nested_foreign"
         self.assertEqual(declared_store_reads(nested), frozenset())
+        unresolved = ROOT / "tests" / "fixtures" / "stage3_mro_unresolved_first"
+        parent = ROOT / "tests" / "fixtures" / "stage3_mro_parent_relative"
+        self.assertEqual(declared_store_reads(unresolved), frozenset())
+        self.assertEqual(declared_store_reads(parent), frozenset())
 
     def test_last_top_level_memory_store_binding_wins(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "stage3_last_memory_store"
+        self.assertEqual(declared_store_reads(fixture), frozenset())
+        assignment = ROOT / "tests" / "fixtures" / "stage3_last_memory_assignment"
+        self.assertEqual(declared_store_reads(assignment), frozenset())
+
+    def test_deleted_override_does_not_hide_effective_base_method(self) -> None:
+        fixture = ROOT / "tests" / "fixtures" / "stage3_deleted_override"
         self.assertEqual(declared_store_reads(fixture), frozenset())
 
     def test_read_classification_comes_from_store_declarations(self) -> None:

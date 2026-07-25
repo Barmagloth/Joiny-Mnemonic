@@ -55,6 +55,8 @@ def _qualified_name(node: ast.expr) -> str | None:
 
 
 def _resolved_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
+    if isinstance(node, ast.NamedExpr):
+        return _resolved_name(node.value, aliases)
     name = _qualified_name(node)
     if name is None:
         return None
@@ -184,20 +186,20 @@ def _literal_code(node: ast.expr | None) -> str | None:
 def _expression_kind(
     node: ast.expr, aliases: dict[str, str], bindings: dict[str, str]
 ) -> str | None:
+    if isinstance(node, ast.NamedExpr):
+        return _expression_kind(node.value, aliases, bindings)
     if isinstance(node, ast.Name):
         return bindings.get(node.id)
     if isinstance(node, ast.Attribute):
-        if (
-            node.attr == "service"
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "self"
-        ):
-            return "owner"
         value_kind = _expression_kind(node.value, aliases, bindings)
+        if node.attr == "service" and value_kind == "handler":
+            return "owner"
         if value_kind == "owner" and node.attr == "store":
             return "store"
         if value_kind == "owner" and node.attr == "__dict__":
             return "owner_dict"
+        if value_kind == "handler" and node.attr == "__dict__":
+            return "handler_dict"
         if value_kind == "owner" and node.attr == "__getattribute__":
             return "owner_getter"
         if value_kind == "store":
@@ -207,24 +209,25 @@ def _expression_kind(
         if resolved == "builtins.getattr" and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
             target_kind = _expression_kind(node.args[0], aliases, bindings)
-            if (
-                isinstance(node.args[0], ast.Name)
-                and node.args[0].id == "self"
-                and attribute == "service"
-            ):
+            if target_kind == "handler" and attribute == "service":
                 return "owner"
+            if target_kind == "handler" and attribute == "__dict__":
+                return "handler_dict"
+            if target_kind == "owner" and attribute == "__dict__":
+                return "owner_dict"
             if target_kind == "owner" and attribute in {None, "store"}:
                 return "store"
             if target_kind == "store":
                 return "store_member"
         if resolved == "object.__getattribute__" and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
-            if (
-                isinstance(node.args[0], ast.Name)
-                and node.args[0].id == "self"
-                and attribute == "service"
-            ):
+            target_kind = _expression_kind(node.args[0], aliases, bindings)
+            if target_kind == "handler" and attribute == "service":
                 return "owner"
+            if target_kind == "handler" and attribute == "__dict__":
+                return "handler_dict"
+            if target_kind == "owner" and attribute == "__dict__":
+                return "owner_dict"
             if (
                 _expression_kind(node.args[0], aliases, bindings) == "owner"
                 and attribute in {None, "store"}
@@ -255,16 +258,11 @@ def _expression_kind(
                 return "store_getter"
     if isinstance(node, ast.Subscript):
         attribute = _constant_string(node.slice)
-        if (
-            isinstance(node.value, ast.Attribute)
-            and isinstance(node.value.value, ast.Name)
-            and node.value.value.id == "self"
-            and node.value.attr == "__dict__"
-            and attribute == "service"
-        ):
+        value_kind = _expression_kind(node.value, aliases, bindings)
+        if value_kind == "handler_dict" and attribute == "service":
             return "owner"
         if (
-            _expression_kind(node.value, aliases, bindings) == "owner_dict"
+            value_kind == "owner_dict"
             and attribute in {None, "store"}
         ):
             return "store"
@@ -278,6 +276,7 @@ def _value_bindings(
     nodes = tuple(nodes)
     bindings = dict(base or {})
     bindings["service"] = "owner"
+    bindings["self"] = "handler"
     assignments = _assignment_pairs(nodes)
     for _ in range(len(assignments) + 1):
         changed = False
@@ -301,6 +300,8 @@ def _value_bindings(
 def declared_store_reads(root: Path) -> frozenset[str]:
     classes: dict[tuple[str, str], list[tuple[ast.ClassDef, str]]] = {}
     imports: dict[str, dict[str, tuple[str, str | None]]] = {}
+    imports_at_class: dict[ast.ClassDef, dict[str, tuple[str, str | None]]] = {}
+    last_bindings: dict[tuple[str, str], ast.AST] = {}
     for source_path in sorted((root / "src/joiny_mnemonic").glob("*.py")):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         relative = source_path.relative_to(root).as_posix()
@@ -309,13 +310,18 @@ def declared_store_reads(root: Path) -> frozenset[str]:
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 classes.setdefault((module, node.name), []).append((node, relative))
+                imports_at_class[node] = dict(module_imports)
+                last_bindings[(module, node.name)] = node
                 module_imports.pop(node.name, None)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                last_bindings[(module, node.name)] = node
                 module_imports.pop(node.name, None)
             elif isinstance(node, ast.ImportFrom):
                 imported_module = node.module
-                if node.level and imported_module:
+                if node.level == 1 and imported_module:
                     imported_module = f"joiny_mnemonic.{imported_module}"
+                elif node.level >= 2:
+                    imported_module = f"__foreign_relative_{node.level}__.{node.module or ''}"
                 for item in node.names:
                     if imported_module:
                         module_imports[item.asname or item.name] = (
@@ -334,25 +340,51 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     for name in _bound_target_names(target):
+                        last_bindings[(module, name)] = node
                         module_imports.pop(name, None)
             elif isinstance(node, ast.AnnAssign):
                 for name in _bound_target_names(node.target):
+                    last_bindings[(module, name)] = node
                     module_imports.pop(name, None)
+            elif isinstance(node, (ast.AugAssign, ast.Delete)):
+                targets = [node.target] if isinstance(node, ast.AugAssign) else node.targets
+                for target in targets:
+                    for name in _bound_target_names(target):
+                        last_bindings[(module, name)] = node
+                        module_imports.pop(name, None)
         imports[module] = module_imports
     memory_key = ("storage", "MemoryStore")
     memory_stores = classes.get(memory_key, [])
-    if not memory_stores:
+    memory_binding = last_bindings.get(memory_key)
+    if not memory_stores or not isinstance(memory_binding, ast.ClassDef):
+        return frozenset()
+    if memory_binding is not memory_stores[-1][0]:
         raise ValueError("MemoryStore declaration not found")
+    unresolved_base = False
+
+    def declaration_for(
+        key: tuple[str, str]
+    ) -> tuple[ast.ClassDef, str] | None:
+        binding = last_bindings.get(key)
+        candidates = classes.get(key, [])
+        if not isinstance(binding, ast.ClassDef):
+            return None
+        return next((item for item in reversed(candidates) if item[0] is binding), None)
+
     def local_bases(
         key: tuple[str, str], declaration: tuple[ast.ClassDef, str]
     ) -> tuple[tuple[str, str], ...]:
+        nonlocal unresolved_base
         node, relative = declaration
         module, _ = key
+        class_imports = imports_at_class[node]
         resolved_bases: list[tuple[str, str]] = []
         for base in node.bases:
             base_key: tuple[str, str] | None = None
             if isinstance(base, ast.Name):
-                imported = imports[module].get(base.id)
+                if base.id == "object":
+                    continue
+                imported = class_imports.get(base.id)
                 if imported and imported[1]:
                     imported_module = imported[0]
                     if (
@@ -368,7 +400,7 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                 qualified = _qualified_name(base)
                 parts = qualified.split(".") if qualified else []
                 if len(parts) >= 2:
-                    imported = imports[module].get(parts[0])
+                    imported = class_imports.get(parts[0])
                     if imported and imported[1] is None:
                         imported_module = imported[0]
                         if (
@@ -381,10 +413,12 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                     elif parts[0] == "joiny_mnemonic" and len(parts) == 3:
                         base_key = (parts[-2], parts[-1])
             if base_key is None:
+                unresolved_base = True
                 continue
-            candidates = classes.get(base_key, [])
-            if candidates:
+            if declaration_for(base_key) is not None:
                 resolved_bases.append(base_key)
+            else:
+                unresolved_base = True
         return tuple(resolved_bases)
 
     mro_cache: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {}
@@ -396,7 +430,9 @@ def declared_store_reads(root: Path) -> frozenset[str]:
         if key in resolving:
             raise ValueError(f"cyclic store inheritance: {key[0]}.{key[1]}")
         resolving.add(key)
-        declaration = classes[key][-1]
+        declaration = declaration_for(key)
+        if declaration is None:
+            raise ValueError(f"unresolved store class: {key[0]}.{key[1]}")
         bases = local_bases(key, declaration)
         sequences = [list(linearize(base)) for base in bases]
         sequences.append(list(bases))
@@ -426,9 +462,20 @@ def declared_store_reads(root: Path) -> frozenset[str]:
     effective: set[str] = set()
     declarations: set[str] = set()
     for class_key in mro_order:
-        node, relative = classes[class_key][-1]
+        if unresolved_base and class_key != memory_key:
+            break
+        declaration = declaration_for(class_key)
+        if declaration is None:
+            break
+        node, relative = declaration
         module, _ = class_key
+        class_imports = imports_at_class[node]
+        deleted: set[str] = set()
         for member in reversed(node.body):
+            if isinstance(member, ast.Delete):
+                for target in member.targets:
+                    deleted.update(_bound_target_names(target))
+                continue
             if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 bound_names = frozenset({member.name})
             elif isinstance(member, ast.Assign):
@@ -439,9 +486,11 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                 )
             elif isinstance(member, ast.AnnAssign):
                 bound_names = _bound_target_names(member.target)
+            elif isinstance(member, ast.AugAssign):
+                bound_names = _bound_target_names(member.target)
             else:
                 bound_names = frozenset()
-            new_names = bound_names - effective
+            new_names = bound_names - effective - deleted
             effective.update(new_names)
             if (
                 not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -451,14 +500,14 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             canonical = False
             for decorator in member.decorator_list:
                 if isinstance(decorator, ast.Name):
-                    canonical = imports[module].get(decorator.id) == (
+                    canonical = class_imports.get(decorator.id) == (
                         "joiny_mnemonic.storage_support", "store_read",
                     )
                 elif isinstance(decorator, ast.Attribute) and isinstance(
                     decorator.value, ast.Name
                 ):
                     canonical = (
-                        imports[module].get(decorator.value.id)
+                        class_imports.get(decorator.value.id)
                         == ("joiny_mnemonic.storage_support", None)
                         and decorator.attr == "store_read"
                     )
@@ -536,7 +585,7 @@ def calls_in_source(
             parent = parents.get(scope)
             while parent not in scope_data:
                 parent = parents.get(parent)
-            parent_aliases, parent_bindings = context_at(parent, scope)
+            parent_aliases, parent_bindings = context_at(parent)
             default_aliases: dict[str, str] = {}
             default_bindings: dict[str, str] = {}
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
