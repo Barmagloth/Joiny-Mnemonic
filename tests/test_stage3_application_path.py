@@ -52,6 +52,17 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "import operator\ndef route(service):\n    pick = operator.attrgetter('store')\n    pick(service).future_write()\n",
             "def route(service):\n    eval('service.store.future_write()')\n",
             "def route(service):\n    exec('service.store.future_write()')\n",
+            "def route(service):\n    ga: object = getattr\n    ga(service, 'store').future_write()\n",
+            "def route(service):\n    (svc := service)\n    svc.store.future_write()\n",
+            "def route(service):\n    (svc,) = (service,)\n    svc.store.future_write()\n",
+            "def route(service):\n    object.__getattribute__(service, 'store').future_write()\n",
+            "def route(service):\n    service.__dict__.pop('store').future_write()\n",
+            "def route(service):\n    dict.get(vars(service), 'store').future_write()\n",
+            "def route(service):\n    consume(vars(service))\n",
+            "def route(service):\n    consume(service.__getattribute__)\n",
+            "def route(service):\n    eval('service.store.' + 'future_write()')\n",
+            "def route(service):\n    exec(b'service.store.future_write()')\n",
+            "def route(service):\n    getattr(service, 'store').future_write()\n\ndef helper(getattr):\n    return getattr\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -76,10 +87,20 @@ def route(request):
     return getattr(request, 'store')
 """
         self.assertEqual(calls_in_source(shadowed, path="fixture.py"), ())
+        assigned = """
+def route(service):
+    getattr = lambda obj, name: None
+    return getattr(service, 'store')
+"""
+        self.assertEqual(calls_in_source(assigned, path="fixture.py"), ())
 
     def test_unrelated_duplicate_classes_do_not_ambiguate_store_mro(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "stage3_mro"
         self.assertEqual(declared_store_reads(fixture), frozenset({"lookup"}))
+
+    def test_effective_override_and_foreign_decorator_are_not_reads(self) -> None:
+        fixture = ROOT / "tests" / "fixtures" / "stage3_mro_override"
+        self.assertEqual(declared_store_reads(fixture), frozenset())
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)

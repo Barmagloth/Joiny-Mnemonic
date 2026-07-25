@@ -62,46 +62,106 @@ def _resolved_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
     return name
 
 
-def _reflection_aliases(tree: ast.AST) -> dict[str, str]:
-    aliases = dict(REFLECTION_NAMES)
+def _scope_nodes(root: ast.AST) -> tuple[ast.AST, ...]:
+    nodes: list[ast.AST] = []
+    stack = list(ast.iter_child_nodes(root))
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return tuple(nodes)
+
+
+def _assignment_pairs(nodes: Iterable[ast.AST]) -> tuple[tuple[ast.expr, ast.expr], ...]:
+    pairs: list[tuple[ast.expr, ast.expr]] = []
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            pairs.extend((target, node.value) for target in node.targets)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            pairs.append((node.target, node.value))
+        elif isinstance(node, ast.NamedExpr):
+            pairs.append((node.target, node.value))
+    return tuple(pairs)
+
+
+def _target_value_pairs(target: ast.expr, value: ast.expr) -> tuple[tuple[ast.expr, ast.expr], ...]:
+    if (
+        isinstance(target, (ast.Tuple, ast.List))
+        and isinstance(value, (ast.Tuple, ast.List))
+        and len(target.elts) == len(value.elts)
+    ):
+        pairs: list[tuple[ast.expr, ast.expr]] = []
+        for target_item, value_item in zip(target.elts, value.elts):
+            pairs.extend(_target_value_pairs(target_item, value_item))
+        return tuple(pairs)
+    return ((target, value),)
+
+
+def _reflection_aliases(
+    nodes: Iterable[ast.AST], *, base: dict[str, str] | None = None
+) -> dict[str, str]:
+    nodes = tuple(nodes)
+    aliases = dict(REFLECTION_NAMES if base is None else base)
     shadowed = {
         node.name
-        for node in ast.walk(tree)
+        for node in nodes
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
     shadowed.update(
-        node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)
+        node.arg for node in nodes if isinstance(node, ast.arg)
     )
     for name in shadowed:
         aliases.pop(name, None)
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             for item in node.names:
                 aliases[item.asname or item.name] = item.name
         elif isinstance(node, ast.ImportFrom) and node.module in {"builtins", "operator"}:
             for item in node.names:
                 aliases[item.asname or item.name] = f"{node.module}.{item.name}"
-    assignments = [node for node in ast.walk(tree) if isinstance(node, ast.Assign)]
-    changed = True
-    while changed:
+    assignments = _assignment_pairs(nodes)
+    for _ in range(len(assignments) + 1):
         changed = False
-        for assignment in assignments:
-            resolved = _resolved_name(assignment.value, aliases)
-            if resolved not in {
+        for assignment_target, assignment_value in assignments:
+            for target, value in _target_value_pairs(assignment_target, assignment_value):
+                if not isinstance(target, ast.Name):
+                    continue
+                resolved = _resolved_name(value, aliases)
+                if resolved in {
                 "builtins.delattr", "builtins.eval", "builtins.exec",
                 "builtins.getattr", "builtins.setattr", "builtins.vars",
                 "operator.attrgetter",
-            }:
-                continue
-            for target in assignment.targets:
-                if isinstance(target, ast.Name) and aliases.get(target.id) != resolved:
-                    aliases[target.id] = resolved
+                }:
+                    if aliases.get(target.id) != resolved:
+                        aliases[target.id] = resolved
+                        changed = True
+                elif target.id in aliases:
+                    aliases.pop(target.id)
                     changed = True
+        if not changed:
+            break
     return aliases
 
 
 def _constant_string(node: ast.expr | None) -> str | None:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _literal_code(node: ast.expr | None) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+        try:
+            return node.value.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _literal_code(node.left)
+        right = _literal_code(node.right)
+        return left + right if left is not None and right is not None else None
+    return None
 
 
 def _expression_kind(
@@ -130,6 +190,13 @@ def _expression_kind(
                 return "store"
             if target_kind == "store":
                 return "store_member"
+        if resolved == "object.__getattribute__" and node.args:
+            attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
+            if (
+                _expression_kind(node.args[0], aliases, bindings) == "owner"
+                and attribute in {None, "store"}
+            ):
+                return "store"
         function_kind = _expression_kind(node.func, aliases, bindings)
         if function_kind == "owner_getter":
             attribute = _constant_string(node.args[0]) if node.args else None
@@ -140,7 +207,7 @@ def _expression_kind(
                 return "store"
         if (
             isinstance(node.func, ast.Attribute)
-            and node.func.attr == "get"
+            and node.func.attr in {"get", "pop"}
             and _expression_kind(node.func.value, aliases, bindings) == "owner_dict"
         ):
             attribute = _constant_string(node.args[0]) if node.args else None
@@ -163,25 +230,21 @@ def _expression_kind(
     return None
 
 
-def _value_bindings(tree: ast.AST, aliases: dict[str, str]) -> dict[str, str]:
+def _value_bindings(nodes: Iterable[ast.AST], aliases: dict[str, str]) -> dict[str, str]:
+    nodes = tuple(nodes)
     bindings = {"service": "owner"}
-    assignments: list[tuple[list[ast.expr], ast.expr]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            assignments.append((list(node.targets), node.value))
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            assignments.append(([node.target], node.value))
-    changed = True
-    while changed:
+    assignments = _assignment_pairs(nodes)
+    for _ in range(len(assignments) + 1):
         changed = False
-        for targets, value in assignments:
-            kind = _expression_kind(value, aliases, bindings)
-            if kind is None:
-                continue
-            for target in targets:
-                if isinstance(target, ast.Name) and bindings.get(target.id) != kind:
-                    bindings[target.id] = kind
-                    changed = True
+        for assignment_target, assignment_value in assignments:
+            for target, value in _target_value_pairs(assignment_target, assignment_value):
+                kind = _expression_kind(value, aliases, bindings)
+                if kind is not None and isinstance(target, ast.Name):
+                    if bindings.get(target.id) != kind:
+                        bindings[target.id] = kind
+                        changed = True
+        if not changed:
+            break
     return bindings
 
 
@@ -216,15 +279,12 @@ def declared_store_reads(root: Path) -> frozenset[str]:
     if len(memory_stores) != 1:
         raise ValueError("MemoryStore declaration is ambiguous")
     memory_key = memory_keys[0]
-    mro: dict[tuple[str, str], tuple[ast.ClassDef, str]] = {}
-    pending = [(memory_key, memory_stores[0])]
-    while pending:
-        key, declaration = pending.pop()
+    def local_bases(
+        key: tuple[str, str], declaration: tuple[ast.ClassDef, str]
+    ) -> tuple[tuple[str, str], ...]:
         node, relative = declaration
-        if key in mro:
-            continue
-        mro[key] = declaration
         module, _ = key
+        resolved_bases: list[tuple[str, str]] = []
         for base in node.bases:
             base_key: tuple[str, str] | None = None
             if isinstance(base, ast.Name):
@@ -245,23 +305,73 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                     f"store base class is ambiguous: {base_key[0]}.{base_key[1]}"
                 )
             if candidates:
-                pending.append((base_key, candidates[0]))
-    declarations: dict[str, str] = {}
-    for class_key in sorted(mro):
-        node, relative = mro[class_key]
+                resolved_bases.append(base_key)
+        return tuple(resolved_bases)
+
+    mro_cache: dict[tuple[str, str], tuple[tuple[str, str], ...]] = {}
+    resolving: set[tuple[str, str]] = set()
+
+    def linearize(key: tuple[str, str]) -> tuple[tuple[str, str], ...]:
+        if key in mro_cache:
+            return mro_cache[key]
+        if key in resolving:
+            raise ValueError(f"cyclic store inheritance: {key[0]}.{key[1]}")
+        resolving.add(key)
+        declaration = classes[key][0]
+        bases = local_bases(key, declaration)
+        sequences = [list(linearize(base)) for base in bases]
+        sequences.append(list(bases))
+        merged: list[tuple[str, str]] = []
+        while any(sequences):
+            sequences = [sequence for sequence in sequences if sequence]
+            candidate = next(
+                (
+                    sequence[0]
+                    for sequence in sequences
+                    if all(sequence[0] not in other[1:] for other in sequences)
+                ),
+                None,
+            )
+            if candidate is None:
+                raise ValueError(f"inconsistent store MRO: {key[0]}.{key[1]}")
+            merged.append(candidate)
+            for sequence in sequences:
+                if sequence and sequence[0] == candidate:
+                    sequence.pop(0)
+        resolving.remove(key)
+        result = (key, *merged)
+        mro_cache[key] = result
+        return result
+
+    mro_order = linearize(memory_key)
+    effective: set[str] = set()
+    declarations: set[str] = set()
+    for class_key in mro_order:
+        node, relative = classes[class_key][0]
+        module, _ = class_key
         for member in node.body:
             if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if "store_read" not in {
-                _decorator_name(item) for item in member.decorator_list
-            }:
+            if member.name in effective:
                 continue
-            if member.name in declarations:
-                raise ValueError(
-                    f"duplicate @store_read declaration {member.name}: "
-                    f"{declarations[member.name]} and {relative}"
-                )
-            declarations[member.name] = relative
+            effective.add(member.name)
+            canonical = False
+            for decorator in member.decorator_list:
+                if isinstance(decorator, ast.Name):
+                    canonical = imports[module].get(decorator.id) == (
+                        "storage_support", "store_read",
+                    )
+                elif isinstance(decorator, ast.Attribute) and isinstance(
+                    decorator.value, ast.Name
+                ):
+                    canonical = (
+                        imports[module].get(decorator.value.id)
+                        == ("storage_support", None)
+                        and decorator.attr == "store_read"
+                    )
+                if canonical:
+                    declarations.add(member.name)
+                    break
     return frozenset(declarations)
 
 
@@ -270,75 +380,102 @@ def calls_in_source(
     _depth: int = 0,
 ) -> tuple[DirectStoreWrite, ...]:
     tree = ast.parse(source, filename=path)
-    aliases = _reflection_aliases(tree)
-    bindings = _value_bindings(tree, aliases)
     parents = {
         child: parent
         for parent in ast.walk(tree)
         for child in ast.iter_child_nodes(parent)
     }
     writes: list[DirectStoreWrite] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _resolved_name(node.func, aliases) in {
-            "builtins.eval", "builtins.exec",
-        }:
-            literal = _constant_string(node.args[0]) if node.args else None
-            if literal is not None and _depth < 3 and calls_in_source(
-                literal, path=path, read_methods=read_methods, _depth=_depth + 1
+    module_nodes = _scope_nodes(tree)
+    module_aliases = _reflection_aliases(module_nodes)
+    scopes: list[ast.AST] = [tree]
+    scopes.extend(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+    )
+    for scope in scopes:
+        nodes = _scope_nodes(scope)
+        aliases = (
+            module_aliases
+            if scope is tree
+            else _reflection_aliases(nodes, base=module_aliases)
+        )
+        bindings = _value_bindings(nodes, aliases)
+        for node in nodes:
+            if isinstance(node, ast.Call) and _resolved_name(node.func, aliases) in {
+                "builtins.eval", "builtins.exec",
+            }:
+                literal = _literal_code(node.args[0]) if node.args else None
+                if literal is not None and _depth < 3 and calls_in_source(
+                    literal, path=path, read_methods=read_methods, _depth=_depth + 1
+                ):
+                    writes.append(
+                        DirectStoreWrite(
+                            path, node.lineno, "<literal_dynamic_store_access>"
+                        )
+                    )
+                continue
+            if (
+                isinstance(node, (ast.Call, ast.Subscript, ast.Attribute))
+                and _expression_kind(node, aliases, bindings) in {
+                    "owner_dict", "owner_getter", "store_getter",
+                }
             ):
                 writes.append(
-                    DirectStoreWrite(path, node.lineno, "<literal_dynamic_store_access>")
-                )
-            continue
-        if (
-            isinstance(node, (ast.Call, ast.Subscript))
-            and _expression_kind(node, aliases, bindings) in {"store", "store_member"}
-        ):
-            writes.append(
-                DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
-            )
-            continue
-        if (
-            isinstance(node, ast.Call)
-            and _resolved_name(node.func, aliases) in {
-                "builtins.delattr", "builtins.setattr",
-            }
-            and node.args
-            and (
-                _expression_kind(node.args[0], aliases, bindings) in {
-                    "store", "store_member",
-                }
-                or (
-                    _expression_kind(node.args[0], aliases, bindings) == "owner"
-                    and (
-                        len(node.args) < 2
-                        or _constant_string(node.args[1]) in {None, "store"}
+                    DirectStoreWrite(
+                        path, node.lineno, "<raw_store_capability_escape>"
                     )
                 )
-            )
-        ):
+                continue
+            if (
+                isinstance(node, (ast.Call, ast.Subscript))
+                and _expression_kind(node, aliases, bindings)
+                in {"store", "store_member"}
+            ):
+                writes.append(
+                    DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
+                )
+                continue
+            if (
+                isinstance(node, ast.Call)
+                and _resolved_name(node.func, aliases)
+                in {"builtins.delattr", "builtins.setattr"}
+                and node.args
+                and (
+                    _expression_kind(node.args[0], aliases, bindings)
+                    in {"store", "store_member"}
+                    or (
+                        _expression_kind(node.args[0], aliases, bindings) == "owner"
+                        and (
+                            len(node.args) < 2
+                            or _constant_string(node.args[1]) in {None, "store"}
+                        )
+                    )
+                )
+            ):
+                writes.append(
+                    DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
+                )
+                continue
+            if (
+                not isinstance(node, ast.Attribute)
+                or node.attr != "store"
+                or _expression_kind(node.value, aliases, bindings) != "owner"
+            ):
+                continue
+            parent = parents.get(node)
+            if not isinstance(parent, ast.Attribute) or parent.value is not node:
+                writes.append(DirectStoreWrite(path, node.lineno, "<store_escape>"))
+                continue
+            grandparent = parents.get(parent)
+            if isinstance(grandparent, ast.Call) and grandparent.func is parent:
+                if parent.attr not in read_methods:
+                    writes.append(DirectStoreWrite(path, node.lineno, parent.attr))
+                continue
             writes.append(
-                DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
+                DirectStoreWrite(path, node.lineno, f"{parent.attr}<store_escape>")
             )
-            continue
-        if (
-            not isinstance(node, ast.Attribute)
-            or node.attr != "store"
-            or _expression_kind(node.value, aliases, bindings) != "owner"
-        ):
-            continue
-        parent = parents.get(node)
-        if not isinstance(parent, ast.Attribute) or parent.value is not node:
-            writes.append(DirectStoreWrite(path, node.lineno, "<store_escape>"))
-            continue
-        grandparent = parents.get(parent)
-        if isinstance(grandparent, ast.Call) and grandparent.func is parent:
-            if parent.attr not in read_methods:
-                writes.append(DirectStoreWrite(path, node.lineno, parent.attr))
-            continue
-        writes.append(
-            DirectStoreWrite(path, node.lineno, f"{parent.attr}<store_escape>")
-        )
     return tuple(sorted(writes, key=lambda item: (item.path, item.line, item.method)))
 
 
