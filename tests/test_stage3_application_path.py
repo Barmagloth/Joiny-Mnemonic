@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 
 from scripts.stage3_surface_audit import (
@@ -39,10 +40,43 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service, other):\n    service.store.path = other\n",
             "def route(service):\n    service.store.path.unlink()\n",
             "def route(service):\n    consume(service.store)\n",
+            "def route(service):\n    ga = getattr\n    ga(service, 'store').future_write()\n",
+            "def route(service):\n    vr = vars\n    vr(service)['store'].future_write()\n",
+            "import builtins\ndef route(service):\n    builtins.getattr(service, 'store').future_write()\n",
+            "import operator\ndef route(service):\n    operator.attrgetter('store')(service).future_write()\n",
+            "import builtins as bi\ndef route(service):\n    svc = service\n    ga = bi.getattr\n    ga(svc, 'store').future_write()\n",
+            "from operator import attrgetter as ag\ndef route(service):\n    pick = ag\n    pick('store')(service).future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
                 self.assertTrue(calls_in_source(source, path="fixture.py"))
+
+    def test_unrelated_reflection_is_not_a_store_violation(self) -> None:
+        source = """
+def route(request):
+    getattr(request, 'method', None)
+    vars(request)
+    setattr(request, 'method', 'GET')
+    eval('1 + 1')
+    exec('answer = 2')
+"""
+        self.assertEqual(calls_in_source(source, path="fixture.py"), ())
+
+    def test_unrelated_duplicate_classes_do_not_ambiguate_store_mro(self) -> None:
+        with TemporaryDirectory(dir=ROOT / "tests" / "runtime") as directory:
+            root = Path(directory)
+            package = root / "src" / "joiny_mnemonic"
+            package.mkdir(parents=True)
+            (package / "storage.py").write_text(
+                "class Base:\n"
+                "    @store_read\n"
+                "    def lookup(self): pass\n"
+                "class MemoryStore(Base): pass\n",
+                encoding="utf-8",
+            )
+            (package / "one.py").write_text("class Duplicate: pass\n", encoding="utf-8")
+            (package / "two.py").write_text("class Duplicate: pass\n", encoding="utf-8")
+            self.assertEqual(declared_store_reads(root), frozenset({"lookup"}))
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)
