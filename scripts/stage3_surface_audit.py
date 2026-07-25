@@ -119,7 +119,8 @@ def _bound_target_names(target: ast.expr) -> frozenset[str]:
 
 
 def _reflection_aliases(
-    nodes: Iterable[ast.AST], *, base: dict[str, str] | None = None
+    nodes: Iterable[ast.AST], *, base: dict[str, str] | None = None,
+    defaults: dict[str, str] | None = None,
 ) -> dict[str, str]:
     nodes = tuple(nodes)
     aliases = dict(REFLECTION_NAMES if base is None else base)
@@ -133,6 +134,7 @@ def _reflection_aliases(
     )
     for name in shadowed:
         aliases.pop(name, None)
+    aliases.update(defaults or {})
     for node in nodes:
         if isinstance(node, ast.Import):
             for item in node.names:
@@ -205,12 +207,24 @@ def _expression_kind(
         if resolved == "builtins.getattr" and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
             target_kind = _expression_kind(node.args[0], aliases, bindings)
+            if (
+                isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "self"
+                and attribute == "service"
+            ):
+                return "owner"
             if target_kind == "owner" and attribute in {None, "store"}:
                 return "store"
             if target_kind == "store":
                 return "store_member"
         if resolved == "object.__getattribute__" and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
+            if (
+                isinstance(node.args[0], ast.Name)
+                and node.args[0].id == "self"
+                and attribute == "service"
+            ):
+                return "owner"
             if (
                 _expression_kind(node.args[0], aliases, bindings) == "owner"
                 and attribute in {None, "store"}
@@ -242,6 +256,14 @@ def _expression_kind(
     if isinstance(node, ast.Subscript):
         attribute = _constant_string(node.slice)
         if (
+            isinstance(node.value, ast.Attribute)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == "self"
+            and node.value.attr == "__dict__"
+            and attribute == "service"
+        ):
+            return "owner"
+        if (
             _expression_kind(node.value, aliases, bindings) == "owner_dict"
             and attribute in {None, "store"}
         ):
@@ -262,10 +284,15 @@ def _value_bindings(
         for assignment_target, assignment_value in assignments:
             for target, value in _target_value_pairs(assignment_target, assignment_value):
                 kind = _expression_kind(value, aliases, bindings)
-                if kind is not None and isinstance(target, ast.Name):
+                if not isinstance(target, ast.Name):
+                    continue
+                if kind is not None:
                     if bindings.get(target.id) != kind:
                         bindings[target.id] = kind
                         changed = True
+                elif target.id in bindings and target.id != "service":
+                    bindings.pop(target.id)
+                    changed = True
         if not changed:
             break
     return bindings
@@ -316,8 +343,6 @@ def declared_store_reads(root: Path) -> frozenset[str]:
     memory_stores = classes.get(memory_key, [])
     if not memory_stores:
         raise ValueError("MemoryStore declaration not found")
-    if len(memory_stores) != 1:
-        raise ValueError("MemoryStore declaration is ambiguous")
     def local_bases(
         key: tuple[str, str], declaration: tuple[ast.ClassDef, str]
     ) -> tuple[tuple[str, str], ...]:
@@ -330,7 +355,10 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                 imported = imports[module].get(base.id)
                 if imported and imported[1]:
                     imported_module = imported[0]
-                    if imported_module.startswith("joiny_mnemonic."):
+                    if (
+                        imported_module.startswith("joiny_mnemonic.")
+                        and imported_module.count(".") == 1
+                    ):
                         base_key = (
                             imported_module.rsplit(".", 1)[-1], str(imported[1])
                         )
@@ -343,19 +371,18 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                     imported = imports[module].get(parts[0])
                     if imported and imported[1] is None:
                         imported_module = imported[0]
-                        if imported_module.startswith("joiny_mnemonic."):
+                        if (
+                            imported_module.startswith("joiny_mnemonic.")
+                            and imported_module.count(".") == 1
+                        ):
                             base_key = (
                                 imported_module.rsplit(".", 1)[-1], parts[-1]
                             )
-                    elif parts[0] == "joiny_mnemonic" and len(parts) >= 3:
+                    elif parts[0] == "joiny_mnemonic" and len(parts) == 3:
                         base_key = (parts[-2], parts[-1])
             if base_key is None:
                 continue
             candidates = classes.get(base_key, [])
-            if len(candidates) > 1:
-                raise ValueError(
-                    f"store base class is ambiguous: {base_key[0]}.{base_key[1]}"
-                )
             if candidates:
                 resolved_bases.append(base_key)
         return tuple(resolved_bases)
@@ -369,7 +396,7 @@ def declared_store_reads(root: Path) -> frozenset[str]:
         if key in resolving:
             raise ValueError(f"cyclic store inheritance: {key[0]}.{key[1]}")
         resolving.add(key)
-        declaration = classes[key][0]
+        declaration = classes[key][-1]
         bases = local_bases(key, declaration)
         sequences = [list(linearize(base)) for base in bases]
         sequences.append(list(bases))
@@ -399,7 +426,7 @@ def declared_store_reads(root: Path) -> frozenset[str]:
     effective: set[str] = set()
     declarations: set[str] = set()
     for class_key in mro_order:
-        node, relative = classes[class_key][0]
+        node, relative = classes[class_key][-1]
         module, _ = class_key
         for member in reversed(node.body):
             if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -453,31 +480,65 @@ def calls_in_source(
         for child in ast.iter_child_nodes(parent)
     }
     writes: list[DirectStoreWrite] = []
-    module_nodes = _scope_nodes(tree)
-    module_aliases = _reflection_aliases(module_nodes, base=_base_aliases)
-    module_bindings = _value_bindings(
-        module_nodes, module_aliases, base=_base_bindings
-    )
     scopes: list[ast.AST] = [tree]
     scopes.extend(
         node
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
     )
-    contexts: dict[ast.AST, tuple[dict[str, str], dict[str, str]]] = {
-        tree: (module_aliases, module_bindings)
-    }
+    scope_data: dict[
+        ast.AST,
+        tuple[
+            tuple[ast.AST, ...], dict[str, str], dict[str, str],
+            dict[str, str], dict[str, str],
+        ],
+    ] = {}
+
+    def position(node: ast.AST) -> tuple[int, int]:
+        return (int(getattr(node, "lineno", 0)), int(getattr(node, "col_offset", 0)))
+
+    def context_at(
+        scope: ast.AST, target: ast.AST | None = None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        nodes, base_aliases, base_bindings, default_aliases, default_bindings = (
+            scope_data[scope]
+        )
+        if target is None:
+            prefix = nodes
+        else:
+            target_position = position(target)
+            prefix = tuple(
+                node
+                for node in nodes
+                if not hasattr(node, "lineno") or position(node) <= target_position
+            )
+        aliases = _reflection_aliases(
+            prefix, base=base_aliases, defaults=default_aliases
+        )
+        bindings = _value_bindings(
+            prefix,
+            aliases,
+            base={**base_bindings, **default_bindings},
+        )
+        return aliases, bindings
+
     for scope in scopes:
         nodes = _scope_nodes(scope)
         if scope is tree:
-            aliases, bindings = contexts[tree]
+            scope_data[tree] = (
+                nodes,
+                dict(REFLECTION_NAMES if _base_aliases is None else _base_aliases),
+                dict(_base_bindings or {}),
+                {},
+                {},
+            )
         else:
             parent = parents.get(scope)
-            while parent not in contexts:
+            while parent not in scope_data:
                 parent = parents.get(parent)
-            parent_aliases, parent_bindings = contexts[parent]
-            aliases = _reflection_aliases(nodes, base=parent_aliases)
-            bindings = _value_bindings(nodes, aliases, base=parent_bindings)
+            parent_aliases, parent_bindings = context_at(parent, scope)
+            default_aliases: dict[str, str] = {}
+            default_bindings: dict[str, str] = {}
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 positional = [*scope.args.posonlyargs, *scope.args.args]
                 defaults = [
@@ -493,12 +554,19 @@ def calls_in_source(
                 for argument, default in defaults:
                     resolved = _resolved_name(default, parent_aliases)
                     if resolved in TRANSFERABLE_CALLABLES:
-                        aliases[argument.arg] = resolved
+                        default_aliases[argument.arg] = resolved
                     kind = _expression_kind(default, parent_aliases, parent_bindings)
                     if kind is not None:
-                        bindings[argument.arg] = kind
-            contexts[scope] = (aliases, bindings)
+                        default_bindings[argument.arg] = kind
+            scope_data[scope] = (
+                nodes,
+                parent_aliases,
+                parent_bindings,
+                default_aliases,
+                default_bindings,
+            )
         for node in nodes:
+            aliases, bindings = context_at(scope, node)
             if isinstance(node, ast.Call) and _resolved_name(node.func, aliases) in {
                 "builtins.eval", "builtins.exec",
             }:

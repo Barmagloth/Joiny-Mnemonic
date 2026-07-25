@@ -72,6 +72,9 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service):\n    return (lambda ga=getattr: ga(service, 'store').future_write())()\n",
             "def route(service):\n    return (lambda run=exec: run('service.store.future_write()'))()\n",
             "def route(service):\n    ga = None\n    ga = getattr\n    ga(service, 'store').future_write()\n",
+            "def route(service):\n    ga = getattr\n    ga(service, 'store').future_write()\n    ga = None\n",
+            "class Handler:\n    def route(self):\n        getattr(self, 'service').store.future_write()\n",
+            "class Handler:\n    def route(self):\n        self.__dict__['service'].store.future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -129,6 +132,12 @@ def route(service):
         self.assertEqual(declared_store_reads(qualified), frozenset({"lookup"}))
         foreign = ROOT / "tests" / "fixtures" / "stage3_mro_foreign"
         self.assertEqual(declared_store_reads(foreign), frozenset())
+        nested = ROOT / "tests" / "fixtures" / "stage3_mro_nested_foreign"
+        self.assertEqual(declared_store_reads(nested), frozenset())
+
+    def test_last_top_level_memory_store_binding_wins(self) -> None:
+        fixture = ROOT / "tests" / "fixtures" / "stage3_last_memory_store"
+        self.assertEqual(declared_store_reads(fixture), frozenset())
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)
