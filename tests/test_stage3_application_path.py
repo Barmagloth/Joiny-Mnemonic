@@ -63,6 +63,11 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service):\n    eval('service.store.' + 'future_write()')\n",
             "def route(service):\n    exec(b'service.store.future_write()')\n",
             "def route(service):\n    getattr(service, 'store').future_write()\n\ndef helper(getattr):\n    return getattr\n",
+            "def route(service):\n    ga = object.__getattribute__\n    ga(service, 'store').future_write()\n",
+            "def outer(service):\n    svc = service\n    ga = getattr\n    def route():\n        ga(svc, 'store').future_write()\n",
+            "def route(service, ga=getattr):\n    ga(service, 'store').future_write()\n",
+            "def route(service, svc=service):\n    svc.store.future_write()\n",
+            "def route(service):\n    svc = service\n    exec('svc.store.future_write()')\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -74,6 +79,7 @@ def route(request):
     getattr(request, 'method', None)
     getattr(request, 'store', None)
     request.store
+    request.service.store.get_event('evt')
     vars(request)
     setattr(request, 'method', 'GET')
     eval('1 + 1')
@@ -94,6 +100,12 @@ def route(service):
 """
         self.assertEqual(calls_in_source(assigned, path="fixture.py"), ())
 
+    def test_literal_nesting_has_no_semantic_depth_bypass(self) -> None:
+        payload = "service.store.future_write()"
+        for _ in range(4):
+            payload = f"exec({payload!r})"
+        self.assertTrue(calls_in_source(payload, path="fixture.py"))
+
     def test_unrelated_duplicate_classes_do_not_ambiguate_store_mro(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "stage3_mro"
         self.assertEqual(declared_store_reads(fixture), frozenset({"lookup"}))
@@ -101,6 +113,14 @@ def route(service):
     def test_effective_override_and_foreign_decorator_are_not_reads(self) -> None:
         fixture = ROOT / "tests" / "fixtures" / "stage3_mro_override"
         self.assertEqual(declared_store_reads(fixture), frozenset())
+        shadow = ROOT / "tests" / "fixtures" / "stage3_decorator_shadow"
+        self.assertEqual(declared_store_reads(shadow), frozenset())
+
+    def test_mro_resolves_relative_and_fully_qualified_module_imports(self) -> None:
+        relative = ROOT / "tests" / "fixtures" / "stage3_mro_module_import"
+        qualified = ROOT / "tests" / "fixtures" / "stage3_mro_full_import"
+        self.assertEqual(declared_store_reads(relative), frozenset({"lookup"}))
+        self.assertEqual(declared_store_reads(qualified), frozenset({"lookup"}))
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)
