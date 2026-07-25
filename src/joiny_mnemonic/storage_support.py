@@ -24,6 +24,12 @@ def atomic_write(method: Any) -> Any:
     return wrapped
 
 
+def store_read(method: Any) -> Any:
+    """Declare a public MemoryStore operation as read-only for surface audits."""
+    method._joiny_store_read_only = True
+    return method
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 

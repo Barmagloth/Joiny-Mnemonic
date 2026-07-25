@@ -29,7 +29,7 @@ from .candidate_confirmation import CandidateConfirmationMixin
 from .dataflow_storage import DataflowStorageMixin
 from .task_storage import TaskStorageMixin
 from .transactions import TransactionMixin
-from .storage_support import integrity_checked, json_text as _json, now as _now
+from .storage_support import integrity_checked, json_text as _json, now as _now, store_read
 from .policy_contract import policy_activation_allowed
 from .transition_rules import (
     CANDIDATE_RULE,
@@ -827,6 +827,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             row = self._conn.execute("PRAGMA schema_version").fetchone()
         return int(row[0])
 
+    @store_read
     def assert_integrity(self) -> None:
         """Verify canonical hashes and fail closed if durable data was altered."""
         for _ in range(3):
@@ -1651,6 +1652,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
     def _event_origin_evidence(row: sqlite3.Row) -> str:
         return origin_evidence_type(MemoryStore._event_from_row(row))
 
+    @store_read
     @integrity_checked
     def get_event(self, event_id: str) -> Event:
         with self._lock:
@@ -1659,6 +1661,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             raise KeyError(f"unknown event: {event_id}")
         return self._event_from_row(row)
 
+    @store_read
     @integrity_checked
     def get_artifact(self, artifact_id: str) -> Artifact:
         with self._lock:
@@ -1916,6 +1919,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             supersedes_id=row["supersedes_id"], created_at=row["created_at"],
         )
 
+    @store_read
     @integrity_checked
     def get_active_blocks(self, *, branch_id: str = "main") -> dict[str, ActiveBlock]:
         with self._lock:
@@ -2202,6 +2206,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             raise KeyError(f"unknown memory: {memory_id}")
         return self._memory_from_row(row)
 
+    @store_read
     @integrity_checked
     def list_memories(
         self,
@@ -2911,6 +2916,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             raise KeyError(f"unknown tool output view: {view_id}")
         return self._tool_view_from_row(row)
 
+    @store_read
     @integrity_checked
     def list_tool_output_views(self, event_id: str) -> tuple[ToolOutputView, ...]:
         with self._lock:
@@ -3517,6 +3523,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             )
         return finding_id
 
+    @store_read
     @integrity_checked
     def list_security_findings(self) -> tuple[dict[str, Any], ...]:
         with self._lock:
@@ -4092,6 +4099,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
         ).fetchone()
         return str(row["to_status"]) if row else None
 
+    @store_read
     @integrity_checked
     def list_extraction_candidates(
         self, *, status: str | None = None
@@ -4422,6 +4430,7 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             )
         return transition_id
 
+    @store_read
     @integrity_checked
     def list_settlement_candidates(
         self, *, kind: str | None = None, status: str | None = None
