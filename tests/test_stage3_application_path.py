@@ -68,6 +68,10 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service, ga=getattr):\n    ga(service, 'store').future_write()\n",
             "def route(service, svc=service):\n    svc.store.future_write()\n",
             "def route(service):\n    svc = service\n    exec('svc.store.future_write()')\n",
+            "def route(service):\n    return (lambda svc=service: svc.store.future_write())()\n",
+            "def route(service):\n    return (lambda ga=getattr: ga(service, 'store').future_write())()\n",
+            "def route(service):\n    return (lambda run=exec: run('service.store.future_write()'))()\n",
+            "def route(service):\n    ga = None\n    ga = getattr\n    ga(service, 'store').future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):
@@ -114,13 +118,17 @@ def route(service):
         fixture = ROOT / "tests" / "fixtures" / "stage3_mro_override"
         self.assertEqual(declared_store_reads(fixture), frozenset())
         shadow = ROOT / "tests" / "fixtures" / "stage3_decorator_shadow"
+        foreign = ROOT / "tests" / "fixtures" / "stage3_foreign_decorator"
         self.assertEqual(declared_store_reads(shadow), frozenset())
+        self.assertEqual(declared_store_reads(foreign), frozenset())
 
     def test_mro_resolves_relative_and_fully_qualified_module_imports(self) -> None:
         relative = ROOT / "tests" / "fixtures" / "stage3_mro_module_import"
         qualified = ROOT / "tests" / "fixtures" / "stage3_mro_full_import"
         self.assertEqual(declared_store_reads(relative), frozenset({"lookup"}))
         self.assertEqual(declared_store_reads(qualified), frozenset({"lookup"}))
+        foreign = ROOT / "tests" / "fixtures" / "stage3_mro_foreign"
+        self.assertEqual(declared_store_reads(foreign), frozenset())
 
     def test_read_classification_comes_from_store_declarations(self) -> None:
         reads = declared_store_reads(ROOT)

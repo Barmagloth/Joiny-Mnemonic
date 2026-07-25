@@ -69,13 +69,17 @@ def _resolved_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
 
 def _scope_nodes(root: ast.AST) -> tuple[ast.AST, ...]:
     nodes: list[ast.AST] = []
-    stack = list(ast.iter_child_nodes(root))
-    while stack:
-        node = stack.pop()
-        nodes.append(node)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-            continue
-        stack.extend(ast.iter_child_nodes(node))
+
+    def visit(parent: ast.AST) -> None:
+        for node in ast.iter_child_nodes(parent):
+            nodes.append(node)
+            if isinstance(
+                node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+            ):
+                continue
+            visit(node)
+
+    visit(root)
     return tuple(nodes)
 
 
@@ -282,19 +286,23 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 module_imports.pop(node.name, None)
             elif isinstance(node, ast.ImportFrom):
-                imported_module = node.module.split(".")[-1] if node.module else None
+                imported_module = node.module
+                if node.level and imported_module:
+                    imported_module = f"joiny_mnemonic.{imported_module}"
                 for item in node.names:
                     if imported_module:
                         module_imports[item.asname or item.name] = (
                             imported_module, item.name,
                         )
                     else:
-                        module_imports[item.asname or item.name] = (item.name, None)
+                        module_imports[item.asname or item.name] = (
+                            f"joiny_mnemonic.{item.name}", None,
+                        )
             elif isinstance(node, ast.Import):
                 for item in node.names:
-                    imported_module = item.name.split(".")[-1]
-                    module_imports[item.asname or imported_module] = (
-                        imported_module, None,
+                    local_name = item.asname or item.name.split(".")[0]
+                    module_imports[local_name] = (
+                        item.name, None,
                     )
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
@@ -321,7 +329,11 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             if isinstance(base, ast.Name):
                 imported = imports[module].get(base.id)
                 if imported and imported[1]:
-                    base_key = (imported[0], str(imported[1]))
+                    imported_module = imported[0]
+                    if imported_module.startswith("joiny_mnemonic."):
+                        base_key = (
+                            imported_module.rsplit(".", 1)[-1], str(imported[1])
+                        )
                 else:
                     base_key = (module, base.id)
             elif isinstance(base, ast.Attribute):
@@ -330,8 +342,12 @@ def declared_store_reads(root: Path) -> frozenset[str]:
                 if len(parts) >= 2:
                     imported = imports[module].get(parts[0])
                     if imported and imported[1] is None:
-                        base_key = (imported[0], parts[-1])
-                    else:
+                        imported_module = imported[0]
+                        if imported_module.startswith("joiny_mnemonic."):
+                            base_key = (
+                                imported_module.rsplit(".", 1)[-1], parts[-1]
+                            )
+                    elif parts[0] == "joiny_mnemonic" and len(parts) >= 3:
                         base_key = (parts[-2], parts[-1])
             if base_key is None:
                 continue
@@ -409,14 +425,14 @@ def declared_store_reads(root: Path) -> frozenset[str]:
             for decorator in member.decorator_list:
                 if isinstance(decorator, ast.Name):
                     canonical = imports[module].get(decorator.id) == (
-                        "storage_support", "store_read",
+                        "joiny_mnemonic.storage_support", "store_read",
                     )
                 elif isinstance(decorator, ast.Attribute) and isinstance(
                     decorator.value, ast.Name
                 ):
                     canonical = (
                         imports[module].get(decorator.value.id)
-                        == ("storage_support", None)
+                        == ("joiny_mnemonic.storage_support", None)
                         and decorator.attr == "store_read"
                     )
                 if canonical:
@@ -462,7 +478,7 @@ def calls_in_source(
             parent_aliases, parent_bindings = contexts[parent]
             aliases = _reflection_aliases(nodes, base=parent_aliases)
             bindings = _value_bindings(nodes, aliases, base=parent_bindings)
-            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 positional = [*scope.args.posonlyargs, *scope.args.args]
                 defaults = [
                     *zip(positional[-len(scope.args.defaults):], scope.args.defaults)
