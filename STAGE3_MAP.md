@@ -10,7 +10,8 @@ Executable inventory: `python scripts/stage3_surface_audit.py`.
 The audit is fail-closed: every direct `.store.<method>(...)` call in CLI, MCP,
 HTTP or hooks is treated as a write unless the MemoryStore declaration carries
 the canonical `@store_read` ownership marker. Raw-store aliases, bound methods,
-`getattr`, subscripts and passing the store to another function are violations.
+reflection, dynamic access, subscripts and passing the store to another
+function are violations. No raw-store attribute exception is permitted.
 `--require-clean` is the final Stage 3 acceptance mode.
 
 Current direct write ownership violations:

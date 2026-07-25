@@ -15,7 +15,10 @@ PUBLIC_SURFACES = (
     "src/joiny_mnemonic/hooks.py",
 )
 
-READ_ONLY_STORE_ATTRIBUTES = frozenset({"path"})
+REFLECTION_CALLS = frozenset({
+    "delattr", "eval", "exec", "setattr", "vars",
+})
+SAFE_GETATTR = frozenset({("stream", "buffer"), ("stream", "reconfigure")})
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,21 +37,45 @@ def _decorator_name(node: ast.expr) -> str | None:
 
 
 def declared_store_reads(root: Path) -> frozenset[str]:
-    declarations: dict[str, str] = {}
+    classes: dict[str, tuple[ast.ClassDef, str]] = {}
     for source_path in sorted((root / "src/joiny_mnemonic").glob("*.py")):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        relative = source_path.relative_to(root).as_posix()
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                if node.name in classes:
+                    raise ValueError(f"duplicate store class candidate: {node.name}")
+                classes[node.name] = (node, relative)
+    if "MemoryStore" not in classes:
+        raise ValueError("MemoryStore declaration not found")
+    mro_names: set[str] = set()
+    pending = ["MemoryStore"]
+    while pending:
+        name = pending.pop()
+        if name in mro_names:
+            continue
+        mro_names.add(name)
+        node, _ = classes[name]
+        for base in node.bases:
+            base_name = _decorator_name(base)
+            if base_name in classes:
+                pending.append(str(base_name))
+    declarations: dict[str, str] = {}
+    for class_name in sorted(mro_names):
+        node, relative = classes[class_name]
+        for member in node.body:
+            if not isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            if "store_read" not in {_decorator_name(item) for item in node.decorator_list}:
+            if "store_read" not in {
+                _decorator_name(item) for item in member.decorator_list
+            }:
                 continue
-            relative = source_path.relative_to(root).as_posix()
-            if node.name in declarations:
+            if member.name in declarations:
                 raise ValueError(
-                    f"duplicate @store_read declaration {node.name}: "
-                    f"{declarations[node.name]} and {relative}"
+                    f"duplicate @store_read declaration {member.name}: "
+                    f"{declarations[member.name]} and {relative}"
                 )
-            declarations[node.name] = relative
+            declarations[member.name] = relative
     return frozenset(declarations)
 
 
@@ -63,6 +90,34 @@ def calls_in_source(
     }
     writes: list[DirectStoreWrite] = []
     for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+        ):
+            target = node.args[0].id if node.args and isinstance(node.args[0], ast.Name) else None
+            attribute = (
+                node.args[1].value
+                if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                else None
+            )
+            if (target, attribute) not in SAFE_GETATTR:
+                writes.append(
+                    DirectStoreWrite(path, node.lineno, "<dynamic_access>")
+                )
+            continue
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in REFLECTION_CALLS
+        ):
+            writes.append(DirectStoreWrite(path, node.lineno, "<dynamic_access>"))
+            continue
+        if isinstance(node, ast.Attribute) and node.attr in {
+            "__dict__", "__getattribute__"
+        }:
+            writes.append(DirectStoreWrite(path, node.lineno, "<dynamic_access>"))
+            continue
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
@@ -97,10 +152,9 @@ def calls_in_source(
             if parent.attr not in read_methods:
                 writes.append(DirectStoreWrite(path, node.lineno, parent.attr))
             continue
-        if parent.attr not in READ_ONLY_STORE_ATTRIBUTES:
-            writes.append(
-                DirectStoreWrite(path, node.lineno, f"{parent.attr}<store_escape>")
-            )
+        writes.append(
+            DirectStoreWrite(path, node.lineno, f"{parent.attr}<store_escape>")
+        )
     return tuple(sorted(writes, key=lambda item: (item.path, item.line, item.method)))
 
 

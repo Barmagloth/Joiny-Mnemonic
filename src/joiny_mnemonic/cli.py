@@ -684,7 +684,7 @@ def run(args: argparse.Namespace) -> int:
                     ),
                     details=dict(finding),
                 )
-            _print({"database": str(service.store.path), **initialized})
+            _print({"database": str(database), **initialized})
         elif args.command == "session-start":
             _print({"id": service.store.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
         elif args.command == "branch-create":
