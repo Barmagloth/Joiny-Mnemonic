@@ -35,6 +35,7 @@ joiny_mnemonic = ["context_limit_presets.json", "explorer.html"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+norecursedirs = ["tests/runtime"]
 
 [tool.ruff]
 target-version = "py311"
