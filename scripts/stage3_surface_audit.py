@@ -28,6 +28,7 @@ TRANSFERABLE_CALLABLES = frozenset({
     *REFLECTION_NAMES.values(),
     "operator.attrgetter",
 })
+POSSIBILITY_SEPARATOR = "\x1f"
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,19 +55,37 @@ def _qualified_name(node: ast.expr) -> str | None:
     return None
 
 
-def _resolved_name(node: ast.expr, aliases: dict[str, str]) -> str | None:
+def _possibilities(value: str | None) -> frozenset[str]:
+    return frozenset(value.split(POSSIBILITY_SEPARATOR)) if value else frozenset()
+
+
+def _pack_possibilities(values: Iterable[str]) -> str:
+    return POSSIBILITY_SEPARATOR.join(
+        sorted(
+            {
+                option
+                for value in values
+                for option in _possibilities(value)
+            }
+        )
+    )
+
+
+def _resolved_names(node: ast.expr, aliases: dict[str, str]) -> frozenset[str]:
     if isinstance(node, ast.NamedExpr):
-        return _resolved_name(node.value, aliases)
+        return _resolved_names(node.value, aliases)
     name = _qualified_name(node)
     if name is None:
-        return None
+        return frozenset()
     if name in aliases:
-        return aliases[name]
+        return _possibilities(aliases[name])
     head, separator, tail = name.partition(".")
     resolved_head = aliases.get(head)
     if separator and resolved_head:
-        return f"{resolved_head}.{tail}"
-    return name
+        return frozenset(
+            f"{option}.{tail}" for option in _possibilities(resolved_head)
+        )
+    return frozenset({name})
 
 
 def _scope_nodes(root: ast.AST) -> tuple[ast.AST, ...]:
@@ -120,41 +139,20 @@ def _bound_target_names(target: ast.expr) -> frozenset[str]:
     return frozenset()
 
 
-def _reflection_aliases(
-    nodes: Iterable[ast.AST], *, base: dict[str, str] | None = None,
-    defaults: dict[str, str] | None = None,
+def _merge_possible_maps(
+    mappings: Iterable[dict[str, str]],
 ) -> dict[str, str]:
-    nodes = tuple(nodes)
-    aliases = dict(REFLECTION_NAMES if base is None else base)
-    for name in (node.arg for node in nodes if isinstance(node, ast.arg)):
-        aliases.pop(name, None)
-    aliases.update(defaults or {})
-    for node in nodes:
-        if isinstance(node, ast.Import):
-            for item in node.names:
-                aliases[item.asname or item.name] = item.name
-        elif isinstance(node, ast.ImportFrom):
-            for item in node.names:
-                bound = item.asname or item.name
-                if node.module in {"builtins", "operator"}:
-                    aliases[bound] = f"{node.module}.{item.name}"
-                else:
-                    aliases.pop(bound, None)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            aliases.pop(node.name, None)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
-            for assignment_target, assignment_value in _assignment_pairs((node,)):
-                for target, value in _target_value_pairs(
-                    assignment_target, assignment_value
-                ):
-                    if not isinstance(target, ast.Name):
-                        continue
-                    resolved = _resolved_name(value, aliases)
-                    if resolved in TRANSFERABLE_CALLABLES:
-                        aliases[target.id] = resolved
-                    else:
-                        aliases.pop(target.id, None)
-    return aliases
+    mappings = tuple(mappings)
+    keys = {key for mapping in mappings for key in mapping}
+    merged: dict[str, str] = {}
+    for key in keys:
+        values = {mapping[key] for mapping in mappings if key in mapping}
+        merged[key] = _pack_possibilities(values)
+    return merged
+
+
+def _has_kind(value: str | None, *kinds: str) -> bool:
+    return bool(_possibilities(value).intersection(kinds))
 
 
 def _constant_string(node: ast.expr | None) -> str | None:
@@ -185,54 +183,58 @@ def _expression_kind(
         return bindings.get(node.id)
     if isinstance(node, ast.Attribute):
         value_kind = _expression_kind(node.value, aliases, bindings)
-        if node.attr == "service" and value_kind == "handler":
+        if node.attr == "service" and _has_kind(value_kind, "handler"):
             return "owner"
-        if value_kind == "owner" and node.attr == "store":
+        if _has_kind(value_kind, "owner") and node.attr == "store":
             return "store"
-        if value_kind == "owner" and node.attr == "__dict__":
+        if _has_kind(value_kind, "owner") and node.attr == "__dict__":
             return "owner_dict"
-        if value_kind == "handler" and node.attr == "__dict__":
+        if _has_kind(value_kind, "handler") and node.attr == "__dict__":
             return "handler_dict"
-        if value_kind == "owner" and node.attr == "__getattribute__":
+        if _has_kind(value_kind, "owner") and node.attr == "__getattribute__":
             return "owner_getter"
-        if value_kind == "store":
+        if _has_kind(value_kind, "store"):
             return "store_member"
     if isinstance(node, ast.Call):
-        resolved = _resolved_name(node.func, aliases)
-        if resolved == "builtins.getattr" and node.args:
+        resolved = _resolved_names(node.func, aliases)
+        if "builtins.getattr" in resolved and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
             target_kind = _expression_kind(node.args[0], aliases, bindings)
-            if target_kind == "handler" and attribute == "service":
+            if _has_kind(target_kind, "handler") and attribute == "service":
                 return "owner"
-            if target_kind == "handler" and attribute == "__dict__":
+            if _has_kind(target_kind, "handler") and attribute == "__dict__":
                 return "handler_dict"
-            if target_kind == "owner" and attribute == "__dict__":
+            if _has_kind(target_kind, "owner") and attribute == "__dict__":
                 return "owner_dict"
-            if target_kind == "owner" and attribute in {None, "store"}:
+            if _has_kind(target_kind, "owner") and attribute in {None, "store"}:
                 return "store"
-            if target_kind == "store":
+            if _has_kind(target_kind, "store"):
                 return "store_member"
-        if resolved == "object.__getattribute__" and node.args:
+        if "object.__getattribute__" in resolved and node.args:
             attribute = _constant_string(node.args[1]) if len(node.args) >= 2 else None
             target_kind = _expression_kind(node.args[0], aliases, bindings)
-            if target_kind == "handler" and attribute == "service":
+            if _has_kind(target_kind, "handler") and attribute == "service":
                 return "owner"
-            if target_kind == "handler" and attribute == "__dict__":
+            if _has_kind(target_kind, "handler") and attribute == "__dict__":
                 return "handler_dict"
-            if target_kind == "owner" and attribute == "__dict__":
+            if _has_kind(target_kind, "owner") and attribute == "__dict__":
                 return "owner_dict"
             if (
-                _expression_kind(node.args[0], aliases, bindings) == "owner"
+                _has_kind(
+                    _expression_kind(node.args[0], aliases, bindings), "owner"
+                )
                 and attribute in {None, "store"}
             ):
                 return "store"
         function_kind = _expression_kind(node.func, aliases, bindings)
-        if function_kind == "owner_getter":
+        if _has_kind(function_kind, "owner_getter"):
             attribute = _constant_string(node.args[0]) if node.args else None
             if attribute in {None, "store"}:
                 return "store"
-        if function_kind == "store_getter" and node.args:
-            if _expression_kind(node.args[0], aliases, bindings) == "owner":
+        if _has_kind(function_kind, "store_getter") and node.args:
+            if _has_kind(
+                _expression_kind(node.args[0], aliases, bindings), "owner"
+            ):
                 return "store"
         if (
             isinstance(node.func, ast.Attribute)
@@ -240,59 +242,111 @@ def _expression_kind(
         ):
             container_kind = _expression_kind(node.func.value, aliases, bindings)
             attribute = _constant_string(node.args[0]) if node.args else None
-            if container_kind == "owner_dict" and attribute in {None, "store"}:
+            if _has_kind(container_kind, "owner_dict") and attribute in {None, "store"}:
                 return "store"
-            if container_kind == "handler_dict" and attribute in {None, "service"}:
+            if _has_kind(container_kind, "handler_dict") and attribute in {None, "service"}:
                 return "owner"
-        if resolved == "builtins.vars" and node.args:
+        if "builtins.vars" in resolved and node.args:
             target_kind = _expression_kind(node.args[0], aliases, bindings)
-            if target_kind == "owner":
+            if _has_kind(target_kind, "owner"):
                 return "owner_dict"
-            if target_kind == "handler":
+            if _has_kind(target_kind, "handler"):
                 return "handler_dict"
-        if resolved == "operator.attrgetter":
+        if "operator.attrgetter" in resolved:
             attribute = _constant_string(node.args[0]) if node.args else None
             if attribute in {None, "store"}:
                 return "store_getter"
     if isinstance(node, ast.Subscript):
         attribute = _constant_string(node.slice)
         value_kind = _expression_kind(node.value, aliases, bindings)
-        if value_kind == "handler_dict" and attribute == "service":
+        if _has_kind(value_kind, "handler_dict") and attribute == "service":
             return "owner"
         if (
-            value_kind == "owner_dict"
+            _has_kind(value_kind, "owner_dict")
             and attribute in {None, "store"}
         ):
             return "store"
     return None
 
 
-def _value_bindings(
-    nodes: Iterable[ast.AST], aliases: dict[str, str],
-    *, base: dict[str, str] | None = None,
-) -> dict[str, str]:
+def _analysis_context(
+    nodes: Iterable[ast.AST], *,
+    base_aliases: dict[str, str] | None = None,
+    base_bindings: dict[str, str] | None = None,
+    default_aliases: dict[str, str] | None = None,
+    default_bindings: dict[str, str] | None = None,
+    conditional_nodes: frozenset[ast.AST] = frozenset(),
+) -> tuple[dict[str, str], dict[str, str]]:
     nodes = tuple(nodes)
-    bindings = dict(base or {})
+    aliases = dict(REFLECTION_NAMES if base_aliases is None else base_aliases)
+    for name in (node.arg for node in nodes if isinstance(node, ast.arg)):
+        aliases.pop(name, None)
+    aliases.update(default_aliases or {})
+    bindings = dict(base_bindings or {})
     bindings["service"] = "owner"
     bindings["self"] = "handler"
-    assignments = _assignment_pairs(nodes)
-    for _ in range(len(assignments) + 1):
-        changed = False
-        for assignment_target, assignment_value in assignments:
-            for target, value in _target_value_pairs(assignment_target, assignment_value):
-                kind = _expression_kind(value, aliases, bindings)
-                if not isinstance(target, ast.Name):
-                    continue
-                if kind is not None:
-                    if bindings.get(target.id) != kind:
+    bindings.update(default_bindings or {})
+    for node in nodes:
+        prior_aliases = dict(aliases)
+        prior_bindings = dict(bindings)
+        binding_event = False
+        if isinstance(node, ast.Import):
+            binding_event = True
+            for item in node.names:
+                bound = item.asname or item.name.split(".")[0]
+                aliases[bound] = (
+                    item.name if item.asname else item.name.split(".")[0]
+                )
+                bindings.pop(bound, None)
+        elif isinstance(node, ast.ImportFrom):
+            binding_event = True
+            for item in node.names:
+                bound = item.asname or item.name
+                if node.module in {"builtins", "operator"}:
+                    aliases[bound] = f"{node.module}.{item.name}"
+                else:
+                    aliases.pop(bound, None)
+                bindings.pop(bound, None)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            binding_event = True
+            aliases.pop(node.name, None)
+            bindings.pop(node.name, None)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            binding_event = True
+            for assignment_target, assignment_value in _assignment_pairs((node,)):
+                for target, value in _target_value_pairs(
+                    assignment_target, assignment_value
+                ):
+                    if not isinstance(target, ast.Name):
+                        continue
+                    resolved = _resolved_names(value, aliases)
+                    kind = _expression_kind(value, aliases, bindings)
+                    transferable = resolved.intersection(TRANSFERABLE_CALLABLES)
+                    if transferable:
+                        aliases[target.id] = _pack_possibilities(transferable)
+                    else:
+                        aliases.pop(target.id, None)
+                    if kind is not None:
                         bindings[target.id] = kind
-                        changed = True
-                elif target.id in bindings and target.id != "service":
-                    bindings.pop(target.id)
-                    changed = True
-        if not changed:
-            break
-    return bindings
+                    elif target.id != "service":
+                        bindings.pop(target.id, None)
+        elif isinstance(node, ast.AugAssign):
+            binding_event = True
+            for name in _bound_target_names(node.target):
+                aliases.pop(name, None)
+                if name != "service":
+                    bindings.pop(name, None)
+        elif isinstance(node, ast.Delete):
+            binding_event = True
+            for target in node.targets:
+                for name in _bound_target_names(target):
+                    aliases.pop(name, None)
+                    if name != "service":
+                        bindings.pop(name, None)
+        if binding_event and node in conditional_nodes:
+            aliases = _merge_possible_maps((prior_aliases, aliases))
+            bindings = _merge_possible_maps((prior_bindings, bindings))
+    return aliases, bindings
 
 
 def declared_store_reads(root: Path) -> frozenset[str]:
@@ -570,9 +624,45 @@ def calls_in_source(
             dict[str, str], dict[str, str],
         ],
     ] = {}
+    conditional_nodes_by_scope: dict[ast.AST, frozenset[ast.AST]] = {}
 
     def position(node: ast.AST) -> tuple[int, int]:
         return (int(getattr(node, "lineno", 0)), int(getattr(node, "col_offset", 0)))
+
+    def conditionally_executed(node: ast.AST, scope: ast.AST) -> bool:
+        child = node
+        parent = parents.get(child)
+        while parent is not None and parent is not scope:
+            if isinstance(parent, ast.If):
+                if child is not parent.test:
+                    return True
+            elif isinstance(parent, ast.IfExp):
+                if child is not parent.test:
+                    return True
+            elif isinstance(parent, (ast.For, ast.AsyncFor)):
+                if child is not parent.iter:
+                    return True
+            elif isinstance(parent, ast.While):
+                if child is not parent.test:
+                    return True
+            elif isinstance(parent, ast.BoolOp):
+                if child is not parent.values[0]:
+                    return True
+            elif isinstance(
+                parent,
+                (
+                    ast.Try,
+                    ast.TryStar,
+                    ast.With,
+                    ast.AsyncWith,
+                    ast.Match,
+                    ast.comprehension,
+                ),
+            ):
+                return True
+            child = parent
+            parent = parents.get(child)
+        return False
 
     def context_at(
         scope: ast.AST, target: ast.AST | None = None
@@ -589,18 +679,20 @@ def calls_in_source(
                 for node in nodes
                 if not hasattr(node, "lineno") or position(node) <= target_position
             )
-        aliases = _reflection_aliases(
-            prefix, base=base_aliases, defaults=default_aliases
-        )
-        bindings = _value_bindings(
+        return _analysis_context(
             prefix,
-            aliases,
-            base={**base_bindings, **default_bindings},
+            base_aliases=base_aliases,
+            base_bindings=base_bindings,
+            default_aliases=default_aliases,
+            default_bindings=default_bindings,
+            conditional_nodes=conditional_nodes_by_scope[scope],
         )
-        return aliases, bindings
 
     for scope in scopes:
         nodes = _scope_nodes(scope)
+        conditional_nodes_by_scope[scope] = frozenset(
+            node for node in nodes if conditionally_executed(node, scope)
+        )
         if scope is tree:
             scope_data[tree] = (
                 nodes,
@@ -613,7 +705,30 @@ def calls_in_source(
             parent = parents.get(scope)
             while parent not in scope_data:
                 parent = parents.get(parent)
-            parent_aliases, parent_bindings = context_at(parent)
+            runtime_contexts = [context_at(parent)]
+            parent_nodes = scope_data[parent][0]
+            for candidate in parent_nodes:
+                if not isinstance(candidate, ast.Call):
+                    continue
+                direct_function_call = (
+                    isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and isinstance(candidate.func, ast.Name)
+                    and candidate.func.id == scope.name
+                )
+                immediate_lambda_call = (
+                    isinstance(scope, ast.Lambda) and candidate.func is scope
+                )
+                if (
+                    (direct_function_call or immediate_lambda_call)
+                    and position(candidate) >= position(scope)
+                ):
+                    runtime_contexts.append(context_at(parent, candidate))
+            parent_aliases = _merge_possible_maps(
+                aliases for aliases, _ in runtime_contexts
+            )
+            parent_bindings = _merge_possible_maps(
+                bindings for _, bindings in runtime_contexts
+            )
             definition_aliases, definition_bindings = context_at(parent, scope)
             default_aliases: dict[str, str] = {}
             default_bindings: dict[str, str] = {}
@@ -630,9 +745,12 @@ def calls_in_source(
                     if default is not None
                 )
                 for argument, default in defaults:
-                    resolved = _resolved_name(default, definition_aliases)
-                    if resolved in TRANSFERABLE_CALLABLES:
-                        default_aliases[argument.arg] = resolved
+                    resolved = _resolved_names(default, definition_aliases)
+                    transferable = resolved.intersection(TRANSFERABLE_CALLABLES)
+                    if transferable:
+                        default_aliases[argument.arg] = _pack_possibilities(
+                            transferable
+                        )
                     kind = _expression_kind(
                         default, definition_aliases, definition_bindings
                     )
@@ -647,9 +765,12 @@ def calls_in_source(
             )
         for node in nodes:
             aliases, bindings = context_at(scope, node)
-            if isinstance(node, ast.Call) and _resolved_name(node.func, aliases) in {
-                "builtins.eval", "builtins.exec",
-            }:
+            if (
+                isinstance(node, ast.Call)
+                and _resolved_names(node.func, aliases).intersection(
+                    {"builtins.eval", "builtins.exec"}
+                )
+            ):
                 literal = _literal_code(node.args[0]) if node.args else None
                 if literal is not None and calls_in_source(
                     literal,
@@ -666,9 +787,12 @@ def calls_in_source(
                 continue
             if (
                 isinstance(node, (ast.Call, ast.Subscript, ast.Attribute))
-                and _expression_kind(node, aliases, bindings) in {
-                    "owner_dict", "owner_getter", "store_getter",
-                }
+                and _has_kind(
+                    _expression_kind(node, aliases, bindings),
+                    "owner_dict",
+                    "owner_getter",
+                    "store_getter",
+                )
             ):
                 writes.append(
                     DirectStoreWrite(
@@ -678,8 +802,11 @@ def calls_in_source(
                 continue
             if (
                 isinstance(node, (ast.Call, ast.Subscript))
-                and _expression_kind(node, aliases, bindings)
-                in {"store", "store_member"}
+                and _has_kind(
+                    _expression_kind(node, aliases, bindings),
+                    "store",
+                    "store_member",
+                )
             ):
                 writes.append(
                     DirectStoreWrite(path, node.lineno, "<dynamic_store_access>")
@@ -687,14 +814,21 @@ def calls_in_source(
                 continue
             if (
                 isinstance(node, ast.Call)
-                and _resolved_name(node.func, aliases)
-                in {"builtins.delattr", "builtins.setattr"}
+                and _resolved_names(node.func, aliases).intersection(
+                    {"builtins.delattr", "builtins.setattr"}
+                )
                 and node.args
                 and (
-                    _expression_kind(node.args[0], aliases, bindings)
-                    in {"store", "store_member"}
+                    _has_kind(
+                        _expression_kind(node.args[0], aliases, bindings),
+                        "store",
+                        "store_member",
+                    )
                     or (
-                        _expression_kind(node.args[0], aliases, bindings) == "owner"
+                        _has_kind(
+                            _expression_kind(node.args[0], aliases, bindings),
+                            "owner",
+                        )
                         and (
                             len(node.args) < 2
                             or _constant_string(node.args[1]) in {None, "store"}
@@ -709,7 +843,9 @@ def calls_in_source(
             if (
                 not isinstance(node, ast.Attribute)
                 or node.attr != "store"
-                or _expression_kind(node.value, aliases, bindings) != "owner"
+                or not _has_kind(
+                    _expression_kind(node.value, aliases, bindings), "owner"
+                )
             ):
                 continue
             parent = parents.get(node)

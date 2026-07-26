@@ -121,6 +121,55 @@ def route(service):
 """
         self.assertEqual(calls_in_source(assigned, path="fixture.py"), ())
 
+    def test_branch_and_call_site_contexts_fail_closed(self) -> None:
+        called_before_shadow = """def outer(service):
+    ga = getattr
+    def inner():
+        ga(service, 'store').future_write()
+    inner()
+    ga = lambda *args: None
+"""
+        possible_unshadowed_branch = """def route(service, cond):
+    ga = getattr
+    if cond:
+        ga = lambda *args: None
+    ga(service, 'store').future_write()
+"""
+        called_after_shadow = """def outer(service):
+    ga = getattr
+    def inner():
+        ga(service, 'store').future_write()
+    ga = lambda *args: None
+    inner()
+"""
+        possible_reflection_aliases = """class Handler:
+    def route(self, cond):
+        ga = getattr
+        if cond:
+            ga = vars
+        ga(self)['service'].store.future_write()
+"""
+        possible_binding_kinds = """class Handler:
+    def route(self, service, cond):
+        target = service
+        if cond:
+            target = self
+        target.service.store.future_write()
+"""
+        self.assertTrue(calls_in_source(called_before_shadow, path="fixture.py"))
+        self.assertTrue(
+            calls_in_source(possible_unshadowed_branch, path="fixture.py")
+        )
+        self.assertTrue(
+            calls_in_source(possible_reflection_aliases, path="fixture.py")
+        )
+        self.assertTrue(
+            calls_in_source(possible_binding_kinds, path="fixture.py")
+        )
+        self.assertEqual(
+            calls_in_source(called_after_shadow, path="fixture.py"), ()
+        )
+
     def test_literal_nesting_has_no_semantic_depth_bypass(self) -> None:
         payload = "service.store.future_write()"
         for _ in range(4):
