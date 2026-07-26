@@ -82,7 +82,7 @@
 | `JM-INV-004` | Доверие вычисляется из сохранённого исходного события, а не принимается от вызывающего кода | trust-тестами этапа 1 |
 | `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | `tests.test_stage5_finalization.Stage5FinalizationTest.test_02_unanswered_question_creates_no_memory`; `test_03_unselected_proposal_creates_no_memory`; `test_04_rejected_is_audited_but_not_an_active_decision`; `test_05_deferred_is_audited_but_not_a_selected_decision`; `test_06_forgeries_malformed_duplicates_and_conflicts_fail_closed` |
 | `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | `tests.test_stage4_branch_time.Stage4BranchTimeTest.test_02_late_parent_event_is_absent_from_descendant`; `tests.test_stage5_finalization.Stage5FinalizationTest.test_07_finalization_does_not_leak_between_sibling_branches` |
-| `JM-INV-007` | `PASSED` относится только к фактически испытанной системе и неизменяемому артефакту | проверкой идентичности этапа 6 |
+| `JM-INV-007` | `PASSED` относится только к фактически испытанной системе и неизменяемому артефакту | `tests.test_stage6_extractor_gate` (`Stage6GateTest` — отклонение несовпадающей цели, пороги, запрет перезаписи датированного отчёта; `Stage6RunnerWiringTest` — сквозной прогон `benchmarks/stage6_extractor_eval.py`) |
 | `JM-INV-008` | Ошибка производной системы видима и не отменяет уже записанное каноническое событие | `tests.test_stage2_atomicity.Stage2AtomicityTest.test_jm_inv_008_event_survives_extraction_and_witness_failures` и `test_jm_inv_008_projection_failure_is_durable_and_retryable` |
 
 В ходе реализации колонка «Чем должен доказываться» дополняется точным путём к
@@ -711,6 +711,21 @@ env-переменных внутри одного семейства. До за
 `latest` является только указателем и не заменяет исторический отчёт.
 
 `PASSED` вычисляется программой только при точном совпадении проверенной системы с заранее зафиксированной целью.
+
+Механика проверки реализована 27 июля 2026 года в
+`src/joiny_mnemonic/extractor_evaluation_target.py`. Цель фиксируется до
+прогона (`benchmarks/stage6_extractor_eval.py --freeze`) и содержит все
+перечисленные выше поля плюс сами пороги и явный список типов памяти, по
+которым эти пороги применяются: gate по одному типу не даёт права на
+межтиповое утверждение. `decide()` — единственное место, где вычисляется
+`passed`; любое расхождение с зафиксированной целью отклоняет прогон целиком,
+а совпадающая система всё равно обязана взять пороги. Датированный отчёт
+никогда не переписывается: попытка записать другое содержимое под тем же
+именем даёт ошибку `report_would_be_rewritten`, а `latest.json` содержит
+только ссылку. Исполняемая проверка:
+`python -m unittest tests.test_stage6_extractor_gate` (15 проверок, включая
+сквозной прогон раннера на ЗАГЛУШКЕ экстрактора — он подтверждает обвязку, а
+не качество какой-либо модели).
 
 ### Приёмка этапа 6
 

@@ -335,6 +335,21 @@ is premature.
       (JM-INV-007). Remote backends stay candidate-only like every
       extractor — no agent_finalized, no trusted memory. Stage 6
       evaluation itself runs on the local candidates only
+- [x] Executable JM-INV-007 gate (2026-07-27): `extractor_evaluation_target.py`
+      freezes the target BEFORE a run — corpus bytes, extractor name/version,
+      hashed ExtractorConfig (model, revision, inference, prompt hash, schema
+      hash), the scored memory types, the thresholds and the checker version —
+      and `decide()` is the only place `passed` is computed: any field
+      differing from the frozen target refuses the run outright, and a matching
+      system still has to clear precision >= 0.90 and recall >= 0.70 per
+      language, a cross-language precision gap <= 0.10 and zero false trusted
+      records. Reports are append-only dated files (`latest.json` is a pointer,
+      never a substitute); a re-run producing different content for an existing
+      dated name raises `report_would_be_rewritten`. Runner:
+      `benchmarks/stage6_extractor_eval.py --freeze` then `--target`.
+      Verified by 15 checks in `tests/test_stage6_extractor_gate.py`, including
+      an end-to-end runner pass against a STUB extractor (wiring only — no
+      model quality is claimed by it)
 - [ ] Candidate smoke: run qwen3-4b, gemma-3-4b and gliner-multilingual through
       the generic connector on a small EN/RU slice; measure load success, JSON
       validity, latency, empty-output rate and RU recall before spending on a

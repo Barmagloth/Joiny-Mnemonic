@@ -78,6 +78,31 @@ measured on one system cannot be presented as evidence for another
 (`JM-INV-007`). This is deliberately strict: changing the port also changes the
 identity, because the report names the exact system that was measured.
 
+## Measuring a candidate
+
+The target is frozen before the run, not after it, and the run is measured
+against that file:
+
+```bash
+PYTHONPATH=src python benchmarks/stage6_extractor_eval.py --backend backend.json --freeze target.json
+```
+
+```bash
+PYTHONPATH=src python benchmarks/stage6_extractor_eval.py --backend backend.json --target target.json
+```
+
+`backend.json` holds the same block as the `backend` key above. The frozen file
+records the corpus bytes, the extractor name and version, the hashed config, the
+memory types the thresholds apply to, the thresholds themselves and the version
+of the checking code. If any of it differs at run time the run is refused with
+the exact mismatch listed — a report about a different system is not a weaker
+result, it is a result about something else.
+
+Add `--limit N` for the cheap smoke slice (reachability, JSON validity,
+empty-output rate, latency) before paying for a full run. The report lands in
+`benchmarks/results/stage6/` under a dated name and is never rewritten;
+`latest.json` only points at it.
+
 ## Remote models: contracted, not implemented
 
 A remote model — a hosted API endpoint or a host-CLI bridge such as `claude -p`
@@ -99,3 +124,13 @@ Covers: config-only model swap over a real loopback runtime, hash movement on
 every identity field, both transports sending the core schema, refusal of remote
 endpoints and unknown transports, and fail-closed behaviour on malformed
 runtime output.
+
+```bash
+PYTHONPATH=src python -m unittest tests.test_stage6_extractor_gate -v
+```
+
+Covers the evaluation gate: refusal of a run whose model, revision, corpus,
+scored types, thresholds or checker version differ from the frozen target; the
+per-language thresholds; the refusal to rewrite a published dated report; and
+`latest.json` being a pointer. The end-to-end runner check drives a stub
+extractor, so it proves the wiring only — it makes no claim about any model.
