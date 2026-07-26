@@ -81,7 +81,9 @@ def _line_set(text: str) -> set[str]:
 
 def _path_references(text: str) -> set[str]:
     return {
-        f"{match.group('path').replace('\\', '/').casefold()}:{match.group('line')}"
+        "{}:{}".format(
+            match.group("path").replace("\\", "/").casefold(), match.group("line")
+        )
         for match in _PATH_REFERENCE.finditer(text)
     }
 
