@@ -114,3 +114,22 @@ Verification after remediation:
 - raw-write inventory: exactly 16 entries;
 - Stage 1 gates: PASS;
 - syntax and `git diff --check`: PASS.
+
+## Scope correction after `52a5be6`
+
+The review of `52a5be6` was interrupted before a verdict because its hostile
+brief had drifted beyond Roadmap section 6. The Roadmap requires a structural
+ban on direct mutating `service.store` calls in four named public surfaces and
+a separate behavioural JM-INV-003 test; it does not require a general Python
+abstract interpreter.
+
+Course correction:
+
+- the 1057-line broad analyser was replaced with a bounded structural AST gate;
+- the gate obtains read-only ownership from the effective runtime
+  `MemoryStore` and its canonical `@store_read` marker;
+- 27 synthetic MRO/reflection/control-flow fixture files were removed;
+- the frozen inventory of 16 actual migration sites remains the pre-migration
+  baseline;
+- arbitrary aliases, closures and metaprogramming are explicitly outside this
+  structural gate; JM-INV-003 remains a cross-surface behavioural obligation.

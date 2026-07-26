@@ -7,12 +7,13 @@ inventory, not a competing specification.
 
 Executable inventory: `python scripts/stage3_surface_audit.py`.
 
-The audit is fail-closed: every direct `.store.<method>(...)` call in CLI, MCP,
-HTTP or hooks is treated as a write unless the MemoryStore declaration carries
-the canonical `@store_read` ownership marker. Raw-store aliases, bound methods,
-reflection, dynamic access, subscripts and passing the store to another
-function are violations. No raw-store attribute exception is permitted.
-`--require-clean` is the final Stage 3 acceptance mode.
+The audit is deliberately bounded to the structural rule in Roadmap section 6:
+every direct `.store.<method>(...)` call in CLI, MCP, HTTP or hooks is treated
+as a write unless the effective runtime `MemoryStore` method carries the
+canonical `@store_read` marker. A direct raw-store capability escape is also a
+violation. The gate is not a general Python data-flow or metaprogramming
+analyser; JM-INV-003 is proved separately by a behavioural test through all
+public surfaces. `--require-clean` is the final structural acceptance mode.
 
 Current direct write ownership violations:
 
@@ -24,9 +25,9 @@ Current direct write ownership violations:
 | hooks | `hook_session`, `bind_task_session`, `append_host_events_once`, `after_commit` |
 
 Read-only calls remain permitted because Stage 3 forbids direct *mutating*
-store calls, not queries. Classification is derived from store declarations,
-not a second allowlist in the gate; unknown methods and store escapes are never
-silently classified as reads.
+store calls, not queries. Classification is derived from the effective runtime
+class (including inherited methods), not a second allowlist in the gate.
+Unknown direct methods and direct store escapes are not classified as reads.
 
 ## Planned ownership
 
