@@ -144,13 +144,14 @@ class FinalizationObserverTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 observe_finalizations(database, sample_limit=-1)
 
-    def test_host_instruction_files_share_observation_contract(self) -> None:
+    def test_host_instruction_files_share_finalization_contract(self) -> None:
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
         self.assertEqual(agents, claude)
         self.assertIn("[TYPE] STATUS: self-contained outcome", agents)
         self.assertIn("unanswered question", agents)
-        self.assertIn("observation-only", agents)
+        self.assertIn("Installed host hooks materialize valid tags", agents)
+        self.assertIn("No answer means", agents)
 
 
 if __name__ == "__main__":

@@ -218,7 +218,10 @@ class SnapshotManager:
         self.project_root = Path(project_root).resolve()
 
     def build_state(self, *, branch_id: str = "main") -> dict[str, Any]:
-        records = self.store.list_memories(branch_id=branch_id)
+        records = [
+            record for record in self.store.list_memories(branch_id=branch_id)
+            if self.store.automatic_memory_eligible(record.id)
+        ]
         events = self.store.query_events(branch_id=branch_id)
         blocks = {
             name: asdict(block) for name, block in self.store.get_active_blocks(branch_id=branch_id).items()

@@ -14,7 +14,6 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
 from .models import (
     ActiveBlock, Artifact, BudgetPolicy, Event, ExtractionCandidate, MemoryRecord, MemoryType,
     Snapshot,
@@ -28,6 +27,7 @@ from .provenance import (
 from .candidate_confirmation import CandidateConfirmationMixin
 from .dataflow_storage import DataflowStorageMixin
 from .projection_storage import ProjectionStorageMixin
+from .finalization_storage import FINALIZATION_SCHEMA, FinalizationStorageMixin
 from .task_storage import TaskStorageMixin
 from .transactions import TransactionMixin
 from .storage_support import integrity_checked, json_text as _json, now as _now, store_read
@@ -42,9 +42,6 @@ from .transition_rules import (
 )
 
 from .security import SecretRedactor, redaction_counts
-
-
-
 def _hash(value: bytes | str) -> str:
     if isinstance(value, str):
         value = value.encode("utf-8")
@@ -105,7 +102,7 @@ def _fts_match_query(value: str) -> str:
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
 
 
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 SETTLEMENT_CONFIG_HASH = "settlement-reconciler-v1"
 FIRST_VERSIONED_MIGRATION = 7
 # v2: memory records serialize bitemporal valid-time fields (task4.md); the
@@ -259,6 +256,7 @@ CREATE TABLE IF NOT EXISTS memory_records (
     temporal_expression TEXT
 );
 
+""" + FINALIZATION_SCHEMA + """
 CREATE TABLE IF NOT EXISTS tool_output_views (
     id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL REFERENCES events(id),
@@ -758,6 +756,7 @@ class MemoryStore(
     CandidateConfirmationMixin,
     DataflowStorageMixin,
     ProjectionStorageMixin,
+    FinalizationStorageMixin,
     TaskStorageMixin,
 ):
     """Durable SQLite event store with immutable canonical and derived records."""
@@ -2092,6 +2091,7 @@ class MemoryStore(
 
         with self._transaction() as conn:
             self._assert_source_events(conn, source_event_ids, branch_id=branch_id)
+            self.assert_agent_finalized_authority(conn, safe_metadata, source_event_ids)
             temporal_fields = self._normalize_temporal_input(
                 conn, valid_from, valid_to, source_event_ids
             )

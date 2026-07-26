@@ -39,7 +39,7 @@ from .failure_quality import is_low_information_failure
 from .reducers import first_failure_line
 from .service import MemoryService
 from .transactions import atomic_service_write
-
+from .finalization import materialize_finalizations
 
 def _json_text(value: Any) -> str:
     if isinstance(value, str):
@@ -430,6 +430,7 @@ def process_hook(
         refs={"event_ids": [event.id for event in events]},
         decision={"idempotent_receipt": receipt_key},
     )
+    materialize_finalizations(service, events)
     with _stage("reduction"):
         reductions = service.reduce_tool_outputs(events)
         if event_name == "PostToolUseFailure":

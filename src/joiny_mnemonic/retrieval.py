@@ -115,7 +115,7 @@ class RetrievalEngine:
         ) / total_weight
         origin = str(record.metadata.get("origin", "explicit"))
         authority = self.store.memory_authority(record.id)
-        if authority != "confirmed":
+        if authority not in {"confirmed", "agent_finalized"}:
             score *= 0.85
         content = record.content if context.exact else record.summary
         return RetrievalHit(
@@ -210,6 +210,10 @@ class RetrievalEngine:
             until=context.until,
             file=context.file,
         )
+        memories = [
+            record for record in memories
+            if self.store.automatic_memory_eligible(record.id)
+        ]
         if len(memories) > 2000:
             # Deterministic cap (review M6): newest first by admission.
             memories = sorted(
@@ -326,7 +330,11 @@ class RetrievalEngine:
             except ValueError:
                 recency = 0.5
             temporal_signal = hit.metadata.get("temporal_arm", {}).get("proximity", 0.5)
-            support = 0.6 if hit.metadata.get("authority_level") == "confirmed" else 0.5
+            support = (
+                0.6
+                if hit.metadata.get("authority_level") in {"confirmed", "agent_finalized"}
+                else 0.5
+            )
             factor = (
                 (1 + 0.2 * (recency - 0.5))
                 * (1 + 0.2 * (temporal_signal - 0.5))
@@ -413,6 +421,8 @@ class RetrievalEngine:
                 include_superseded=context.temporal_active,
             )
             for position, (record, rank) in enumerate(memory_candidates):
+                if not self.store.automatic_memory_eligible(record.id):
+                    continue
                 hit = self._memory_hit(record, context)
                 metadata = dict(hit.metadata)
                 metadata.update({"retrieval_backend": "fts5-bm25", "fts_rank": rank})
@@ -451,6 +461,10 @@ class RetrievalEngine:
                 until=context.until,
                 file=context.file,
             )
+            records = [
+                record for record in records
+                if self.store.automatic_memory_eligible(record.id)
+            ]
             hits.extend(self._memory_hit(record, context) for record in records)
             if context.include_events:
                 events = self.store.query_events(
@@ -479,6 +493,10 @@ class RetrievalEngine:
                 until=context.until,
                 file=context.file,
             )
+            visible_records = [
+                record for record in visible_records
+                if self.store.automatic_memory_eligible(record.id)
+            ]
             visible_events = (
                 self.store.query_events(
                     branch_id=context.branch_id,
@@ -550,6 +568,7 @@ class RetrievalEngine:
                     until=context.until,
                     file=context.file,
                 )
+                if self.store.automatic_memory_eligible(record.id)
             )
             for plugin in self.plugins.knowledge_graph.values():
                 arm = getattr(plugin, "search_arm", None)
@@ -811,6 +830,7 @@ class RetrievalEngine:
             and (not context.since or record.created_at >= context.since)
             and (not context.until or record.created_at <= context.until)
             and not is_low_information_failure(record.content)
+            and self.store.automatic_memory_eligible(record.id)
         ]
         hits = [self._memory_hit(record, context) for record in selected]
         if context.query:

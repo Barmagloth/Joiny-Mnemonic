@@ -16,6 +16,7 @@ Do not emit any finalization tag for an unanswered question, an unselected
 proposal, intermediate reasoning, or an assumption. If no outcome was
 resolved, emit no tag. Never put a real tag in a quote or code block.
 
-Tags are currently observation-only dogfood data. They are not authorization
-to materialize memory, and no agent should write memory from them during this
-observation period.
+If the agent invents a new durable outcome rather than completing an outcome
+the user already selected, ask whether it should be recorded. No answer means
+no tag. Installed host hooks materialize valid tags; do not duplicate them
+through a memory tool.

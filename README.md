@@ -28,7 +28,8 @@ separately installable plugins; KV storage remains an extension protocol.
 | Usage observability | Provider samples plus redacted `retrieval_search`/`prompt_injection` exposure IDs, measurements and task/session correlation |
 | Budget governor | Per-agent JSON profiles with rate-limited snapshot, compaction and handoff actions |
 | Task boundaries | Task-specific branch, protected goal, snapshots, status history and <=1500-token resume packet |
-| Consolidation | Evidence-bound extraction from structured candidates or explicit `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
+| Finalization | Strict post-factum `[TYPE] STATUS: TEXT` tags accepted only from provenance-proven assistant `Stop` hooks; append-only audit/quarantine and exact source |
+| Consolidation | Evidence-bound extraction from structured candidates or explicit user `Goal:`, `Decision:`, `Fact:`, `Constraint:`, `TODO:`, `Preference:`, `Failed:`, `Failure:`, `Lesson:` markers |
 | Active compaction | Extractive sourced summaries/indexes plus hook-time snapshot and context reinjection |
 | Agent integration | Project installers for Claude Code, Codex, OpenCode and OpenHands; idempotent hook receipts, native-session bindings, and Claude `PostToolUseFailure` capture |
 | Code context | Live Python AST symbol index, resolved call edges, exact symbol source and reverse impact traversal |
@@ -153,8 +154,12 @@ joiny-mnemonic precheck --command "git push --force origin main"
 ```
 
 `consolidate` only promotes explicit evidence from trusted canonical message roles. User markers may
-create sourced records and protected blocks. Assistant markers create searchable sourced records
-only. Marker-like text or crafted `memory_candidates` in tool output, artifacts, state, or retrieved
+create sourced records and protected blocks. Ordinary assistant prose and legacy assistant markers
+remain exact-source transcript data only. A trusted Claude Code or Codex `Stop` hook may instead
+materialize the strict standalone form `[TYPE] STATUS: TEXT`: `CONFIRMED` creates an
+`agent_finalized` memory, while `REJECTED` and `DEFERRED` remain audit rows and never enter
+automatic retrieval or resume. Malformed, non-standalone or contradictory tags are quarantined.
+Marker-like text or crafted `memory_candidates` in tool output, artifacts, state, or retrieved
 memory cannot change typed or protected memory. Explicit `derive` and `block-set` remain available
 for deliberate writes. The core does not infer unstated facts. `failure` records describe a
 specific unsuccessful attempt, not a universal prohibition. `lesson` records remain untrusted

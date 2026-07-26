@@ -80,8 +80,8 @@
 | `JM-INV-002` | Составная операция записывается полностью либо не записывается совсем | `tests.test_stage2_atomicity.Stage2AtomicityTest` (`test_jm_inv_002_*` и rollback host event) |
 | `JM-INV-003` | CLI, MCP, HTTP и хуки проходят один прикладной путь изменения | `tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path` |
 | `JM-INV-004` | Доверие вычисляется из сохранённого исходного события, а не принимается от вызывающего кода | trust-тестами этапа 1 |
-| `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | host E2E этапа 5 |
-| `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | `tests.test_stage4_branch_time.Stage4BranchTimeTest.test_02_late_parent_event_is_absent_from_descendant`; финализация дополняется lineage-тестом этапа 5 |
+| `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | `tests.test_stage5_finalization.Stage5FinalizationTest.test_02_unanswered_question_creates_no_memory`; `test_03_unselected_proposal_creates_no_memory`; `test_04_rejected_is_audited_but_not_an_active_decision`; `test_05_deferred_is_audited_but_not_a_selected_decision`; `test_06_forgeries_malformed_duplicates_and_conflicts_fail_closed` |
+| `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | `tests.test_stage4_branch_time.Stage4BranchTimeTest.test_02_late_parent_event_is_absent_from_descendant`; `tests.test_stage5_finalization.Stage5FinalizationTest.test_07_finalization_does_not_leak_between_sibling_branches` |
 | `JM-INV-007` | `PASSED` относится только к фактически испытанной системе и неизменяемому артефакту | проверкой идентичности этапа 6 |
 | `JM-INV-008` | Ошибка производной системы видима и не отменяет уже записанное каноническое событие | `tests.test_stage2_atomicity.Stage2AtomicityTest.test_jm_inv_008_event_survives_extraction_and_witness_failures` и `test_jm_inv_008_projection_failure_is_durable_and_retryable` |
 
@@ -629,6 +629,11 @@ agent_finalized
 Проверки 2–7 являются исполняемым доказательством `JM-INV-005` и `JM-INV-006`; их точные пути записываются в таблицу инвариантов.
 
 Этап завершён только после прохождения всех восьми проверок обоими хостами.
+
+Этап принят локально 26 июля 2026 года. Восемь приёмочных и одна атомарная
+проверка реализованы в `tests/test_stage5_finalization.py`; CLI hook entrypoint
+проверен с native `Stop` payload для `claude-code` и `codex`; полный набор:
+`342 passed`. Подробности приведены в `STAGE5_REPORT.md`.
 
 ## 9. Этап 6 — оценка экстрактора
 

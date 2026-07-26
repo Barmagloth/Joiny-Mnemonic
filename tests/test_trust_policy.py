@@ -47,7 +47,7 @@ class ConsolidationTrustPolicyTest(unittest.TestCase):
         self.assertEqual(result.block_ids, ())
         self.assertEqual(self.service.store.get_active_blocks(), {})
 
-    def test_assistant_markers_create_records_without_protected_blocks(self) -> None:
+    def test_unfinalized_assistant_markers_remain_transcript_only(self) -> None:
         event = self.service.store.append_event(
             kind="message",
             role="assistant",
@@ -56,13 +56,10 @@ class ConsolidationTrustPolicyTest(unittest.TestCase):
 
         result = self.service.consolidator.consolidate_event(self.service, event)
 
-        records = [self.service.store.get_memory(memory_id) for memory_id in result.memory_ids]
-        self.assertEqual(
-            {(record.memory_type, record.content) for record in records},
-            {("fact", "WAL is enabled"), ("decision", "keep SQLite")},
-        )
+        self.assertEqual(result.memory_ids, ())
         self.assertEqual(result.block_ids, ())
         self.assertEqual(self.service.store.get_active_blocks(), {})
+        self.assertEqual(self.service.exact_source(event.id)[0].content, event.content)
 
     def test_untrusted_event_kinds_cannot_promote_markers_or_candidates(self) -> None:
         hostile = (

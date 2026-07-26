@@ -681,7 +681,10 @@ class MemoryService:
     ) -> list[RetrievalHit]:
         if limit < 1:
             return []
-        records = self.store.list_memories(branch_id=branch_id)
+        records = [
+            record for record in self.store.list_memories(branch_id=branch_id)
+            if self.store.automatic_memory_eligible(record.id)
+        ]
         filters = {
             "branch_id": branch_id,
             "allowed_memory_ids": tuple(record.id for record in records),

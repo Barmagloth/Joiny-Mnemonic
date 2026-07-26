@@ -249,12 +249,8 @@ class SnapshotAndPromptTest(unittest.TestCase):
         )
         self.assertNotIn(path.casefold(), active_now)
 
-    def test_trusted_restatement_follows_poisoned_transcript(self) -> None:
-        """Live-run finding: a recent assistant message that misquotes a
-        protected block wins on recency across agents. The packet must state
-        the arbitration rule up front and restate trusted blocks after the
-        data sections; the restatement is dropped, never the packet, when
-        the budget is tight."""
+    def test_unfinalized_assistant_poison_is_excluded_from_resume(self) -> None:
+        """Stage 5 keeps ordinary assistant prose in exact-source audit only."""
         self.service.store.set_active_block("open_tasks", "создать файл delme2.md")
         self.service.store.append_event(
             kind="message", role="assistant",
@@ -263,9 +259,8 @@ class SnapshotAndPromptTest(unittest.TestCase):
         packet = self.service.resume(token_budget=1500)
         text = packet.text
         self.assertIn("prefer ACTIVE MEMORY as the better-preserved record", text)
-        restated = text.rindex("[ACTIVE MEMORY RESTATED")
-        self.assertGreater(restated, text.index("[RECENT TRANSCRIPT"))
-        self.assertIn("создать файл delme2.md", text[restated:])
+        self.assertIn("создать файл delme2.md", text)
+        self.assertNotIn("удалить файл delme2.md", text)
         # Tight budget: the packet survives (the restatement may be dropped,
         # the packet itself may not). Active memory alone exceeding the
         # budget still raises, which is pre-existing semantics.

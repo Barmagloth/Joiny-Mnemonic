@@ -18,6 +18,7 @@
 | Canonical | `events`, `artifacts` | точный replay и аудит |
 | Active | latest `block_versions` | инструкции, цель, ограничения, решения, задачи |
 | Structured | `memory_records` | facts/decisions/tasks/preferences/failures/lessons и provenance |
+| Finalization audit | `finalization_records`, `finalization_quarantine` | post-factum status, materialized-memory link or fail-closed reason |
 | Index | timeline + `index` records | дешёвая навигация по старой истории |
 | Summary/detail | поля memory record | progressive disclosure |
 | Snapshot | parent delta + cursor | быстрый resume и lineage |
@@ -83,6 +84,14 @@ of an active/blocked task are never prunable. Legacy delta blobs are retained be
 
 
 ## Retrieval
+
+Strict finalization runs inside the same transaction as trusted host-hook capture. Authority is
+derived from the saved event (`host_hook`, assistant role, `Stop`, matching stamped adapter), never
+from caller-supplied text. Only `CONFIRMED` creates a memory with `agent_finalized` authority.
+`REJECTED`, `DEFERRED`, malformed and contradictory outcomes remain append-only audit data.
+Ordinary assistant messages and legacy memories derived from them are excluded from automatic
+resume, lexical/semantic/graph ranking and compaction; exact source/context inspection remains
+available.
 
 Встроенный retrieval получает кандидатов через SQLite FTS5/BM25 и применяет фильтры времени,
 файла, branch и типа внутри SQL/lineage-проверки. Python не сканирует полную историю при

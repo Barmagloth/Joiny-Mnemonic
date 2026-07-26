@@ -107,10 +107,8 @@ class FailureLessonTest(unittest.TestCase):
             )
             result = self.service.consolidator.consolidate_event(self.service, event)
             records = [self.service.store.get_memory(item) for item in result.memory_ids]
-            self.assertEqual(
-                [record.memory_type for record in records],
-                ["failure", "failure", "lesson"],
-            )
+            expected = ["failure", "failure", "lesson"] if role == "user" else []
+            self.assertEqual([record.memory_type for record in records], expected)
             self.assertEqual(result.block_ids, ())
 
         tool = self.service.store.append_event(

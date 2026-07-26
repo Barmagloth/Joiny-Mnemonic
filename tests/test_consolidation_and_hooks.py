@@ -97,11 +97,19 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         hits = self.service.search(query="ORBITAL741", include_events=True, semantic=False)
         self.assertIn(source.id, {hit.id for hit in hits})
 
-        marked_source = self.service.store.append_event(
-            kind="message", role="assistant", content="Fact: Build codename is ORBITAL741."
+        process_hook(
+            self.service,
+            "codex",
+            {
+                "hook_event_name": "Stop",
+                "session_id": "native-finalized-orbital",
+                "last_assistant_message": (
+                    "[FACT] CONFIRMED: Build codename is ORBITAL741."
+                ),
+            },
         )
-        marked = self.service.consolidator.consolidate_event(self.service, marked_source)
-        self.assertEqual(len(marked.memory_ids), 1)
+        finalized = self.service.store.list_finalizations(status="CONFIRMED")
+        self.assertEqual(len(finalized), 1)
         for index in range(120, 240):
             self.service.store.append_event(
                 kind="message", role="user", content=f"routine distractor {index:04d}"
@@ -161,14 +169,16 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertIn("Fact:", context)
         self.assertIn("Unmarked prose remains searchable", context)
 
-    def test_agent_marker_in_stop_hook_is_promoted(self) -> None:
+    def test_strict_finalization_in_stop_hook_is_promoted(self) -> None:
         output = process_hook(
             self.service,
             "codex",
             {
                 "hook_event_name": "Stop",
                 "session_id": "native-durable-marker",
-                "last_assistant_message": "Fact: Deployment requires the X-Trace header.",
+                "last_assistant_message": (
+                    "[FACT] CONFIRMED: Deployment requires the X-Trace header."
+                ),
             },
         )
         self.assertEqual(output, {})
@@ -178,7 +188,7 @@ class ConsolidationAndHooksTest(unittest.TestCase):
         self.assertEqual(memories[0].content, "Deployment requires the X-Trace header.")
         self.assertEqual(
             self.service.exact_source(memories[0].id)[0].content,
-            "Fact: Deployment requires the X-Trace header.",
+            "[FACT] CONFIRMED: Deployment requires the X-Trace header.",
         )
 
     def test_installers_write_real_project_configs_and_preserve_existing_hooks(self) -> None:

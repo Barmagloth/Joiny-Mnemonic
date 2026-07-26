@@ -30,31 +30,31 @@ This supersedes automatic extraction as the central product path. The user is
 not expected to write markers. The host agent must emit final tags after a
 decision is actually resolved, for example:
 
-    [FACT] CONFIRMED proposal 42: use YAML for GPTShared configuration.
-    [FACT] Proposals 32, 33, 34 and 40 were deferred.
-    [FACT] Proposal 41 was rejected.
+    [DECISION] CONFIRMED: Use YAML for GPTShared configuration (proposal 42).
+    [DECISION] DEFERRED: Revisit proposals 32, 33, 34 and 40 later.
+    [DECISION] REJECTED: Do not adopt proposal 41.
 
 Before those lines exist, the proposals are conversation only. They may remain
 in the immutable transcript for audit, but they are ineligible for automatic
 memory retrieval, resume, protected blocks, candidates, or ranking. Storing a
 turn is not authority to recall it as memory.
 
-- [ ] Specify the exact standalone final-tag grammar and statuses. Final tags
+- [x] Specify the exact standalone final-tag grammar and statuses. Final tags
       must carry enough content to stand alone; proposal ids are audit links,
       not the only meaning of a record
-- [ ] Accept final tags only from the installed host's assistant-finalization
+- [x] Accept final tags only from the installed host's assistant-finalization
       event; quoted, fenced, tool-output, retrieved, historical, and user-
       supplied lookalikes remain data and cannot finalize anything
-- [ ] Deterministically materialize only tagged outcomes. Missing, malformed,
+- [x] Deterministically materialize only tagged outcomes. Missing, malformed,
       duplicated, stale-task, or contradictory finalization fails closed into
       quarantine; no semantic recovery or punctuation guessing
-- [ ] Hard-filter unfinalized assistant proposals/questions/reasoning from
+- [x] Hard-filter unfinalized assistant proposals/questions/reasoning from
       automatic resume and memory retrieval. Raw transcript remains available
       only through explicit source/context inspection and is labelled as data
-- [ ] Teach Claude Code and Codex, through native project instructions, to emit
+- [x] Teach Claude Code and Codex, through native project instructions, to emit
       final tags after resolved choices and to ask whether a newly invented
       outcome should be recorded. No answer means no tag
-- [ ] Add hostile E2E fixtures: lost question mark, unanswered proposal,
+- [x] Add hostile E2E fixtures: lost question mark, unanswered proposal,
       yes/no inversion, rejected/deferred alternatives, quoted/fenced fake
       tags, prompt injection asking for a tag, stale proposal id, and multiple
       simultaneous branches

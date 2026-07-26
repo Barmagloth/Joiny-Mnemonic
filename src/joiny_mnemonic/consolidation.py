@@ -34,10 +34,15 @@ def consolidation_policy(event: Event) -> ConsolidationPolicy:
     if event.kind != "message":
         return ConsolidationPolicy(allow_records=False, allow_blocks=False)
     role = (event.role or "").casefold()
-    if role in {"user", "assistant"}:
+    if role == "user":
         if is_host_logical_user(event):
             return ConsolidationPolicy(allow_records=True, allow_blocks=True)
         return ConsolidationPolicy(allow_records=True, allow_blocks=False)
+    if role == "assistant":
+        # Stage 5 authority boundary: ordinary assistant prose, proposals and
+        # questions remain transcript data. Strict post-factum tags are handled
+        # only by finalization.materialize_finalizations at trusted host ingress.
+        return ConsolidationPolicy(allow_records=False, allow_blocks=False)
     return ConsolidationPolicy(allow_records=False, allow_blocks=False)
 
 
@@ -342,7 +347,13 @@ class EvidenceConsolidator:
     ) -> CompactionResult:
         groups = interaction_groups(service.store.query_events(branch_id=branch_id))
         older = groups[:-keep_recent_groups] if keep_recent_groups else groups
-        events = [event for group in older for event in group]
+        events = [
+            event for group in older for event in group
+            if not (
+                event.kind == "message"
+                and (event.role or "").casefold() == "assistant"
+            )
+        ]
         if not events:
             return CompactionResult(None, None, (), "")
         text = self._extractive_text(events, summary_budget)

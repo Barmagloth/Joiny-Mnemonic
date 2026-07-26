@@ -159,7 +159,7 @@ class PromptAssembler:
         authority = hit.metadata.get("authority_level", "confirmed")
         label = (
             "[auto] " if origin == "auto"
-            else "[unconfirmed] " if authority != "confirmed"
+            else "[unconfirmed] " if authority not in {"confirmed", "agent_finalized"}
             else ""
         )
         return memory_as_untrusted_data(
@@ -333,11 +333,33 @@ class PromptAssembler:
         )
         transcript_budget = effective_budget - retrieval_reserve
 
-        all_events = (
+        canonical_events = (
             self._state_events(state) if state is not None
             else self.store.query_events(branch_id=branch_id)
         )
-        active_files = self._active_files(all_events)
+        active_files = self._active_files(canonical_events)
+        # Stage 5: assistant prose is immutable audit data, not automatic
+        # memory. Even a finalized Stop is represented here by its derived
+        # memory; its raw message remains available through exact source/context.
+        excluded_event_ids: set[str] = set()
+        for event in self.store.query_events(branch_id=branch_id):
+            if (
+                event.kind == "message"
+                and (event.role or "").casefold() == "assistant"
+            ):
+                excluded_event_ids.add(event.id)
+                continue
+            memory_id = event.payload.get("memory_id")
+            if event.payload.get("operation") == "derive_memory" and memory_id:
+                try:
+                    eligible = self.store.automatic_memory_eligible(str(memory_id))
+                except KeyError:
+                    eligible = False
+                if not eligible:
+                    excluded_event_ids.add(event.id)
+        all_events = [
+            event for event in canonical_events if event.id not in excluded_event_ids
+        ]
         recent_groups = interaction_groups(all_events)[-recent_event_count:] if recent_event_count else []
         chosen_groups: list[list[Event]] = []
         for group in reversed(recent_groups):
@@ -456,6 +478,8 @@ class PromptAssembler:
             ]
         for item in timeline:
             if item["id"] in recent_ids:
+                continue
+            if item["id"] in excluded_event_ids:
                 continue
             preview = str(item.get("preview", ""))
             if is_low_information_failure(preview):
