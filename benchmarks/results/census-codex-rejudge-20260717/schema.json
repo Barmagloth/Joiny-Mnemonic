@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "cases", "conclusions"],
+  "properties": {
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reader", "passage", "uncertain", "agree", "disagree", "partial", "passage_yes_all_reader"],
+      "properties": {
+        "reader": {"type": "integer"},
+        "passage": {"type": "integer"},
+        "uncertain": {"type": "integer"},
+        "agree": {"type": "integer"},
+        "disagree": {"type": "integer"},
+        "partial": {"type": "integer"},
+        "passage_yes_all_reader": {"type": "boolean"}
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 28,
+      "maxItems": 28,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question_id", "original_proxy", "verdict", "mechanism", "comparison", "rationale"],
+        "properties": {
+          "question_id": {"type": "string"},
+          "original_proxy": {"type": "string", "enum": ["passage:yes", "passage:no"]},
+          "verdict": {"type": "string", "enum": ["reader", "passage", "uncertain"]},
+          "mechanism": {"type": "string"},
+          "comparison": {"type": "string", "enum": ["agree", "disagree", "partial"]},
+          "rationale": {"type": "string"}
+        }
+      }
+    },
+    "conclusions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passage_yes", "passage_no", "selector_headroom", "temporal_status", "limitations"],
+      "properties": {
+        "passage_yes": {"type": "string"},
+        "passage_no": {"type": "string"},
+        "selector_headroom": {"type": "string"},
+        "temporal_status": {"type": "string"},
+        "limitations": {"type": "string"}
+      }
+    }
+  }
+}

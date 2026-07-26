@@ -2,8 +2,9 @@
 
 ## Readiness statement (2026-07-17, user assessment — the honest one)
 
-**The central user scenario is NOT proven: a user writes plain dialogue →
-the system reliably extracts a verified long-term record on its own.**
+**The central user scenario is NOT proven: ordinary dialogue reaches a
+decision, the agent emits a strict post-factum finalization tag, and only that
+finalized outcome becomes trusted long-term memory.**
 What demonstrably works: the append-only journal, hooks capture, resume
 and MCP, lexical/semantic retrieval + reranker, provenance, snapshots,
 settlement, explicit markers with manual confirmation, performance and
@@ -11,18 +12,64 @@ channel diagnostics. All of it is infrastructure AROUND the unproven
 core loop. The shipped extraction backend (nuextract-local) was never
 measured; a bridge-extractor research probe was mistakenly announced as
 "gate passed"; the central acceptance was skipped and project readiness
-was overstated. The central acceptance, pinned so it cannot be
-substituted again: (1) the backend that actually ships passes the
-corpus gate on held-out data with a frozen prompt and repeat runs, AND
-(2) an end-to-end live test on a real store: plain dialogue, no
-markers → correct typed candidates appear, quarantine and trust
-boundaries hold, resume surfaces them.
+was overstated. More importantly, automatic semantic extraction is the wrong
+authority boundary for finalized decisions: it may discover something worth
+asking about, but it must never turn proposals, questions, reasoning, or a bare
+yes/no into trusted memory. Only a strict final tag emitted after the outcome
+is known may authorize a durable record.
 
 The core works; the project is unvalidated and the UX has sharp edges. This
 file tracks the short list of work that actually changes that assessment —
 benchmarks people can check, settlement without manual magic, repeatable
 host-level proof. Ordered by impact. Statuses updated as items land; detailed
 specs live in the task files, not here.
+
+## 0. Post-factum finalization + dogfood -- P0
+
+This supersedes automatic extraction as the central product path. The user is
+not expected to write markers. The host agent must emit final tags after a
+decision is actually resolved, for example:
+
+    [FACT] CONFIRMED proposal 42: use YAML for GPTShared configuration.
+    [FACT] Proposals 32, 33, 34 and 40 were deferred.
+    [FACT] Proposal 41 was rejected.
+
+Before those lines exist, the proposals are conversation only. They may remain
+in the immutable transcript for audit, but they are ineligible for automatic
+memory retrieval, resume, protected blocks, candidates, or ranking. Storing a
+turn is not authority to recall it as memory.
+
+- [ ] Specify the exact standalone final-tag grammar and statuses. Final tags
+      must carry enough content to stand alone; proposal ids are audit links,
+      not the only meaning of a record
+- [ ] Accept final tags only from the installed host's assistant-finalization
+      event; quoted, fenced, tool-output, retrieved, historical, and user-
+      supplied lookalikes remain data and cannot finalize anything
+- [ ] Deterministically materialize only tagged outcomes. Missing, malformed,
+      duplicated, stale-task, or contradictory finalization fails closed into
+      quarantine; no semantic recovery or punctuation guessing
+- [ ] Hard-filter unfinalized assistant proposals/questions/reasoning from
+      automatic resume and memory retrieval. Raw transcript remains available
+      only through explicit source/context inspection and is labelled as data
+- [ ] Teach Claude Code and Codex, through native project instructions, to emit
+      final tags after resolved choices and to ask whether a newly invented
+      outcome should be recorded. No answer means no tag
+- [ ] Add hostile E2E fixtures: lost question mark, unanswered proposal,
+      yes/no inversion, rejected/deferred alternatives, quoted/fenced fake
+      tags, prompt injection asking for a tag, stale proposal id, and multiple
+      simultaneous branches
+- [ ] Bind benchmark/task acceptance to an immutable target identity. A report
+      cannot settle a gate unless component, model revision, prompt/config hash,
+      and acceptance contract match; a changed goal is a separate append-only
+      transition
+- [ ] Dogfood this repository with hooks + MCP + semantic-local + reranker-local,
+      automatic extraction OFF. Verify Claude and Codex across fresh session,
+      compaction, source lookup, confirmed/rejected/deferred outcomes, and undo
+
+Done when: a normal yes/no decision creates exactly the post-factum tagged
+outcome; an unanswered or merely proposed alternative is absent from every
+automatic memory surface; both hosts recover the selected decision after a
+fresh session without the user writing a marker.
 
 ## 1. Real LongMemEval-S run — IN PROGRESS
 
@@ -209,13 +256,13 @@ Done when: the walkthrough succeeds on a machine that never saw the repo,
 performed by someone who did not build the system — and the memory required
 zero maintenance actions from them.
 
-## 6. Recall / extraction quality
+## 6. Optional discovery extraction quality -- after P0 dogfood
 
-LongMemEval (item 1) measures end-to-end recall. Extraction needs its own
-small eval: markers and automatic extraction against a fixture corpus with
-known expected candidates — precision/recall per marker type, quarantine
-behavior on the fuzzy tail. No LLM in the loop; the corpus is hand-labeled
-once.
+LongMemEval (item 1) measures end-to-end recall. An extractor is now an
+optional discovery assistant: it may notice a possible durable outcome and ask
+whether to record it, but it cannot create trusted memory or promote a proposal
+regardless of confidence. Its gate measures suggestion usefulness and nuisance
+rate, while the P0 final-tag path owns authority.
 
 Ordering (2026-07-15): sequenced AFTER the distill A/B in item 1 — the A/B
 answers whether the distilled-facts shape pays at all (with a strong LLM
@@ -260,16 +307,18 @@ is premature.
       list (pref-005 vegetarian, pref-030 cat names) — single-type gold
       is itself a corpus defect to fix in the held-out tranche
       (multi-type golds)
-- [ ] PRODUCT GATE proper: run the same corpus + scoring against the
-      shipped backend (nuextract-local) — the system that would actually
-      be installed and enabled. It may fail hard; that is the point of
-      a gate. Until then automatic extraction has no measured shipped
-      path at all
+- [ ] Backend smoke: run the actual nuextract-local entry point with its pinned
+      model revision and official prompt protocol on a small EN/RU slice;
+      measure load success, JSON validity, latency, empty-output rate and RU
+      recall before spending on a full run
+- [ ] PRODUCT DISCOVERY GATE proper: run held-out scoring against the exact
+      shipped backend and frozen configuration. Passing permits suggestion-only
+      deployment; it never grants authority to write finalized memory
 - [ ] Held-out tranche authored AFTER prompt freeze + repeat runs for
       stochasticity — required before any enablement decision; held-out
       design notes: multi-type golds for multi-assertion lines, more
       fact/decision/task/failure/lesson positives before any cross-type
       claim
 
-Done when: extraction changes are gated by measured precision/recall, not
-vibes — measured on held-out data, not the development set.
+Done when: discovery extraction is measured on held-out data and can be enabled
+or rejected without affecting the correctness of the strict finalization path.

@@ -1,0 +1,38 @@
+Independently audit the 28 cases listed in:
+benchmarks/results/census-codex-rejudge-20260717/claude-manual-audit-snapshot.md
+
+Use these sources:
+- benchmarks/results/census-codex-rejudge-20260717/census-deep-v2-snapshot.json
+- benchmarks/results/longmemeval-latest.jsonl
+- R:/Projects/data/longmemeval_s_cleaned.json
+- src/joiny_mnemonic/longmemeval.py
+
+Do not edit any file. This is a blind methodological rejudge, not an attempt to
+defend the existing audit.
+
+For every one of the 28 qids:
+1. Recover the question, reference answer, saved model answer, and all persisted
+   packed gold-session fragments.
+2. Decide whether those fragments contain enough information to derive the
+   reference answer. Semantic support counts; literal substring containment by
+   itself does not. Beware incidental short-number/name matches.
+3. Classify the failure as:
+   - reader: sufficient supporting evidence is in the packet but the answer is
+     wrong;
+   - passage: supporting evidence is absent from the packed fragments;
+   - uncertain: the persisted fragments or reference do not permit a defensible
+     decision.
+4. Assign a narrow mechanism such as temporal arithmetic, temporal ordering,
+   enumeration, conflicting versions/status, question comprehension, recall,
+   or passage selection.
+5. Compare with Claude's per-case verdict and mark agree, disagree, or partial.
+
+Do not infer from gold session presence alone. Do not call a case reader-side
+unless the packed text is sufficient for the requested answer. Keep rationales
+short but concrete and quote or paraphrase the decisive evidence.
+
+Finally report independent counts, disputed qids, whether the claimed 11/11
+passage:yes reader result holds, how many of the 17 passage:no cases are really
+reader/passage/uncertain, and what conclusions are justified about selector
+headroom and temporal/status failures. Acknowledge that the 26 indeterminate
+cases are outside this audit, so no result over these 28 is a global ceiling.

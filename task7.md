@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed. Trigger: a live host-level E2E finding (2026-07-14) that invalidates
+Blocked behind TODO P0 post-factum finalization and dogfood. Native authority
+channels must not amplify raw proposals, questions, reasoning, or semantically
+inferred candidates. Resume this task only after the generated protected state
+is proven to contain finalized tagged outcomes exclusively.
+
+Original trigger: a live host-level E2E finding (2026-07-14) that invalidates
 our delivery assumption. A nested Claude Code session, asked what ACTIVE
 MEMORY says, answered correctly — and then volunteered that the injected
 `[MEMORY PACKET] / ACTIVE MEMORY` block "is not part of my real memory
