@@ -156,6 +156,45 @@ def route(service):
             target = self
         target.service.store.future_write()
 """
+        alias_call_before_shadow = """def outer(service):
+    ga = getattr
+    def inner():
+        ga(service, 'store').future_write()
+    run = inner
+    run()
+    ga = lambda *args: None
+"""
+        escaped_before_unreachable_shadow = """def outer(service):
+    ga = getattr
+    def inner():
+        ga(service, 'store').future_write()
+    run = inner
+    return run
+    ga = lambda *args: None
+"""
+        if_expression_alias = """def route(service, cond):
+    ga = getattr if cond else (lambda *args: None)
+    ga(service, 'store').future_write()
+"""
+        boolean_alias = """def route(service, cond):
+    ga = (cond and getattr) or (lambda *args: None)
+    ga(service, 'store').future_write()
+"""
+        iteration_alias = """def route(service):
+    for ga in (getattr,):
+        ga(service, 'store').future_write()
+"""
+        comprehension_alias = """def route(service):
+    return [ga(service, 'store').future_write() for ga in (getattr,)]
+"""
+        alias_call_after_shadow = """def outer(service):
+    ga = getattr
+    def inner():
+        ga(service, 'store').future_write()
+    run = inner
+    ga = lambda *args: None
+    run()
+"""
         self.assertTrue(calls_in_source(called_before_shadow, path="fixture.py"))
         self.assertTrue(
             calls_in_source(possible_unshadowed_branch, path="fixture.py")
@@ -166,8 +205,21 @@ def route(service):
         self.assertTrue(
             calls_in_source(possible_binding_kinds, path="fixture.py")
         )
+        for source in (
+            alias_call_before_shadow,
+            escaped_before_unreachable_shadow,
+            if_expression_alias,
+            boolean_alias,
+            iteration_alias,
+            comprehension_alias,
+        ):
+            with self.subTest(source=source):
+                self.assertTrue(calls_in_source(source, path="fixture.py"))
         self.assertEqual(
             calls_in_source(called_after_shadow, path="fixture.py"), ()
+        )
+        self.assertEqual(
+            calls_in_source(alias_call_after_shadow, path="fixture.py"), ()
         )
 
     def test_literal_nesting_has_no_semantic_depth_bypass(self) -> None:

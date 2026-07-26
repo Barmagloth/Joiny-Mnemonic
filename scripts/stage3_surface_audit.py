@@ -74,6 +74,26 @@ def _pack_possibilities(values: Iterable[str]) -> str:
 def _resolved_names(node: ast.expr, aliases: dict[str, str]) -> frozenset[str]:
     if isinstance(node, ast.NamedExpr):
         return _resolved_names(node.value, aliases)
+    if isinstance(node, ast.IfExp):
+        return _resolved_names(node.body, aliases).union(
+            _resolved_names(node.orelse, aliases)
+        )
+    if isinstance(node, ast.BoolOp):
+        return frozenset().union(
+            *(_resolved_names(value, aliases) for value in node.values)
+        )
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return frozenset().union(
+            *(_resolved_names(value, aliases) for value in node.elts)
+        )
+    if isinstance(node, ast.Dict):
+        return frozenset().union(
+            *(
+                _resolved_names(value, aliases)
+                for value in (*node.keys, *node.values)
+                if value is not None
+            )
+        )
     name = _qualified_name(node)
     if name is None:
         return frozenset()
@@ -179,6 +199,27 @@ def _expression_kind(
 ) -> str | None:
     if isinstance(node, ast.NamedExpr):
         return _expression_kind(node.value, aliases, bindings)
+    if isinstance(node, ast.IfExp):
+        kinds = {
+            kind
+            for value in (node.body, node.orelse)
+            if (kind := _expression_kind(value, aliases, bindings)) is not None
+        }
+        return _pack_possibilities(kinds) if kinds else None
+    if isinstance(node, ast.BoolOp):
+        kinds = {
+            kind
+            for value in node.values
+            if (kind := _expression_kind(value, aliases, bindings)) is not None
+        }
+        return _pack_possibilities(kinds) if kinds else None
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        kinds = {
+            kind
+            for value in node.elts
+            if (kind := _expression_kind(value, aliases, bindings)) is not None
+        }
+        return _pack_possibilities(kinds) if kinds else None
     if isinstance(node, ast.Name):
         return bindings.get(node.id)
     if isinstance(node, ast.Attribute):
@@ -330,6 +371,20 @@ def _analysis_context(
                         bindings[target.id] = kind
                     elif target.id != "service":
                         bindings.pop(target.id, None)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            binding_event = True
+            resolved = _resolved_names(node.iter, aliases)
+            transferable = resolved.intersection(TRANSFERABLE_CALLABLES)
+            kind = _expression_kind(node.iter, aliases, bindings)
+            for name in _bound_target_names(node.target):
+                if transferable:
+                    aliases[name] = _pack_possibilities(transferable)
+                else:
+                    aliases.pop(name, None)
+                if kind is not None:
+                    bindings[name] = kind
+                elif name != "service":
+                    bindings.pop(name, None)
         elif isinstance(node, ast.AugAssign):
             binding_event = True
             for name in _bound_target_names(node.target):
@@ -688,6 +743,131 @@ def calls_in_source(
             conditional_nodes=conditional_nodes_by_scope[scope],
         )
 
+    def expression_can_be_closure(
+        node: ast.expr, aliases: set[str], scope: ast.AST
+    ) -> bool:
+        if node is scope:
+            return True
+        if isinstance(node, ast.Name):
+            return node.id in aliases
+        if isinstance(node, ast.NamedExpr):
+            return expression_can_be_closure(node.value, aliases, scope)
+        if isinstance(node, ast.IfExp):
+            return expression_can_be_closure(
+                node.body, aliases, scope
+            ) or expression_can_be_closure(node.orelse, aliases, scope)
+        if isinstance(node, ast.BoolOp):
+            return any(
+                expression_can_be_closure(value, aliases, scope)
+                for value in node.values
+            )
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            return any(
+                expression_can_be_closure(value, aliases, scope)
+                for value in node.elts
+            )
+        if isinstance(node, ast.Dict):
+            return any(
+                expression_can_be_closure(value, aliases, scope)
+                for value in (*node.keys, *node.values)
+                if value is not None
+            )
+        return False
+
+    def subtree_references_closure(
+        node: ast.AST, aliases: set[str], scope: ast.AST
+    ) -> bool:
+        return any(
+            child is scope
+            or (
+                isinstance(child, ast.Name)
+                and isinstance(child.ctx, ast.Load)
+                and child.id in aliases
+            )
+            for child in ast.walk(node)
+        )
+
+    def closure_runtime_contexts(
+        parent: ast.AST, scope: ast.AST
+    ) -> list[tuple[dict[str, str], dict[str, str]]]:
+        contexts = [context_at(parent)]
+        closure_aliases: set[str] = set()
+        for candidate in scope_data[parent][0]:
+            prior_aliases = set(closure_aliases)
+            escaped = False
+            if candidate is scope and isinstance(
+                scope, (ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                closure_aliases.add(scope.name)
+            elif isinstance(candidate, ast.Import):
+                for item in candidate.names:
+                    closure_aliases.discard(
+                        item.asname or item.name.split(".")[0]
+                    )
+            elif isinstance(candidate, ast.ImportFrom):
+                for item in candidate.names:
+                    closure_aliases.discard(item.asname or item.name)
+            elif isinstance(
+                candidate, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                closure_aliases.discard(candidate.name)
+            elif isinstance(candidate, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                for target, value in _assignment_pairs((candidate,)):
+                    possible = expression_can_be_closure(
+                        value, closure_aliases, scope
+                    )
+                    target_names = _bound_target_names(target)
+                    if possible and not target_names:
+                        escaped = True
+                    for name in target_names:
+                        if possible:
+                            closure_aliases.add(name)
+                        else:
+                            closure_aliases.discard(name)
+            elif isinstance(
+                candidate, (ast.For, ast.AsyncFor, ast.comprehension)
+            ):
+                possible = expression_can_be_closure(
+                    candidate.iter, closure_aliases, scope
+                )
+                for name in _bound_target_names(candidate.target):
+                    if possible:
+                        closure_aliases.add(name)
+                    else:
+                        closure_aliases.discard(name)
+            elif isinstance(candidate, ast.AugAssign):
+                closure_aliases.difference_update(
+                    _bound_target_names(candidate.target)
+                )
+            elif isinstance(candidate, ast.Delete):
+                for target in candidate.targets:
+                    closure_aliases.difference_update(_bound_target_names(target))
+            if candidate in conditional_nodes_by_scope[parent]:
+                closure_aliases.update(prior_aliases)
+            if isinstance(candidate, ast.Call):
+                direct_call = candidate.func is scope or (
+                    isinstance(candidate.func, ast.Name)
+                    and candidate.func.id in closure_aliases
+                )
+                argument_escape = any(
+                    subtree_references_closure(argument, closure_aliases, scope)
+                    for argument in (
+                        *candidate.args,
+                        *(keyword.value for keyword in candidate.keywords),
+                    )
+                )
+                if direct_call or argument_escape:
+                    contexts.append(context_at(parent, candidate))
+            elif isinstance(candidate, (ast.Return, ast.Yield, ast.YieldFrom)):
+                value = candidate.value
+                if value is not None and subtree_references_closure(
+                    value, closure_aliases, scope
+                ):
+                    contexts.append(context_at(parent, candidate))
+            if escaped:
+                contexts.append(context_at(parent, candidate))
+        return contexts
+
     for scope in scopes:
         nodes = _scope_nodes(scope)
         conditional_nodes_by_scope[scope] = frozenset(
@@ -705,24 +885,7 @@ def calls_in_source(
             parent = parents.get(scope)
             while parent not in scope_data:
                 parent = parents.get(parent)
-            runtime_contexts = [context_at(parent)]
-            parent_nodes = scope_data[parent][0]
-            for candidate in parent_nodes:
-                if not isinstance(candidate, ast.Call):
-                    continue
-                direct_function_call = (
-                    isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and isinstance(candidate.func, ast.Name)
-                    and candidate.func.id == scope.name
-                )
-                immediate_lambda_call = (
-                    isinstance(scope, ast.Lambda) and candidate.func is scope
-                )
-                if (
-                    (direct_function_call or immediate_lambda_call)
-                    and position(candidate) >= position(scope)
-                ):
-                    runtime_contexts.append(context_at(parent, candidate))
+            runtime_contexts = closure_runtime_contexts(parent, scope)
             parent_aliases = _merge_possible_maps(
                 aliases for aliases, _ in runtime_contexts
             )

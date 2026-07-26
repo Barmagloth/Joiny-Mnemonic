@@ -89,3 +89,28 @@ Verification before commit:
 - raw-write inventory: exactly 16 entries;
 - Stage 1 gates: PASS;
 - `git diff --check`: PASS.
+
+## Review of `381ec21`
+
+Original status: **REJECT** with two additional P1 findings. Both are now
+remediated in the working tree and await a fresh independent review. Stage 3
+step 2 remains blocked.
+
+- Closure call-site discovery recognised only the original function name and
+  an immediately-called lambda. Calls through a local alias and a closure
+  returned before unreachable late shadowing were missed.
+- Reflection alternatives in `IfExp` and `BoolOp`, plus `for` and
+  comprehension targets, were not transferred into analysis bindings.
+
+The remediation tracks local closure aliases, direct calls and real escape
+positions, and propagates callable/kind alternatives from conditional
+expressions, collections and iteration targets. Regression coverage includes
+all reviewer reproducers and a negative alias-call-after-shadow control.
+
+Verification after remediation:
+
+- audit suite: 12/12 PASS;
+- linked focused suite: 25/25 PASS;
+- raw-write inventory: exactly 16 entries;
+- Stage 1 gates: PASS;
+- syntax and `git diff --check`: PASS.
