@@ -11,9 +11,11 @@ from contextlib import redirect_stdout
 from dataclasses import asdict
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 from joiny_mnemonic.api import make_handler
 from joiny_mnemonic.cli import build_parser, run
+from joiny_mnemonic.hooks import process_hook
 from joiny_mnemonic.mcp import MCPServer
 from joiny_mnemonic.service import MemoryService
 from joiny_mnemonic.storage import MemoryStore
@@ -125,6 +127,48 @@ class ApplicationCommandsTest(unittest.TestCase):
                 MCPServer(service)._call_tool(
                     "memory_set_block", {"name": "goal", "content": oversized}
                 )
+
+    def test_hook_mutations_use_application_commands(self) -> None:
+        with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
+            with (
+                patch.object(
+                    service.commands,
+                    "resolve_hook_session",
+                    wraps=service.commands.resolve_hook_session,
+                ) as resolve_session,
+                patch.object(
+                    service.commands,
+                    "append_host_events_once",
+                    wraps=service.commands.append_host_events_once,
+                ) as append_events,
+                patch.object(
+                    service.commands,
+                    "schedule_after_commit",
+                    wraps=service.commands.schedule_after_commit,
+                ) as after_commit,
+            ):
+                result = process_hook(
+                    service,
+                    "codex",
+                    {
+                        "hook_event_name": "PostToolUse",
+                        "session_id": "stage3-application-hook",
+                        "task_id": "stage3-application-task",
+                        "tool_use_id": "stage3-call",
+                        "tool_name": "Read",
+                        "tool_input": {"file_path": "README.md"},
+                        "tool_response": {"content": "ok"},
+                    },
+                )
+
+            self.assertEqual(result, {})
+            resolve_session.assert_called_once()
+            self.assertEqual(
+                resolve_session.call_args.kwargs["task_key"],
+                "stage3-application-task",
+            )
+            append_events.assert_called_once()
+            after_commit.assert_called_once()
 
 
 if __name__ == "__main__":

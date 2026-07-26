@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Sequence
 
-from .models import ActiveBlock, Artifact, BudgetPolicy
+from .models import ActiveBlock, Artifact, BudgetPolicy, Event
 
 if TYPE_CHECKING:
     from .service import MemoryService
@@ -31,6 +32,45 @@ class ApplicationCommands:
         return self._service.store.start_session(
             agent, branch_id=branch_id, capabilities=capabilities
         )
+
+    def resolve_hook_session(
+        self,
+        agent: str,
+        external_session_id: str,
+        *,
+        branch_id: str = "main",
+        capabilities: dict[str, Any] | None = None,
+        task_key: str | None = None,
+    ) -> str:
+        session_id = self._service.store.hook_session(
+            agent,
+            external_session_id,
+            branch_id=branch_id,
+            capabilities=capabilities,
+        )
+        if task_key is not None:
+            self._service.store.bind_task_session(session_id, task_key)
+        return session_id
+
+    def append_host_events_once(
+        self,
+        receipt_key: str,
+        events: Sequence[dict[str, Any]],
+        *,
+        adapter: str,
+        branch_id: str = "main",
+        session_id: str | None = None,
+    ) -> tuple[tuple[Event, ...], bool]:
+        return self._service.store.append_host_events_once(
+            receipt_key,
+            events,
+            adapter=adapter,
+            branch_id=branch_id,
+            session_id=session_id,
+        )
+
+    def schedule_after_commit(self, callback: Callable[[], None]) -> None:
+        self._service.store.after_commit(callback)
 
     def create_branch(
         self,

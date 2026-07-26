@@ -47,12 +47,27 @@ That test performs the same active-block operation through CLI, MCP and HTTP,
 checks the successful result on every surface, and proves that the canonical
 stored-size validation rejects the same oversized input on all three.
 
-After this migration, the bounded audit contains only the four hook writes
+After this migration, the bounded audit contained only four hook writes,
 reserved for the next independent step:
 
 | Surface | Remaining direct writes |
 |---|---|
 | hooks | `hook_session`, `bind_task_session`, `append_host_events_once`, `after_commit` |
+
+## Step 3 hook command path
+
+Host hooks now use the same `ApplicationCommands` boundary. Session resolution
+and optional Workstream binding are one application operation; idempotent host
+event append and after-commit scheduling are also exposed as named commands.
+The structural inventory is therefore empty.
+
+Executable proof:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_hook_mutations_use_application_commands -v
+python scripts/stage3_surface_audit.py --require-clean
+```
 
 ## Target ownership
 

@@ -43,13 +43,7 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
     def test_current_direct_store_write_inventory_is_frozen(self) -> None:
         violations = direct_store_writes(ROOT)
         self.assertEqual(
-            [(item.path, item.line, item.method) for item in violations],
-            [
-                ("src/joiny_mnemonic/hooks.py", 376, "hook_session"),
-                ("src/joiny_mnemonic/hooks.py", 383, "bind_task_session"),
-                ("src/joiny_mnemonic/hooks.py", 421, "append_host_events_once"),
-                ("src/joiny_mnemonic/hooks.py", 496, "after_commit"),
-            ],
+            [(item.path, item.line, item.method) for item in violations], []
         )
 
 

@@ -373,14 +373,13 @@ def process_hook(
         if task is not None:
             branch_id = task.branch_id
 
-        session_id = service.store.hook_session(
+        session_id = service.commands.resolve_hook_session(
             agent,
             external_session,
             branch_id=branch_id,
             capabilities=adapter_capabilities(agent),
+            task_key=task.task_key if task is not None else None,
         )
-        if task is not None:
-            service.store.bind_task_session(session_id, task.task_key)
     flow.session_id = session_id
     flow.branch_id = branch_id
     flow.step(
@@ -418,7 +417,7 @@ def process_hook(
 
     receipt_key = _receipt_key(agent, external_session, value)
     with _stage("capture_append"):
-        events, _created = service.store.append_host_events_once(
+        events, _created = service.commands.append_host_events_once(
             receipt_key,
             _hook_events(capture_value),
             adapter=agent,
@@ -493,7 +492,7 @@ def process_hook(
         reconcile_summary = service.reconciler.reconcile(branch_id=branch_id)
     flow.step("hook.reconcile", output_value=reconcile_summary)
     with _stage("maintenance"):
-        service.store.after_commit(lambda: service.projection_failures.maintain_event(events[-1], detached=True))
+        service.commands.schedule_after_commit(lambda: service.projection_failures.maintain_event(events[-1], detached=True))
         decision = service.governor.evaluate_and_apply(
             branch_id=branch_id,
             session_id=session_id,
