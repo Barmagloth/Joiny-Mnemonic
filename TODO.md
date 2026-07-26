@@ -307,10 +307,20 @@ is premature.
       list (pref-005 vegetarian, pref-030 cat names) — single-type gold
       is itself a corpus defect to fix in the held-out tranche
       (multi-type golds)
-- [ ] Backend smoke: run the actual nuextract-local entry point with its pinned
-      model revision and official prompt protocol on a small EN/RU slice;
-      measure load success, JSON validity, latency, empty-output rate and RU
-      recall before spending on a full run
+- [x] Backend smoke superseded (2026-07-26): nuextract-local does not work
+      with Russian text and is excluded from stage 6 candidates. New local
+      candidates: qwen3-4b, gemma-3-4b, gliner-multilingual (ROADMAP §9)
+- [ ] Model-agnostic local extractor connector: one generic backend where the
+      user swaps the model via config only (model id, revision, inference
+      params in a single config; OpenAI-compatible / llama.cpp endpoint; no
+      new Python package per model). Swapping must change
+      ExtractorConfig.canonical_hash so signed eval reports never carry over.
+      Document the swap as one short recipe and verify it on at least two
+      different models. Required before the stage 6 evaluation runs
+- [ ] Candidate smoke: run qwen3-4b, gemma-3-4b and gliner-multilingual through
+      the generic connector on a small EN/RU slice; measure load success, JSON
+      validity, latency, empty-output rate and RU recall before spending on a
+      full run
 - [ ] PRODUCT DISCOVERY GATE proper: run held-out scoring against the exact
       shipped backend and frozen configuration. Passing permits suggestion-only
       deployment; it never grants authority to write finalized memory
