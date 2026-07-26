@@ -15,7 +15,7 @@ violation. The gate is not a general Python data-flow or metaprogramming
 analyser; JM-INV-003 is proved separately by a behavioural test through all
 public surfaces. `--require-clean` is the final structural acceptance mode.
 
-Current direct write ownership violations:
+Step 1 baseline direct write ownership violations:
 
 | Surface | Direct writes to move behind the application layer |
 |---|---|
@@ -40,7 +40,7 @@ Executable behavioural proof:
 
 ```powershell
 $env:PYTHONPATH='src'
-python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_cli_mcp_http_share_block_command_and_validation -v
+python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path -v
 ```
 
 That test performs the same active-block operation through CLI, MCP and HTTP,
@@ -65,7 +65,7 @@ Executable proof:
 
 ```powershell
 $env:PYTHONPATH='src'
-python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_hook_mutations_use_application_commands -v
+python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path -v
 python scripts/stage3_surface_audit.py --require-clean
 ```
 

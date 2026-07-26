@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import tomllib
 import unittest
@@ -608,35 +609,39 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(decision.placement, Placement.CPU_QUANTIZED_KV)
 
     def test_http_exposes_task_and_usage_endpoints(self) -> None:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.service))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            body = json.dumps({"task_key": "HTTP-1", "title": "HTTP task"}).encode()
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{server.server_port}/v1/tasks",
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=5) as response:
-                task = json.load(response)
-            self.assertTrue(task["branch_id"].startswith("task/http-1-"))
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{server.server_port}/v1/tasks", timeout=5
-            ) as response:
-                tasks = json.load(response)
-            self.assertEqual(tasks[0]["task_key"], "HTTP-1")
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{server.server_port}/v1/usage?branch={task['branch_id']}",
-                timeout=5,
-            ) as response:
-                usage = json.load(response)
-            self.assertIn("totals", usage)
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=5)
+        with tempfile.TemporaryDirectory(dir=RUNTIME_ROOT) as project_root:
+            with MemoryService(":memory:", project_root=project_root) as service:
+                server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                try:
+                    body = json.dumps(
+                        {"task_key": "HTTP-1", "title": "HTTP task"}
+                    ).encode()
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{server.server_port}/v1/tasks",
+                        data=body,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        task = json.load(response)
+                    self.assertTrue(task["branch_id"].startswith("task/http-1-"))
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{server.server_port}/v1/tasks", timeout=5
+                    ) as response:
+                        tasks = json.load(response)
+                    self.assertEqual(tasks[0]["task_key"], "HTTP-1")
+                    with urllib.request.urlopen(
+                        f"http://127.0.0.1:{server.server_port}/v1/usage?branch={task['branch_id']}",
+                        timeout=5,
+                    ) as response:
+                        usage = json.load(response)
+                    self.assertIn("totals", usage)
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                    thread.join(timeout=5)
 
     def test_http_api_uses_the_same_store(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.service))

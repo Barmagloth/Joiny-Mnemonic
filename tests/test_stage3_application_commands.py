@@ -19,9 +19,11 @@ from joiny_mnemonic.hooks import process_hook
 from joiny_mnemonic.mcp import MCPServer
 from joiny_mnemonic.service import MemoryService
 from joiny_mnemonic.storage import MemoryStore
+from scripts.stage3_surface_audit import direct_store_writes
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parent / "runtime"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ApplicationCommandsTest(unittest.TestCase):
@@ -75,7 +77,7 @@ class ApplicationCommandsTest(unittest.TestCase):
             self.assertEqual(policy.context_window_tokens, 1000)
             self.assertTrue(finding_id.startswith("finding_"))
 
-    def test_cli_mcp_http_share_block_command_and_validation(self) -> None:
+    def test_jm_inv_003_all_public_surfaces_share_application_path(self) -> None:
         database = RUNTIME_ROOT / f"stage3-command-{uuid.uuid4().hex}.db"
         self.addCleanup(lambda: database.unlink(missing_ok=True))
         cli_result = self._run_cli(database, "ship")
@@ -128,7 +130,6 @@ class ApplicationCommandsTest(unittest.TestCase):
                     "memory_set_block", {"name": "goal", "content": oversized}
                 )
 
-    def test_hook_mutations_use_application_commands(self) -> None:
         with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
             with (
                 patch.object(
@@ -169,6 +170,8 @@ class ApplicationCommandsTest(unittest.TestCase):
             )
             append_events.assert_called_once()
             after_commit.assert_called_once()
+
+        self.assertEqual(direct_store_writes(PROJECT_ROOT), ())
 
 
 if __name__ == "__main__":

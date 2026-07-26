@@ -78,7 +78,7 @@
 |---|---|---|
 | `JM-INV-001` | Переход, отсутствующий в таблице переходов, не записывает состояние | тестами разрешённых и запрещённых переходов этапа 1 |
 | `JM-INV-002` | Составная операция записывается полностью либо не записывается совсем | `tests.test_stage2_atomicity.Stage2AtomicityTest` (`test_jm_inv_002_*` и rollback host event) |
-| `JM-INV-003` | CLI, MCP, HTTP и хуки проходят один прикладной путь изменения | проверками поверхностей этапа 3 |
+| `JM-INV-003` | CLI, MCP, HTTP и хуки проходят один прикладной путь изменения | `tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path` |
 | `JM-INV-004` | Доверие вычисляется из сохранённого исходного события, а не принимается от вызывающего кода | trust-тестами этапа 1 |
 | `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | host E2E этапа 5 |
 | `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | lineage-тестами этапов 4 и 5 |
@@ -396,6 +396,24 @@ CLI, MCP, HTTP и хуки вызывают только прикладной с
 - Complexity-gate проходит и запрещает обратный рост разделённых модулей.
 - Существующие публичные форматы сохранены либо имеют документированную миграцию.
 - Полный набор тестов проходит.
+
+Исполняемая приёмка этапа 3 (2026-07-26):
+
+- `JM-INV-003`, включая CLI, MCP, HTTP и hook:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path -v`;
+- запрет прямых изменяющих вызовов из публичных поверхностей:
+  `python scripts/stage3_surface_audit.py --require-clean`;
+- физическое владение вынесенными storage-компонентами и совместимость импортов:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python -m unittest tests.test_stage3_storage_split -v`;
+- contract/complexity gates: `python scripts/stage1_gates.py all`;
+- полный suite:
+  `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 python -m unittest discover -s tests -q`.
+
+Результат приёмки 2026-07-26: `JM-INV-003` 1/1, focused suite 8/8,
+direct-store inventory 0, contract/complexity gates PASS, полный suite 325/325.
+Baseline `storage.py` снижен с 4847/156/4 до 4702/138/1; новые
+`projection_storage.py` и `storage_errors.py` имеют собственные точные caps.
+Публичные форматы не менялись.
 
 ## 7. Этап 4 — закрепить ветки и время тестами
 
