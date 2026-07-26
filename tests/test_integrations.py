@@ -98,12 +98,12 @@ class IntegrationTest(unittest.TestCase):
         appended = subprocess.run(
             [*base, "append", "--kind", "message", "--role", "user",
              "--content", "GPT↔Claude bridge ⇄ проверка"],
-            capture_output=True, text=True, env=env, timeout=60,
+            capture_output=True, text=True, encoding="cp1251", env=env, timeout=60,
         )
         self.assertEqual(appended.returncode, 0, appended.stderr)
         shown = subprocess.run(
             [*base, "timeline", "--limit", "5"],
-            capture_output=True, text=True, env=env, timeout=60,
+            capture_output=True, text=True, encoding="cp1251", env=env, timeout=60,
         )
         self.assertEqual(shown.returncode, 0, shown.stderr)
         self.assertIn("Claude bridge", shown.stdout)
