@@ -41,7 +41,8 @@ Final results:
 | Stage 3 focused suite | 8/8 PASS |
 | Direct mutating store calls in four surfaces | 0 |
 | Contract/complexity gates | PASS |
-| Full suite | 325/325 OK in 427.761 s |
+| Local full suite with `explorer` extras | 325/325 OK in 427.761 s |
+| Minimal CI (`pip install -e . pytest`) | 324 passed, 1 skipped (explorer extras absent) |
 
 The first full run exposed a deterministic test-isolation defect: the HTTP
 task integration used the shared, accumulated `tests/runtime` tree when

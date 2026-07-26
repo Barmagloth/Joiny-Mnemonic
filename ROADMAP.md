@@ -410,7 +410,10 @@ CLI, MCP, HTTP и хуки вызывают только прикладной с
   `PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 python -m unittest discover -s tests -q`.
 
 Результат приёмки 2026-07-26: `JM-INV-003` 1/1, focused suite 8/8,
-direct-store inventory 0, contract/complexity gates PASS, полный suite 325/325.
+direct-store inventory 0, contract/complexity gates PASS, локальный полный suite
+с `explorer` extras 325/325. Минимальный CI (`pip install -e . pytest`) прошёл:
+324 passed, 1 skipped; пропущен только explorer-тест, поскольку optional extras в CI
+намеренно не устанавливаются.
 Baseline `storage.py` снижен с 4847/156/4 до 4702/138/1; новые
 `projection_storage.py` и `storage_errors.py` имеют собственные точные caps.
 Публичные форматы не менялись.
