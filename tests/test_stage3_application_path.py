@@ -88,6 +88,7 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
             "def route(service):\n    ga = getattr\n    inner = lambda get=ga, svc=service: get(svc, 'store').future_write()\n    ga = None\n    service = None\n    inner()\n",
             "class Handler:\n    def route(self):\n        vars(self)['service'].store.future_write()\n",
             "class Handler:\n    def route(self):\n        self.__dict__.get('service').store.future_write()\n",
+            "getattr = lambda *args: None\nfrom builtins import getattr\ngetattr(service, 'store').future_write()\n",
         )
         for source in fixtures:
             with self.subTest(source=source):

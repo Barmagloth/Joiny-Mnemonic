@@ -126,41 +126,34 @@ def _reflection_aliases(
 ) -> dict[str, str]:
     nodes = tuple(nodes)
     aliases = dict(REFLECTION_NAMES if base is None else base)
-    shadowed = {
-        node.name
-        for node in nodes
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    }
-    shadowed.update(
-        node.arg for node in nodes if isinstance(node, ast.arg)
-    )
-    for name in shadowed:
+    for name in (node.arg for node in nodes if isinstance(node, ast.arg)):
         aliases.pop(name, None)
     aliases.update(defaults or {})
     for node in nodes:
         if isinstance(node, ast.Import):
             for item in node.names:
                 aliases[item.asname or item.name] = item.name
-        elif isinstance(node, ast.ImportFrom) and node.module in {"builtins", "operator"}:
+        elif isinstance(node, ast.ImportFrom):
             for item in node.names:
-                aliases[item.asname or item.name] = f"{node.module}.{item.name}"
-    assignments = _assignment_pairs(nodes)
-    for _ in range(len(assignments) + 1):
-        changed = False
-        for assignment_target, assignment_value in assignments:
-            for target, value in _target_value_pairs(assignment_target, assignment_value):
-                if not isinstance(target, ast.Name):
-                    continue
-                resolved = _resolved_name(value, aliases)
-                if resolved in TRANSFERABLE_CALLABLES:
-                    if aliases.get(target.id) != resolved:
+                bound = item.asname or item.name
+                if node.module in {"builtins", "operator"}:
+                    aliases[bound] = f"{node.module}.{item.name}"
+                else:
+                    aliases.pop(bound, None)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            aliases.pop(node.name, None)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            for assignment_target, assignment_value in _assignment_pairs((node,)):
+                for target, value in _target_value_pairs(
+                    assignment_target, assignment_value
+                ):
+                    if not isinstance(target, ast.Name):
+                        continue
+                    resolved = _resolved_name(value, aliases)
+                    if resolved in TRANSFERABLE_CALLABLES:
                         aliases[target.id] = resolved
-                        changed = True
-                elif target.id in aliases:
-                    aliases.pop(target.id)
-                    changed = True
-        if not changed:
-            break
+                    else:
+                        aliases.pop(target.id, None)
     return aliases
 
 
