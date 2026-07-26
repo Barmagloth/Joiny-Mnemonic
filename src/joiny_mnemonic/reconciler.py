@@ -22,6 +22,7 @@ import hashlib
 import os
 import re
 from dataclasses import asdict, dataclass
+from functools import wraps
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -128,6 +129,15 @@ def _event_command(event: Event) -> str:
     if isinstance(tool_input, dict):
         return str(tool_input.get("command", ""))
     return ""
+
+
+def _atomic(method: Any) -> Any:
+    @wraps(method)
+    def wrapped(self: "StateReconciler", *args: Any, **kwargs: Any) -> Any:
+        with self.store._transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 class StateReconciler:
@@ -315,6 +325,7 @@ class StateReconciler:
                 summary["pending"] += 1
         return summary
 
+    @_atomic
     def _apply_closure(
         self,
         detection: CompletionDetection,
@@ -422,6 +433,7 @@ class StateReconciler:
             settle_source_event_id=settle_source_event_id,
         )
 
+    @_atomic
     def undo_closure(
         self, candidate_id: str, *, branch_id: str = "main",
         rule_id: str = "operator_undo", detail: dict[str, Any] | None = None,

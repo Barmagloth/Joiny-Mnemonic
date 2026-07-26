@@ -11,10 +11,9 @@ import time
 import uuid
 import zlib
 from collections.abc import Sequence
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .models import (
     ActiveBlock, Artifact, BudgetPolicy, Event, ExtractionCandidate, MemoryRecord, MemoryType,
@@ -26,9 +25,13 @@ from .provenance import (
     EXTERNAL_UNTRUSTED,
     origin_evidence_type,
 )
+from .candidate_confirmation import CandidateConfirmationMixin
 from .dataflow_storage import DataflowStorageMixin
+from .projection_storage import ProjectionStorageMixin
 from .task_storage import TaskStorageMixin
-from .storage_support import integrity_checked, json_text as _json, now as _now
+from .transactions import TransactionMixin
+from .storage_support import integrity_checked, json_text as _json, now as _now, store_read
+from .storage_errors import SchemaCompatibilityError, SnapshotIntegrityError, StoreIntegrityError
 from .policy_contract import policy_activation_allowed
 from .transition_rules import (
     CANDIDATE_RULE,
@@ -100,24 +103,6 @@ def _memory_signals(
 def _fts_match_query(value: str) -> str:
     terms = [term for term in re.findall(r"[\w./:-]+", value, re.UNICODE) if term]
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
-
-
-class StoreIntegrityError(RuntimeError):
-    """Raised when canonical storage fails automatic integrity verification."""
-
-
-class SchemaCompatibilityError(RuntimeError):
-    """Raised before mutation when the database schema is unsupported or malformed."""
-
-
-class SnapshotIntegrityError(RuntimeError):
-    """Raised internally when materialized snapshot state fails hash verification."""
-
-    def __init__(self, snapshot_id: str, expected: str, actual: str) -> None:
-        self.snapshot_id = snapshot_id
-        self.expected = expected
-        self.actual = actual
-        super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
 CURRENT_SCHEMA_VERSION = 10
@@ -768,7 +753,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, 
 """
 
 
-class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
+class MemoryStore(
+    TransactionMixin,
+    CandidateConfirmationMixin,
+    DataflowStorageMixin,
+    ProjectionStorageMixin,
+    TaskStorageMixin,
+):
     """Durable SQLite event store with immutable canonical and derived records."""
 
     MAX_ACTIVE_BYTES = 3000
@@ -780,6 +771,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self.redactor = redactor or SecretRedactor()
         self._lock = threading.RLock()
+        self._init_transactions()
         self._verified_data_version: int | None = None
         self._verified_schema_version: int | None = None
         target = ":memory:" if self._in_memory else str(self.path)
@@ -825,6 +817,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             row = self._conn.execute("PRAGMA schema_version").fetchone()
         return int(row[0])
 
+    @store_read
     def assert_integrity(self) -> None:
         """Verify canonical hashes and fail closed if durable data was altered."""
         for _ in range(3):
@@ -1196,18 +1189,6 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
 
     def __exit__(self, *_: object) -> None:
         self.close()
-
-    @contextmanager
-    def _transaction(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                yield self._conn
-            except BaseException:
-                self._conn.rollback()
-                raise
-            else:
-                self._conn.commit()
 
     def create_branch(
         self, branch_id: str, *, parent_id: str = "main", fork_event_seq: int | None = None
@@ -1661,6 +1642,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
     def _event_origin_evidence(row: sqlite3.Row) -> str:
         return origin_evidence_type(MemoryStore._event_from_row(row))
 
+    @store_read
     @integrity_checked
     def get_event(self, event_id: str) -> Event:
         with self._lock:
@@ -1669,6 +1651,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             raise KeyError(f"unknown event: {event_id}")
         return self._event_from_row(row)
 
+    @store_read
     @integrity_checked
     def get_artifact(self, artifact_id: str) -> Artifact:
         with self._lock:
@@ -1926,6 +1909,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             supersedes_id=row["supersedes_id"], created_at=row["created_at"],
         )
 
+    @store_read
     @integrity_checked
     def get_active_blocks(self, *, branch_id: str = "main") -> dict[str, ActiveBlock]:
         with self._lock:
@@ -2212,6 +2196,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             raise KeyError(f"unknown memory: {memory_id}")
         return self._memory_from_row(row)
 
+    @store_read
     @integrity_checked
     def list_memories(
         self,
@@ -2599,59 +2584,6 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             blob_available=True,
         )
 
-    def retrieval_health_load(self) -> dict[str, dict[str, Any]]:
-        """Rebuildable channel-health projection (see schema comment)."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT channel, payload_json FROM retrieval_channel_health"
-            ).fetchall()
-        return {
-            str(row["channel"]): json.loads(row["payload_json"]) for row in rows
-        }
-
-    def retrieval_health_store(self, channels: dict[str, dict[str, Any]]) -> None:
-        if not channels:
-            return
-        with self._transaction() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO retrieval_channel_health"
-                "(channel, payload_json, updated_at) VALUES(?,?,?)",
-                [
-                    (channel, _json(payload), _now())
-                    for channel, payload in channels.items()
-                ],
-            )
-
-    def file_hash_cache_load(self, root: str) -> dict[str, tuple[int, int, str]]:
-        """Rebuildable stat->hash projection for one project root."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT path, size, mtime_ns, sha256 FROM file_hash_cache "
-                "WHERE root=?",
-                (root,),
-            ).fetchall()
-        return {
-            str(row["path"]): (
-                int(row["size"]), int(row["mtime_ns"]), str(row["sha256"])
-            )
-            for row in rows
-        }
-
-    def file_hash_cache_store(
-        self, root: str, entries: dict[str, tuple[int, int, str]]
-    ) -> None:
-        if not entries:
-            return
-        with self._transaction() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO file_hash_cache"
-                "(root, path, size, mtime_ns, sha256) VALUES(?,?,?,?,?)",
-                [
-                    (root, path, size, mtime_ns, sha256)
-                    for path, (size, mtime_ns, sha256) in entries.items()
-                ],
-            )
-
     @integrity_checked
     def get_snapshot(self, snapshot_id: str) -> Snapshot:
         try:
@@ -2921,6 +2853,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             raise KeyError(f"unknown tool output view: {view_id}")
         return self._tool_view_from_row(row)
 
+    @store_read
     @integrity_checked
     def list_tool_output_views(self, event_id: str) -> tuple[ToolOutputView, ...]:
         with self._lock:
@@ -3527,6 +3460,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             )
         return finding_id
 
+    @store_read
     @integrity_checked
     def list_security_findings(self) -> tuple[dict[str, Any], ...]:
         with self._lock:
@@ -4102,6 +4036,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
         ).fetchone()
         return str(row["to_status"]) if row else None
 
+    @store_read
     @integrity_checked
     def list_extraction_candidates(
         self, *, status: str | None = None
@@ -4432,6 +4367,7 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             )
         return transition_id
 
+    @store_read
     @integrity_checked
     def list_settlement_candidates(
         self, *, kind: str | None = None, status: str | None = None
@@ -4507,72 +4443,6 @@ class MemoryStore(DataflowStorageMixin, TaskStorageMixin):
             for row in rows
             if kind is None or str(row["candidate_kind"]) == kind
         ]
-
-    @integrity_checked
-    def find_auto_candidate_match(
-        self, memory_type: str, content: str
-    ) -> tuple[str, str] | None:
-        key = self._normalized_key(content)
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT c.id, c.normalized_content, l.memory_id, "
-                "(SELECT t.to_status FROM candidate_transitions t "
-                "WHERE t.candidate_id=c.id ORDER BY t.rowid DESC LIMIT 1) AS status "
-                "FROM extraction_candidates c "
-                "JOIN candidate_memory_links l ON l.candidate_id=c.id "
-                "WHERE c.memory_type=? ORDER BY c.created_at",
-                (memory_type,),
-            ).fetchall()
-        for row in rows:
-            if (
-                row["status"] in {
-                    "auto", "confirmation_requested", "confirmed"
-                }
-                and self._normalized_key(row["normalized_content"]) == key
-            ):
-                return str(row["id"]), str(row["memory_id"])
-        return None
-
-    def confirm_candidate_match(
-        self,
-        candidate_id: str,
-        memory_id: str,
-        *,
-        source_event_id: str,
-    ) -> None:
-        current = next(
-            (
-                item.current_status
-                for item in self.list_extraction_candidates()
-                if item.id == candidate_id
-            ),
-            None,
-        )
-        if current == "auto":
-            self.transition_candidate(
-                candidate_id,
-                "confirmation_requested",
-                source_event_id=source_event_id,
-                actor="explicit_marker",
-                rule_id="normalized_explicit_match_requested",
-            )
-        self.transition_candidate(
-            candidate_id,
-            "confirmed",
-            source_event_id=source_event_id,
-            actor="explicit_marker",
-            rule_id="normalized_explicit_match",
-        )
-        with self._transaction() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO candidate_memory_links"
-                "(id, candidate_id, memory_id, relation, source_event_id, created_at) "
-                "VALUES(?,?,?,?,?,?)",
-                (
-                    f"cml_{uuid.uuid4().hex}", candidate_id, memory_id,
-                    "confirmed_as", source_event_id, _now(),
-                ),
-            )
 
     @integrity_checked
     def memory_authority(self, memory_id: str) -> str:

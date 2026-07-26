@@ -440,9 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     usage = commands.add_parser("usage")
     usage.add_argument("--branch", default="main")
     usage.add_argument("--session")
-
     commands.add_parser("context-profiles")
-
     budget_policy = commands.add_parser("budget-policy")
     budget_policy.add_argument("--branch", default="main")
     budget_policy.add_argument("--agent")
@@ -455,25 +453,24 @@ def build_parser() -> argparse.ArgumentParser:
     budget_policy.add_argument("--handoff-ratio", type=float)
     budget_policy.add_argument("--hard-limit-ratio", type=float)
     budget_policy.add_argument("--min-action-events", type=int)
-
     governor = commands.add_parser("governor")
     governor.add_argument("--branch", default="main")
     governor.add_argument("--session")
     governor.add_argument("--agent")
     governor.add_argument("--apply", action="store_true")
-
     task_start = commands.add_parser("task-start")
     task_start.add_argument("key")
     task_start.add_argument("title")
     task_start.add_argument("--parent-branch", default="main")
     task_start.add_argument("--parent-task")
     task_start.add_argument("--session")
-
     task_status = commands.add_parser("task-status")
     task_status.add_argument("key")
     task_status.add_argument("status", choices=["active", "blocked", "completed", "cancelled"])
     task_status.add_argument("--note", default="")
     task_status.add_argument("--session")
+    task_status.add_argument("--override-obligation", action="append", default=[])
+    task_status.add_argument("--override-reason", default="")
     task_reopen = commands.add_parser("task-reopen")
     task_reopen.add_argument("key")
     task_reopen.add_argument("--reason", required=True)
@@ -679,7 +676,7 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "init":
             initialized = service.initialize_project()
             for finding in missing_database:
-                service.store.record_security_finding(
+                service.commands.record_security_finding(
                     "known_project_database_missing",
                     incident_key=(
                         "known_project_database_missing:"
@@ -687,18 +684,18 @@ def run(args: argparse.Namespace) -> int:
                     ),
                     details=dict(finding),
                 )
-            _print({"database": str(service.store.path), **initialized})
+            _print({"database": str(database), **initialized})
         elif args.command == "session-start":
-            _print({"id": service.store.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
+            _print({"id": service.commands.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
         elif args.command == "branch-create":
-            _print({"id": service.store.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
+            _print({"id": service.commands.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
         elif args.command == "append":
             _print(service.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
         elif args.command == "artifact":
             path = Path(args.path)
-            _print(service.store.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
+            _print(service.commands.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
         elif args.command == "block-set":
-            _print(service.store.set_active_block(args.name, args.content, branch_id=args.branch, session_id=args.session, source_event_ids=args.source))
+            _print(service.commands.set_active_block(args.name, args.content, branch_id=args.branch, session_id=args.session, source_event_ids=args.source))
         elif args.command == "derive":
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes, valid_from=args.valid_from, valid_to=args.valid_to, temporal_expression=args.temporal_expression))
         elif args.command == "search":
@@ -852,7 +849,7 @@ def run(args: argparse.Namespace) -> int:
                 )
                 _print({"path": str(path), "policy": policy})
             else:
-                _print(service.store.set_budget_policy(
+                _print(service.commands.set_budget_policy(
                     branch_id=args.branch,
                     context_window_tokens=args.context_window or 200_000,
                     snapshot_ratio=args.snapshot_ratio or 0.45,
@@ -879,7 +876,10 @@ def run(args: argparse.Namespace) -> int:
             ))
         elif args.command == "task-status":
             _print(service.tasks.set_status_as_operator(
-                args.key, args.status, note=args.note, session_id=args.session))
+                args.key, args.status, note=args.note, session_id=args.session,
+                override_obligations=args.override_obligation,
+                override_reason=args.override_reason,
+            ))
         elif args.command == "task-reopen":
             _print(service.tasks.reopen_as_operator(
                 args.key, reason=args.reason, session_id=args.session))

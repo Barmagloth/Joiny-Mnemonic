@@ -1,3 +1,6 @@
+> **SUPERSEDED_BY:** `ROADMAP.md` + `TODO.md` §0. This file is historical
+> evidence only and does not define requirements or implementation order.
+
 # Task: automatic evidence-bound memory extraction
 
 ## Goal

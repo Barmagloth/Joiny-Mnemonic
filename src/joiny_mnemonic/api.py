@@ -174,7 +174,7 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                 body = self._body()
                 if path == "/v1/sessions":
                     result = {
-                        "id": service.store.start_session(
+                        "id": service.commands.start_session(
                             body["agent"],
                             branch_id=body.get("branch_id", "main"),
                             capabilities=body.get("capabilities"),
@@ -182,7 +182,7 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     }
                 elif path == "/v1/branches":
                     result = {
-                        "id": service.store.create_branch(
+                        "id": service.commands.create_branch(
                             body["id"],
                             parent_id=body.get("parent_id", "main"),
                             fork_event_seq=body.get("fork_event_seq"),
@@ -194,9 +194,9 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                     values = dict(body)
                     if "data_base64" in values:
                         values["data"] = base64.b64decode(values.pop("data_base64"), validate=True)
-                    result = service.store.append_artifact(**values)
+                    result = service.commands.append_artifact(**values)
                 elif path == "/v1/blocks":
-                    result = service.store.set_active_block(**body)
+                    result = service.commands.set_active_block(**body)
                 elif path == "/v1/memories":
                     result = service.derive_memory(**body)
                 elif path == "/v1/search":
@@ -235,7 +235,7 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         )
                         result = {"path": str(config_path), "policy": policy}
                     else:
-                        result = service.store.set_budget_policy(**values)
+                        result = service.commands.set_budget_policy(**values)
                 elif path == "/v1/governor":
                     values = dict(body)
                     apply = bool(values.pop("apply", False))
@@ -261,6 +261,8 @@ def make_handler(service: MemoryService) -> type[BaseHTTPRequestHandler]:
                         session_id=body.get("session_id"),
                         metadata=body.get("metadata"),
                         source_event_id=body.get("source_event_id"),
+                        override_obligations=body.get("override_obligations"),
+                        override_reason=body.get("override_reason", ""),
                     )
                 elif path.startswith("/v1/tasks/") and path.endswith("/reopen"):
                     task_key = path.split("/")[-2]

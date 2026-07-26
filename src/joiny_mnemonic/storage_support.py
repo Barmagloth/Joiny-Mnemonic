@@ -14,6 +14,22 @@ def integrity_checked(method: Any) -> Any:
 
     return wrapped
 
+
+def atomic_write(method: Any) -> Any:
+    @functools.wraps(method)
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        with self._transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
+def store_read(method: Any) -> Any:
+    """Declare a public MemoryStore operation as read-only for surface audits."""
+    method._joiny_store_read_only = True
+    return method
+
+
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 

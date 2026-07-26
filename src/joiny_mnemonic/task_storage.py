@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from .models import TaskRecord
-from .storage_support import integrity_checked, json_text, now
+from .storage_support import integrity_checked, json_text, now, store_read
 from .transition_rules import WORKSTREAM_RULE, validate_transition
 
 
@@ -173,6 +173,7 @@ class TaskStorageMixin:
             ).fetchone()
         return row is not None
 
+    @store_read
     @integrity_checked
     def task_for_hook_session(self, agent: str, external_session_id: str) -> TaskRecord | None:
         with self._lock:
