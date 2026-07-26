@@ -8,7 +8,6 @@ import urllib.error
 import urllib.request
 import uuid
 from contextlib import redirect_stdout
-from dataclasses import asdict
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -16,7 +15,7 @@ from unittest.mock import patch
 from joiny_mnemonic.api import make_handler
 from joiny_mnemonic.cli import build_parser, run
 from joiny_mnemonic.hooks import process_hook
-from joiny_mnemonic.mcp import MCPServer
+from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION
 from joiny_mnemonic.service import MemoryService
 from joiny_mnemonic.storage import MemoryStore
 from scripts.stage3_surface_audit import direct_store_writes
@@ -80,12 +79,55 @@ class ApplicationCommandsTest(unittest.TestCase):
     def test_jm_inv_003_all_public_surfaces_share_application_path(self) -> None:
         database = RUNTIME_ROOT / f"stage3-command-{uuid.uuid4().hex}.db"
         self.addCleanup(lambda: database.unlink(missing_ok=True))
+        oversized = "x" * (MemoryStore.MAX_ACTIVE_BYTES + 1)
         cli_result = self._run_cli(database, "ship")
 
         with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
-            mcp_result = MCPServer(service)._call_tool(
-                "memory_set_block", {"name": "goal", "content": "ship"}
+            mcp = MCPServer(service)
+            initialized = mcp.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": PROTOCOL_VERSION},
+                }
             )
+            self.assertEqual(
+                initialized["result"]["protocolVersion"], PROTOCOL_VERSION
+            )
+            self.assertIsNone(
+                mcp.handle(
+                    {"jsonrpc": "2.0", "method": "notifications/initialized"}
+                )
+            )
+            mcp_success = mcp.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "memory_set_block",
+                        "arguments": {"name": "goal", "content": "ship"},
+                    },
+                }
+            )
+            mcp_denied = mcp.handle(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "memory_set_block",
+                        "arguments": {"name": "goal", "content": oversized},
+                    },
+                }
+            )
+            self.assertFalse(mcp_success["result"]["isError"])
+            self.assertTrue(mcp_denied["result"]["isError"])
+            self.assertIn("ValueError", mcp_denied["result"]["content"][0]["text"])
+            json.dumps(mcp_success)
+            json.dumps(mcp_denied)
+            mcp_result = mcp_success["result"]["structuredContent"]
 
         with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
             server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(service))
@@ -105,7 +147,6 @@ class ApplicationCommandsTest(unittest.TestCase):
 
             try:
                 http_result = post("ship")
-                oversized = "x" * (service.store.MAX_ACTIVE_BYTES + 1)
                 with self.assertRaises(urllib.error.HTTPError) as denied:
                     post(oversized)
                 self.assertEqual(denied.exception.code, 400)
@@ -115,20 +156,13 @@ class ApplicationCommandsTest(unittest.TestCase):
                 thread.join(timeout=5)
 
         for result in (cli_result, mcp_result, http_result):
-            value = result if isinstance(result, dict) else asdict(result)
             self.assertEqual(
-                {"name": value["name"], "content": value["content"]},
+                {"name": result["name"], "content": result["content"]},
                 {"name": "goal", "content": "ship"},
             )
 
-        oversized = "x" * (MemoryStore.MAX_ACTIVE_BYTES + 1)
         with self.assertRaises(ValueError):
             self._run_cli(database, oversized)
-        with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
-            with self.assertRaises(ValueError):
-                MCPServer(service)._call_tool(
-                    "memory_set_block", {"name": "goal", "content": oversized}
-                )
 
         with MemoryService(":memory:", project_root=RUNTIME_ROOT) as service:
             with (
