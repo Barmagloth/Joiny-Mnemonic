@@ -29,7 +29,32 @@ store calls, not queries. Classification is derived from the effective runtime
 class (including inherited methods), not a second allowlist in the gate.
 Unknown direct methods and direct store escapes are not classified as reads.
 
-## Planned ownership
+## Step 2 application command path
+
+`ApplicationCommands` in `src/joiny_mnemonic/application.py` is the named
+mutation boundary. CLI, MCP and HTTP now invoke it instead of calling mutating
+`MemoryStore` methods directly. Their existing result objects and serialized
+response formats are preserved.
+
+Executable behavioural proof:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest tests.test_stage3_application_commands.ApplicationCommandsTest.test_cli_mcp_http_share_block_command_and_validation -v
+```
+
+That test performs the same active-block operation through CLI, MCP and HTTP,
+checks the successful result on every surface, and proves that the canonical
+stored-size validation rejects the same oversized input on all three.
+
+After this migration, the bounded audit contains only the four hook writes
+reserved for the next independent step:
+
+| Surface | Remaining direct writes |
+|---|---|
+| hooks | `hook_session`, `bind_task_session`, `append_host_events_once`, `after_commit` |
+
+## Target ownership
 
 - Public surfaces parse/serialize only and call `MemoryService` application
   commands.
@@ -37,4 +62,4 @@ Unknown direct methods and direct store escapes are not classified as reads.
   orchestration and transaction boundaries.
 - Storage modules own SQLite, SQL and row conversion only.
 - Existing CLI/MCP/HTTP response formats remain unchanged.
-- The inventory must reach zero before `JM-INV-003` can pass.
+- The inventory must reach zero before final Stage 3 acceptance.

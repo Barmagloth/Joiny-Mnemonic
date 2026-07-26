@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .adapters import ADAPTERS, adapter_capabilities, get_adapter
+from .application import ApplicationCommands
 from .code_index import PythonCodeIndex
 from .configuration import effective_configuration
 from .consolidation import CompactionResult, ConsolidationResult, EvidenceConsolidator
@@ -71,6 +72,7 @@ class MemoryService:
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.store = MemoryStore(database)
+        self.commands = ApplicationCommands(self)
         self.dataflow = DataflowRecorder(self.store, dataflow_sinks)
         self.witness = WitnessRegistry(witness_registry_path)
         self._witness_status: dict[str, Any] = {"status": "uninitialized"}

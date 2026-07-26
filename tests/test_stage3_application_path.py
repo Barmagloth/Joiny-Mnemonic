@@ -45,22 +45,10 @@ class Stage3SurfaceAuditTest(unittest.TestCase):
         self.assertEqual(
             [(item.path, item.line, item.method) for item in violations],
             [
-                ("src/joiny_mnemonic/api.py", 177, "start_session"),
-                ("src/joiny_mnemonic/api.py", 185, "create_branch"),
-                ("src/joiny_mnemonic/api.py", 197, "append_artifact"),
-                ("src/joiny_mnemonic/api.py", 199, "set_active_block"),
-                ("src/joiny_mnemonic/api.py", 238, "set_budget_policy"),
-                ("src/joiny_mnemonic/cli.py", 679, "record_security_finding"),
-                ("src/joiny_mnemonic/cli.py", 689, "start_session"),
-                ("src/joiny_mnemonic/cli.py", 691, "create_branch"),
-                ("src/joiny_mnemonic/cli.py", 696, "append_artifact"),
-                ("src/joiny_mnemonic/cli.py", 698, "set_active_block"),
-                ("src/joiny_mnemonic/cli.py", 852, "set_budget_policy"),
                 ("src/joiny_mnemonic/hooks.py", 376, "hook_session"),
                 ("src/joiny_mnemonic/hooks.py", 383, "bind_task_session"),
                 ("src/joiny_mnemonic/hooks.py", 421, "append_host_events_once"),
                 ("src/joiny_mnemonic/hooks.py", 496, "after_commit"),
-                ("src/joiny_mnemonic/mcp.py", 500, "set_active_block"),
             ],
         )
 

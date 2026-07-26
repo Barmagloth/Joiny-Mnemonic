@@ -497,7 +497,7 @@ class MCPServer:
         if name == "memory_append":
             return self.service.append_event(**arguments)
         if name == "memory_set_block":
-            return self.service.store.set_active_block(**arguments)
+            return self.service.commands.set_active_block(**arguments)
         if name == "memory_derive":
             return self.service.derive_memory(**arguments)
         if name == "memory_search":

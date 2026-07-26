@@ -676,7 +676,7 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "init":
             initialized = service.initialize_project()
             for finding in missing_database:
-                service.store.record_security_finding(
+                service.commands.record_security_finding(
                     "known_project_database_missing",
                     incident_key=(
                         "known_project_database_missing:"
@@ -686,16 +686,16 @@ def run(args: argparse.Namespace) -> int:
                 )
             _print({"database": str(database), **initialized})
         elif args.command == "session-start":
-            _print({"id": service.store.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
+            _print({"id": service.commands.start_session(args.agent, branch_id=args.branch, capabilities=args.capabilities)})
         elif args.command == "branch-create":
-            _print({"id": service.store.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
+            _print({"id": service.commands.create_branch(args.id, parent_id=args.parent, fork_event_seq=args.fork_seq)})
         elif args.command == "append":
             _print(service.append_event(kind=args.kind, content=args.content, role=args.role, branch_id=args.branch, session_id=args.session, payload=args.payload, files=args.file))
         elif args.command == "artifact":
             path = Path(args.path)
-            _print(service.store.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
+            _print(service.commands.append_artifact(name=args.name or path.name, data=path.read_bytes(), mime_type=args.mime, branch_id=args.branch, session_id=args.session))
         elif args.command == "block-set":
-            _print(service.store.set_active_block(args.name, args.content, branch_id=args.branch, session_id=args.session, source_event_ids=args.source))
+            _print(service.commands.set_active_block(args.name, args.content, branch_id=args.branch, session_id=args.session, source_event_ids=args.source))
         elif args.command == "derive":
             _print(service.derive_memory(memory_type=args.memory_type, content=args.content, summary=args.summary, source_event_ids=args.source, files=args.file, branch_id=args.branch, risk=args.risk, retrieval_cost=args.cost, supersedes_id=args.supersedes, valid_from=args.valid_from, valid_to=args.valid_to, temporal_expression=args.temporal_expression))
         elif args.command == "search":
@@ -849,7 +849,7 @@ def run(args: argparse.Namespace) -> int:
                 )
                 _print({"path": str(path), "policy": policy})
             else:
-                _print(service.store.set_budget_policy(
+                _print(service.commands.set_budget_policy(
                     branch_id=args.branch,
                     context_window_tokens=args.context_window or 200_000,
                     snapshot_ratio=args.snapshot_ratio or 0.45,
