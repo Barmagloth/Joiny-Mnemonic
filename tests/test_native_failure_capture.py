@@ -31,6 +31,32 @@ class NativeFailureCaptureTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.service.close()
 
+    def test_derived_event_inherits_saved_source_trace_context(self) -> None:
+        session_id = self.service.store.start_session("codex")
+        source = self.service.store.append_host_event(
+            adapter="codex",
+            kind="message",
+            role="user",
+            content="The saved source owns this trace context.",
+            session_id=session_id,
+            payload={"hook_event_name": "UserPromptSubmit"},
+        )
+
+        memory = self.service.derive_memory(
+            memory_type="fact",
+            content="Trace context is inherited from the saved source.",
+            source_event_ids=(source.id,),
+        )
+        derivation = next(
+            event
+            for event in self.service.store.query_events(kinds=("state",))
+            if event.payload.get("memory_id") == memory.id
+        )
+
+        self.assertEqual(derivation.session_id, source.session_id)
+        self.assertEqual(derivation.origin_adapter, source.origin_adapter)
+        self.assertEqual(derivation.payload["source_event_ids"], [source.id])
+
     def test_failure_pair_record_provenance_files_and_retry_are_deterministic(self) -> None:
         value = {
             "hook_event_name": "PostToolUseFailure",
@@ -65,6 +91,13 @@ class NativeFailureCaptureTest(unittest.TestCase):
         self.assertEqual(failures[0].files, pair[0].files)
         self.assertEqual(failures[0].metadata["origin"], "auto")
         self.assertEqual(failures[0].metadata["authority_level"], "auto")
+        derivation = next(
+            event
+            for event in self.service.store.query_events(kinds=("state",))
+            if event.payload.get("memory_id") == failures[0].id
+        )
+        self.assertEqual(derivation.session_id, pair[0].session_id)
+        self.assertEqual(derivation.origin_adapter, pair[0].origin_adapter)
         self.assertEqual(self.service.store.get_active_blocks(), {})
 
     def test_exit_code_only_failure_stays_canonical_but_not_durable(self) -> None:

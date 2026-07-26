@@ -25,7 +25,16 @@ def lexical_terms(value: str) -> set[str]:
 
 def exact_identifiers(value: str) -> tuple[str, ...]:
     """Opaque ids are lexical constraints, never semantic suggestions."""
-    return tuple(dict.fromkeys(match.casefold() for match in EXACT_IDENTIFIER.findall(value)))
+    identifiers: list[str] = []
+    for match in EXACT_IDENTIFIER.findall(value):
+        candidate = match.casefold()
+        prefixed = candidate.startswith(("evt_", "mem_", "op_", "task_"))
+        bare_hex = any(char.isdigit() for char in candidate) and any(
+            char in "abcdef" for char in candidate
+        )
+        if prefixed or bare_hex:
+            identifiers.append(candidate)
+    return tuple(dict.fromkeys(identifiers))
 
 
 def _hit_contains_identifiers(hit: RetrievalHit, identifiers: tuple[str, ...]) -> bool:

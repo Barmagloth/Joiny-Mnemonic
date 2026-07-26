@@ -491,6 +491,11 @@ Dogfood до зачётного периода обязан закрыть дв�
 - настоящий отсутствующий opaque ID остаётся fail-closed:
   `python -m unittest tests.test_retrieval_fusion.FusionTest.test_opaque_identifier_query_abstains_from_semantic_neighbours`.
 
+Оба дефекта закрыты исполняемыми регрессиями 26 июля 2026 года. Derived event
+наследует общий сохранённый `session_id` и `origin_adapter` источников; даты и
+hex-похожие слова без одновременно буквенной и цифровой составляющей больше не
+активируют exact-ID abstention.
+
 Команда наблюдения:
 
 ```text
@@ -631,9 +636,10 @@ agent_finalized
 Этап завершён только после прохождения всех восьми проверок обоими хостами.
 
 Этап принят локально 26 июля 2026 года. Восемь приёмочных и одна атомарная
-проверка реализованы в `tests/test_stage5_finalization.py`; CLI hook entrypoint
-проверен с native `Stop` payload для `claude-code` и `codex`; полный набор:
-`342 passed`. Подробности приведены в `STAGE5_REPORT.md`.
+проверка реализованы в `tests/test_stage5_finalization.py`; каждая из восьми
+приёмочных проверок выполняется для `claude-code` и `codex`. CLI hook entrypoint
+также проверен с native `Stop` payload для обоих адаптеров; полный набор:
+`344 passed`. Подробности приведены в `STAGE5_REPORT.md`.
 
 ## 9. Этап 6 — оценка экстрактора
 

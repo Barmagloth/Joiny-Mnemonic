@@ -36,3 +36,23 @@ def now() -> str:
 
 def json_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def common_event_trace(
+    connection: Any, source_event_ids: tuple[str, ...]
+) -> tuple[str | None, str | None]:
+    """Return saved trace fields only when every source agrees on them."""
+    if not source_event_ids:
+        return None, None
+    placeholders = ",".join("?" for _ in source_event_ids)
+    rows = connection.execute(
+        "SELECT session_id,origin_adapter FROM events WHERE id IN ("
+        + placeholders + ")",
+        source_event_ids,
+    ).fetchall()
+    sessions = {row["session_id"] for row in rows}
+    adapters = {row["origin_adapter"] for row in rows}
+    return (
+        next(iter(sessions)) if len(sessions) == 1 else None,
+        next(iter(adapters)) if len(adapters) == 1 else None,
+    )

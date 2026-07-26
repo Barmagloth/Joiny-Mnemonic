@@ -36,6 +36,9 @@
 7. `test_07_finalization_does_not_leak_between_sibling_branches`.
 8. `test_08_every_memory_resolves_to_the_exact_host_stop_event`.
 
+Каждая из восьми проверок выполняет один и тот же сценарий отдельно через
+`claude-code` и `codex`; чередования проверок между адаптерами больше нет.
+
 Дополнительный
 `test_finalization_and_host_capture_are_atomic` закрепляет rollback всей
 операции при сбое между созданием памяти и записью аудита.
@@ -44,6 +47,16 @@
 нативные `Stop` payload для `--agent claude-code` и `--agent codex` в новую
 SQLite-базу; обе финализации вернулись последующим `resume`.
 
+## Обязательные дефекты перед этапом 7
+
+- `tests.test_native_failure_capture.NativeFailureCaptureTest.test_derived_event_inherits_saved_source_trace_context` закрепляет наследование сохранённых
+  `session_id` и `origin_adapter` производным событием `derive_memory`.
+- `tests.test_retrieval_fusion.FusionTest.test_dates_and_hex_words_do_not_activate_exact_identifier_abstention` закрепляет отсутствие abstention для даты
+  `20260717` и hex-похожего слова `decafbad`.
+- Существующий
+  `test_opaque_identifier_query_abstains_from_semantic_neighbours` сохраняет
+  fail-closed поведение для настоящего отсутствующего opaque ID.
+
 ## Результаты
 
 ```text
@@ -51,7 +64,7 @@ python -m unittest tests.test_stage5_finalization -v
 Ran 9 tests — OK
 
 python -m pytest -q
-342 tests collected; 100% passed
+344 tests collected; 100% passed
 
 ruff check <изменённые Python-файлы>
 All checks passed!

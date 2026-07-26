@@ -220,6 +220,42 @@ class FusionTest(unittest.TestCase):
             any("reranker:broken" in e for e in self.service.plugins.errors)
         )
 
+    def test_dates_and_hex_words_do_not_activate_exact_identifier_abstention(self) -> None:
+        from joiny_mnemonic.models import RetrievalHit
+        from joiny_mnemonic.retrieval import exact_identifiers
+
+        relevant = self._fact("The retention policy was reviewed during dogfood.")
+
+        class SemanticNeighbour:
+            name = "semantic-date-and-word-neighbour"
+
+            def sync(self, records, events):
+                return None
+
+            def search(self, query, *, limit=20, filters=None):
+                return [
+                    RetrievalHit(
+                        id=relevant.id,
+                        source_kind="memory",
+                        memory_type="fact",
+                        representation="semantic",
+                        content=relevant.content,
+                        score=0.17,
+                        source_event_ids=relevant.source_event_ids,
+                        files=(),
+                        created_at=relevant.created_at,
+                    )
+                ]
+
+        self.service.plugins.semantic = {
+            "semantic-date-and-word-neighbour": SemanticNeighbour()
+        }
+        for query in ("что решили 20260717", "what changed in decafbad"):
+            with self.subTest(query=query):
+                self.assertEqual(exact_identifiers(query), ())
+                hits = self.service.search(query=query, include_events=False, limit=5)
+                self.assertIn(relevant.id, {hit.id for hit in hits})
+
     def test_opaque_identifier_query_abstains_from_semantic_neighbours(self) -> None:
         from joiny_mnemonic.models import RetrievalHit
 

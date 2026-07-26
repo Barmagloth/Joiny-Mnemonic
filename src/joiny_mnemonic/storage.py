@@ -30,7 +30,7 @@ from .projection_storage import ProjectionStorageMixin
 from .finalization_storage import FINALIZATION_SCHEMA, FinalizationStorageMixin
 from .task_storage import TaskStorageMixin
 from .transactions import TransactionMixin
-from .storage_support import integrity_checked, json_text as _json, now as _now, store_read
+from .storage_support import common_event_trace, integrity_checked, json_text as _json, now as _now, store_read
 from .storage_errors import SchemaCompatibilityError, SnapshotIntegrityError, StoreIntegrityError
 from .policy_contract import policy_activation_allowed
 from .transition_rules import (
@@ -118,7 +118,6 @@ CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     from_version INTEGER NOT NULL,
@@ -126,7 +125,6 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     code_version TEXT NOT NULL,
     backup_path TEXT
 );
-
 CREATE TRIGGER IF NOT EXISTS schema_migrations_no_update
 BEFORE UPDATE ON schema_migrations
 BEGIN SELECT RAISE(ABORT, 'schema migration history is immutable'); END;
@@ -2092,6 +2090,7 @@ class MemoryStore(
         with self._transaction() as conn:
             self._assert_source_events(conn, source_event_ids, branch_id=branch_id)
             self.assert_agent_finalized_authority(conn, safe_metadata, source_event_ids)
+            trace_session_id, trace_origin_adapter = common_event_trace(conn, source_event_ids)
             temporal_fields = self._normalize_temporal_input(
                 conn, valid_from, valid_to, source_event_ids
             )
@@ -2114,9 +2113,10 @@ class MemoryStore(
             derivation = self._append_event_in_tx(
                 conn,
                 branch_id=branch_id,
-                session_id=None,
+                session_id=trace_session_id,
                 kind="state",
                 role=None,
+                origin_adapter=trace_origin_adapter,
                 content=f"derived {memory_type}: {safe_summary}",
                 payload={
                     "operation": "derive_memory",
