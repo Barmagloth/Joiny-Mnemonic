@@ -11,7 +11,14 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-from .models import Event, ExtractionStatus, MemoryType
+from .extractor_backend import (
+    ALLOWED_CANDIDATE_TYPES,
+    CANDIDATE_SCHEMA_HASH,
+    EXTRACTION_PROMPT_HASH,
+    BackendConfig,
+    validate_backend,
+)
+from .models import Event, ExtractionStatus
 from .plugins import Extractor
 
 
@@ -44,13 +51,53 @@ class ExtractorConfig:
     auto_threshold: float = 0.85
     max_retries: int = 3
     worker_concurrency: int = 1
+    backend: Mapping[str, Any] | None = None
+
+    @classmethod
+    def for_backend(cls, backend: BackendConfig, **overrides: Any) -> "ExtractorConfig":
+        """Derive the identity from the configured backend, not from plugin state.
+
+        Model, revision and inference parameters have exactly one owner — the
+        backend configuration — so a config-only model swap necessarily changes
+        ``canonical_hash`` and no signed report survives it.
+        """
+        return cls(
+            model_identity=backend.model,
+            model_version=backend.revision,
+            inference_parameters=dict(backend.inference),
+            backend=backend.descriptor(),
+            **overrides,
+        )
 
     def descriptor(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["prompt_hash"] = EXTRACTION_PROMPT_HASH
+        value["schema_hash"] = CANDIDATE_SCHEMA_HASH
+        return value
 
     @property
     def canonical_hash(self) -> str:
         return hashlib.sha256(_canonical_json(self.descriptor()).encode("utf-8")).hexdigest()
+
+
+def resolve_extractor_config(
+    configured_extractor: Mapping[str, Any], plugin: Any
+) -> "ExtractorConfig | None":
+    """Configuration owns the model; plugin attributes remain the legacy path.
+
+    A backend block selects the model without code, so the same plugin measured
+    against two models produces two different ``canonical_hash`` values.
+    """
+    if plugin is None:
+        return None
+    backend_value = configured_extractor.get("backend")
+    if backend_value:
+        return ExtractorConfig.for_backend(validate_backend(backend_value))
+    return ExtractorConfig(
+        model_identity=str(getattr(plugin, "model_identity", plugin.name)),
+        model_version=str(getattr(plugin, "model_version", "unknown")),
+        inference_parameters=dict(getattr(plugin, "inference_parameters", {})),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,7 +202,7 @@ def parse_candidates(value: Any) -> tuple[ProposedCandidate, ...]:
         raise ExtractionValidationError(
             "malformed_output", "output must contain a candidates array"
         )
-    allowed = {item.value for item in MemoryType} - {"summary", "index"}
+    allowed = set(ALLOWED_CANDIDATE_TYPES)
     parsed: list[ProposedCandidate] = []
     for item in value:
         required = {

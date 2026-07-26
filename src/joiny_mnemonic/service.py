@@ -18,7 +18,7 @@ from .context_limits import ContextLimitConfig
 from .dataflow import DataflowRecorder, DataflowSink
 from .models import BudgetPolicy, Event, MemoryRecord, PromptPacket, RetrievalHit, Snapshot, ToolOutputView
 from .governor import BudgetGovernor
-from .extraction import ExtractionService, ExtractorConfig
+from .extraction import ExtractionService, ExtractorConfig, resolve_extractor_config
 from .plugins import PluginContext, PluginRegistry
 from .paths import resolve_project_database
 from .precheck import PrecheckReport, PrecheckService
@@ -95,15 +95,9 @@ class MemoryService:
                 raise KeyError(f"unknown extractor plugin: {extractor_name}")
         elif self.plugins.extractors:
             selected_extractor = self.plugins.extractors[sorted(self.plugins.extractors)[0]]
-        if extractor_config is None and selected_extractor is not None:
-            extractor_config = ExtractorConfig(
-                model_identity=str(
-                    getattr(selected_extractor, "model_identity", selected_extractor.name)
-                ),
-                model_version=str(getattr(selected_extractor, "model_version", "unknown")),
-                inference_parameters=dict(
-                    getattr(selected_extractor, "inference_parameters", {})
-                ),
+        if extractor_config is None:
+            extractor_config = resolve_extractor_config(
+                configured_extractor, selected_extractor
             )
         active_policy = self.store.active_policy()
         policy_extraction_enabled = bool(

@@ -5,10 +5,14 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+from .extractor_backend import validate_backend
+
 
 CONFIG_VERSION = 2
 AGENTS = frozenset({"claude-code", "codex", "opencode", "openhands"})
-PLUGINS = frozenset({"semantic-local", "knowledge-graph", "nuextract-local"})
+PLUGINS = frozenset(
+    {"semantic-local", "knowledge-graph", "nuextract-local", "local-llm"}
+)
 
 
 def global_config_path(
@@ -59,6 +63,11 @@ def validate_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
         "requested_enabled": requested_enabled,
         "name": name.strip() if isinstance(name, str) else None,
     }
+    backend = extractor.get("backend")
+    if backend is not None:
+        # The model swap lives here, so an unusable backend must fail at read
+        # time rather than at the first extraction attempt.
+        result["extractor"]["backend"] = validate_backend(backend).descriptor()
     return result
 
 

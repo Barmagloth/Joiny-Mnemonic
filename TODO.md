@@ -316,7 +316,14 @@ is premature.
       new Python package per model). Swapping must change
       ExtractorConfig.canonical_hash so signed eval reports never carry over.
       Document the swap as one short recipe and verify it on at least two
-      different models. Required before the stage 6 evaluation runs
+      different models. Required before the stage 6 evaluation runs.
+      LANDED 2026-07-27: core contract (`extractor_backend.py`: prompt, schema
+      and backend descriptor, all hashed), `ExtractorConfig.for_backend`,
+      config-file backend block, plugin `local-llm` (openai_compatible +
+      llama_cpp over loopback), recipe in `docs/extractor-connector.md`,
+      14 checks in `tests/test_extractor_connector.py`. REMAINING: run the
+      recipe against two real model runtimes — that lands with the candidate
+      smoke below, not against a stub server
 - [ ] Connector contract must admit a REMOTE LLM backend later (design
       constraint now, implementation deferred): a remote API endpoint or a
       host-CLI bridge (e.g. `claude -p` / `codex exec`) is just another
