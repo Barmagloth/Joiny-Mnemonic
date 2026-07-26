@@ -27,9 +27,11 @@ from .provenance import (
 )
 from .candidate_confirmation import CandidateConfirmationMixin
 from .dataflow_storage import DataflowStorageMixin
+from .projection_storage import ProjectionStorageMixin
 from .task_storage import TaskStorageMixin
 from .transactions import TransactionMixin
 from .storage_support import integrity_checked, json_text as _json, now as _now, store_read
+from .storage_errors import SchemaCompatibilityError, SnapshotIntegrityError, StoreIntegrityError
 from .policy_contract import policy_activation_allowed
 from .transition_rules import (
     CANDIDATE_RULE,
@@ -101,24 +103,6 @@ def _memory_signals(
 def _fts_match_query(value: str) -> str:
     terms = [term for term in re.findall(r"[\w./:-]+", value, re.UNICODE) if term]
     return " OR ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
-
-
-class StoreIntegrityError(RuntimeError):
-    """Raised when canonical storage fails automatic integrity verification."""
-
-
-class SchemaCompatibilityError(RuntimeError):
-    """Raised before mutation when the database schema is unsupported or malformed."""
-
-
-class SnapshotIntegrityError(RuntimeError):
-    """Raised internally when materialized snapshot state fails hash verification."""
-
-    def __init__(self, snapshot_id: str, expected: str, actual: str) -> None:
-        self.snapshot_id = snapshot_id
-        self.expected = expected
-        self.actual = actual
-        super().__init__(f"snapshot {snapshot_id} state hash mismatch")
 
 
 CURRENT_SCHEMA_VERSION = 10
@@ -769,7 +753,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(memory_id UNINDEXED, 
 """
 
 
-class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageMixin, TaskStorageMixin):
+class MemoryStore(
+    TransactionMixin,
+    CandidateConfirmationMixin,
+    DataflowStorageMixin,
+    ProjectionStorageMixin,
+    TaskStorageMixin,
+):
     """Durable SQLite event store with immutable canonical and derived records."""
 
     MAX_ACTIVE_BYTES = 3000
@@ -2593,59 +2583,6 @@ class MemoryStore(TransactionMixin, CandidateConfirmationMixin, DataflowStorageM
             replay_code_version=SNAPSHOT_REPLAY_CODE_VERSION,
             blob_available=True,
         )
-
-    def retrieval_health_load(self) -> dict[str, dict[str, Any]]:
-        """Rebuildable channel-health projection (see schema comment)."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT channel, payload_json FROM retrieval_channel_health"
-            ).fetchall()
-        return {
-            str(row["channel"]): json.loads(row["payload_json"]) for row in rows
-        }
-
-    def retrieval_health_store(self, channels: dict[str, dict[str, Any]]) -> None:
-        if not channels:
-            return
-        with self._transaction() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO retrieval_channel_health"
-                "(channel, payload_json, updated_at) VALUES(?,?,?)",
-                [
-                    (channel, _json(payload), _now())
-                    for channel, payload in channels.items()
-                ],
-            )
-
-    def file_hash_cache_load(self, root: str) -> dict[str, tuple[int, int, str]]:
-        """Rebuildable stat->hash projection for one project root."""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT path, size, mtime_ns, sha256 FROM file_hash_cache "
-                "WHERE root=?",
-                (root,),
-            ).fetchall()
-        return {
-            str(row["path"]): (
-                int(row["size"]), int(row["mtime_ns"]), str(row["sha256"])
-            )
-            for row in rows
-        }
-
-    def file_hash_cache_store(
-        self, root: str, entries: dict[str, tuple[int, int, str]]
-    ) -> None:
-        if not entries:
-            return
-        with self._transaction() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO file_hash_cache"
-                "(root, path, size, mtime_ns, sha256) VALUES(?,?,?,?,?)",
-                [
-                    (root, path, size, mtime_ns, sha256)
-                    for path, (size, mtime_ns, sha256) in entries.items()
-                ],
-            )
 
     @integrity_checked
     def get_snapshot(self, snapshot_id: str) -> Snapshot:

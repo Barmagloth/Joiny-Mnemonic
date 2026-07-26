@@ -78,3 +78,32 @@ python scripts/stage3_surface_audit.py --require-clean
 - Storage modules own SQLite, SQL and row conversion only.
 - Existing CLI/MCP/HTTP response formats remain unchanged.
 - The inventory must reach zero before final Stage 3 acceptance.
+
+## Step 4 storage split
+
+`ProjectionStorageMixin` in `src/joiny_mnemonic/projection_storage.py` is the
+single SQLite owner for the rebuildable retrieval-health and file-hash
+projections. It uses the parent `MemoryStore` connection and transaction; no
+database or service boundary was added. `src/joiny_mnemonic/storage_errors.py`
+owns the three storage exception types, while `storage.py` re-exports them for
+backward-compatible imports.
+
+The lowered limits in `quality/complexity-baseline.json` are exact and cannot
+be regenerated upward by the gate:
+
+| Module | Original Stage 1 baseline | Enforced after split |
+|---|---:|---:|
+| `storage.py` physical lines | 4847 | 4702 |
+| `storage.py` functions/methods | 156 | 138 |
+| `storage.py` classes | 4 | 1 |
+
+Both new modules are independently capped at their current metrics as well as
+by the project-wide 1000-line limit.
+
+Executable proof:
+
+```powershell
+$env:PYTHONPATH='src'
+python -m unittest tests.test_stage3_storage_split -v
+python scripts/stage1_gates.py complexity
+```

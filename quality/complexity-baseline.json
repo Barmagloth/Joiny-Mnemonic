@@ -2,9 +2,19 @@
   "version": 1,
   "files": {
     "src/joiny_mnemonic/storage.py": {
-      "physical_lines": 4847,
-      "functions_methods": 156,
-      "classes": 4
+      "physical_lines": 4702,
+      "functions_methods": 138,
+      "classes": 1
+    },
+    "src/joiny_mnemonic/projection_storage.py": {
+      "physical_lines": 63,
+      "functions_methods": 4,
+      "classes": 1
+    },
+    "src/joiny_mnemonic/storage_errors.py": {
+      "physical_lines": 16,
+      "functions_methods": 1,
+      "classes": 3
     },
     "src/joiny_mnemonic/hooks.py": {
       "physical_lines": 1336,
