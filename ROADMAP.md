@@ -81,7 +81,7 @@
 | `JM-INV-003` | CLI, MCP, HTTP и хуки проходят один прикладной путь изменения | `tests.test_stage3_application_commands.ApplicationCommandsTest.test_jm_inv_003_all_public_surfaces_share_application_path` |
 | `JM-INV-004` | Доверие вычисляется из сохранённого исходного события, а не принимается от вызывающего кода | trust-тестами этапа 1 |
 | `JM-INV-005` | Нефинализированное предложение не попадает ни в одну автоматическую поверхность памяти | host E2E этапа 5 |
-| `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | lineage-тестами этапов 4 и 5 |
+| `JM-INV-006` | События, память и финализация не протекают через границы видимости ветки | `tests.test_stage4_branch_time.Stage4BranchTimeTest.test_02_late_parent_event_is_absent_from_descendant`; финализация дополняется lineage-тестом этапа 5 |
 | `JM-INV-007` | `PASSED` относится только к фактически испытанной системе и неизменяемому артефакту | проверкой идентичности этапа 6 |
 | `JM-INV-008` | Ошибка производной системы видима и не отменяет уже записанное каноническое событие | `tests.test_stage2_atomicity.Stage2AtomicityTest.test_jm_inv_008_event_survives_extraction_and_witness_failures` и `test_jm_inv_008_projection_failure_is_durable_and_retryable` |
 
@@ -439,6 +439,12 @@ Baseline `storage.py` снижен с 4847/156/4 до 4702/138/1; новые
 - Тесты используют цепочку минимум из трёх поколений веток.
 - Для `JM-INV-006` указан точный исполняемый lineage-тест.
 - Полный набор тестов проходит.
+
+### Итог этапа 4
+
+Этап принят локально 26 июля 2026 года. Все восемь проверок реализованы в
+`tests/test_stage4_branch_time.py`; полный набор с `explorer` extras: `333 passed`.
+Подробности и точные команды приведены в `STAGE4_REPORT.md`.
 
 ## 8. Этап 5 — постфактум-финализация
 
