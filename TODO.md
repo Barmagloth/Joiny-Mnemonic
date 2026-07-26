@@ -317,6 +317,17 @@ is premature.
       ExtractorConfig.canonical_hash so signed eval reports never carry over.
       Document the swap as one short recipe and verify it on at least two
       different models. Required before the stage 6 evaluation runs
+- [ ] Connector contract must admit a REMOTE LLM backend later (design
+      constraint now, implementation deferred): a remote API endpoint or a
+      host-CLI bridge (e.g. `claude -p` / `codex exec`) is just another
+      backend selected by config, behind the same Extractor contract. The
+      config schema must not assume the model runs locally: endpoint URL,
+      transport kind (local runtime / remote API / CLI bridge) and model
+      identity all belong to the hashed ExtractorConfig, so a remote swap
+      invalidates signed local eval reports exactly like a local swap
+      (JM-INV-007). Remote backends stay candidate-only like every
+      extractor — no agent_finalized, no trusted memory. Stage 6
+      evaluation itself runs on the local candidates only
 - [ ] Candidate smoke: run qwen3-4b, gemma-3-4b and gliner-multilingual through
       the generic connector on a small EN/RU slice; measure load success, JSON
       validity, latency, empty-output rate and RU recall before spending on a
