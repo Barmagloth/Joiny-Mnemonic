@@ -90,8 +90,10 @@ class ExtractorConfig:
             # the code that ran before the verifier existed, so its identity
             # must not move — otherwise adding an optional stage would
             # retroactively invalidate every published report about a system
-            # that did not change. Turning the verifier on adds three keys and
-            # therefore does move the hash, which is the case that should.
+            # that did not change. Turning the verifier on adds four keys
+            # relative to a one-pass descriptor — the flag itself plus the
+            # three identity fields above — and therefore does move the hash,
+            # which is the case that should.
             value.pop("verify_candidates")
         return value
 
