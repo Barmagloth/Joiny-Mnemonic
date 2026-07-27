@@ -3,16 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, is_dataclass
-from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from .api import serve
 from .extraction import ExtractorConfig
 from .extraction_evaluation import evaluate_extractor
 from .evaluation import (
-    EvaluationTask,
     FullHistoryPolicy,
     ResumePolicy,
     SubprocessTaskRunner,
@@ -35,82 +31,23 @@ from .installer import (
     select_interactively,
 )
 from .mcp import serve_stdio
+from .model_provisioning import MODEL_CATALOG
 from .paths import (
     resolve_project_database,
     resolve_runtime_database,
     resolve_runtime_project,
 )
+from .cli_support import (
+    evaluation_tasks as _evaluation_tasks,
+    hook_json_input as _hook_json_input,
+    identifier_list as _identifier_list,
+    json_array as _json_array,
+    json_object as _json_object,
+    print_json as _print,
+)
 from .physical import PhysicalCandidate, PhysicalMemoryGovernor, Placement
 from .service import MemoryService
 from .witness import WitnessRegistry
-
-
-def _plain(value: Any) -> Any:
-    if is_dataclass(value):
-        return _plain(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_plain(item) for item in value]
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return value
-
-
-def _print(value: Any) -> None:
-    print(json.dumps(_plain(value), ensure_ascii=False, indent=2))
-
-
-def _json_object(value: str) -> dict[str, Any]:
-    result = json.loads(value)
-    if not isinstance(result, dict):
-        raise argparse.ArgumentTypeError("expected a JSON object")
-    return result
-
-
-def _json_array(value: str) -> list[str]:
-    result = json.loads(value)
-    if not isinstance(result, list) or not result or not all(isinstance(item, str) for item in result):
-        raise argparse.ArgumentTypeError("expected a non-empty JSON array of strings")
-    return result
-
-
-def _identifier_list(values: list[str]) -> list[str]:
-    if len(values) == 1 and values[0].lstrip().startswith("["):
-        return _json_array(values[0])
-    return values
-
-
-def _hook_json_input(stream: Any) -> dict[str, Any]:
-    """Read native hook JSON as UTF-8 while accepting an optional UTF-8 BOM."""
-    raw_stream = getattr(stream, "buffer", stream)
-    source = raw_stream.read()
-    if isinstance(source, str):
-        source = source.removeprefix("\ufeff")
-    value = json.loads(source)
-    if not isinstance(value, dict):
-        raise ValueError("hook input must be a JSON object")
-    return value
-
-
-def _evaluation_tasks(path: str | Path) -> list[EvaluationTask]:
-    values = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(values, list):
-        raise ValueError("evaluation task file must contain a JSON array")
-    return [
-        EvaluationTask(
-            id=item["id"],
-            query=item.get("query", item.get("task_input", "")),
-            required_evidence=tuple(item.get("required_evidence", ())),
-            branch_id=item.get("branch_id", "main"),
-            task_input=item.get("task_input", item.get("query", "")),
-            expected_output=item.get("expected_output"),
-            metadata=item.get("metadata"),
-        )
-        for item in values
-    ]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -146,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--without-mcp", action="store_true",
         help="skip MCP registration (default registers it: memory tools let "
         "agents quote protected state instead of paraphrasing)",
+    )
+    setup.add_argument(
+        "--extractor-model",
+        choices=sorted(MODEL_CATALOG),
+        help="download this local model, its runtime and its configuration as "
+        "part of setup; it is then started on demand",
     )
     setup.add_argument("--without-hooks", action="store_true")
     setup.add_argument("--skip-plugin-install", action="store_true")
@@ -575,6 +518,7 @@ def run(args: argparse.Namespace) -> int:
             with_mcp = default_mcp
             scope = args.scope or "project"
             enable_extraction = bool(args.enable_extraction)
+            extractor_model = args.extractor_model
         else:
             # Only a product/component *selection* makes the run non-interactive.
             # Wrapper scripts always pass --scope/--source-root, and flags like
@@ -590,9 +534,11 @@ def run(args: argparse.Namespace) -> int:
                 with_mcp = default_mcp
                 scope = args.scope or "project"
                 enable_extraction = bool(args.enable_extraction)
+                extractor_model = args.extractor_model
             elif sys.stdin.isatty():
                 (
-                    agents, plugins, with_mcp, scope, enable_extraction
+                    agents, plugins, with_mcp, scope, enable_extraction,
+                    extractor_model,
                 ) = select_interactively(
                     detections, default_scope=args.scope or "project"
                 )
@@ -611,6 +557,7 @@ def run(args: argparse.Namespace) -> int:
                 install_mcp=with_mcp,
                 install_plugins=not args.skip_plugin_install,
                 enable_extraction=enable_extraction,
+                extractor_model=extractor_model,
                 source_root=args.source_root,
                 dry_run=args.dry_run,
             )

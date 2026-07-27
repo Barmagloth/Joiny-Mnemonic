@@ -587,6 +587,11 @@ Ordinary prose can be interpreted into exact-evidence memory by an optional extr
 Installing a backend is passive. Runtime enablement is read only from the immutable active policy
 ledger; mutable workspace configuration and environment variables cannot turn it on.
 
+A model is chosen during installation, not installed separately: `setup --extractor-model qwen3-4b`
+downloads content-pinned weights and a pinned `llama.cpp` runtime into `~/.joiny-mnemonic`, installs
+the `local-llm` connector and configures the backend, and the server is started lazily when there is
+a backlog. Details: [docs/extractor-connector.md](docs/extractor-connector.md).
+
 NuExtract remains experimental and automatic enablement gates are not yet satisfied. After pinning
 its model revision and validating both calibration corpora, a user may explicitly pass
 `--enable-extraction` during first project setup. That choice enters the initial TOFU policy. On an

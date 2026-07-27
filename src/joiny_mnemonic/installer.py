@@ -19,6 +19,7 @@ from .configuration import (
     write_configuration,
 )
 from .hooks import install_hooks, uninstall_hooks
+from .model_provisioning import MODEL_CATALOG, catalog_rows, provision
 from .paths import resolve_project_database
 
 
@@ -80,7 +81,12 @@ PLUGIN_METADATA = {
     "knowledge-graph": ("Knowledge graph", "plugins/knowledge-graph"),
     "nuextract-local": ("NuExtract local extractor", "plugins/nuextract-local"),
     "reranker-local": ("Cross-encoder reranking", "plugins/reranker-local"),
+    "local-llm": ("Local LLM extractor connector", "plugins/local-llm"),
 }
+
+#: Offered through the model choice instead of the component list — picking a
+#: model is what installs the connector.
+IMPLIED_PLUGINS = ("local-llm",)
 
 GLOBAL_AGENT_MARKERS = {
     "claude-code": (".claude",),
@@ -304,6 +310,8 @@ def run_setup(
     install_mcp: bool = False,
     install_plugins: bool = True,
     enable_extraction: bool = False,
+    extractor_model: str | None = None,
+    provisioner: Callable[..., dict[str, Any]] | None = None,
     source_root: str | Path | None = None,
     dry_run: bool = False,
     python_executable: str | None = None,
@@ -315,11 +323,21 @@ def run_setup(
         raise ValueError("scope must be project or global")
     selected_agents = tuple(dict.fromkeys(str(item) for item in agents))
     selected_plugins = tuple(dict.fromkeys(str(item) for item in plugins))
+    if extractor_model is not None:
+        if extractor_model not in MODEL_CATALOG:
+            raise ValueError(
+                f"unknown extractor model {extractor_model!r}; available: "
+                f"{', '.join(sorted(MODEL_CATALOG))}"
+            )
+        # Choosing a model is the whole setup step: the transport plugin comes
+        # with it, so the user never installs a second thing by hand.
+        if "local-llm" not in selected_plugins:
+            selected_plugins = (*selected_plugins, "local-llm")
     if not set(selected_agents) <= AGENTS:
         raise ValueError("unsupported agent selection")
     if not set(selected_plugins) <= PLUGINS:
         raise ValueError("unsupported plugin selection")
-    if enable_extraction and "nuextract-local" not in selected_plugins:
+    if enable_extraction and extractor_model is None and "nuextract-local" not in selected_plugins:
         raise ValueError("automatic extraction requires the nuextract-local component")
     if enable_extraction and scope != "project":
         raise ValueError("automatic extraction activation requires project scope")
@@ -427,6 +445,23 @@ def run_setup(
             "name": "nuextract-local" if "nuextract-local" in selected_plugins else None,
         },
     }
+    if extractor_model is not None:
+        provision_state = None
+        if dry_run:
+            notes.append(f"Planned extractor model provisioning: {extractor_model}.")
+        else:
+            provision_state = (provisioner or provision)(
+                extractor_model, home=user_home, progress=notes.append
+            )
+        config["extractor"] = {
+            "requested_enabled": bool(enable_extraction),
+            "name": "local-llm",
+            **(
+                {"backend": provision_state["backend"]}
+                if provision_state is not None
+                else {}
+            ),
+        }
     if not dry_run:
         write_configuration(config_path, config)
 
@@ -764,6 +799,28 @@ def _ask_yes_no(
         output_fn("Please answer y or n.")
 
 
+def _select_extractor_model(
+    *,
+    input_fn: Callable[[str], str] = input,
+    output_fn: Callable[[str], None] = print,
+) -> str | None:
+    """Ask once; the answer provisions weights, runtime and configuration."""
+    rows = list(catalog_rows())
+    output_fn("Local extractor model (downloaded and started automatically):")
+    output_fn("  0. none - configure an extractor later")
+    for index, (_key, title, detail) in enumerate(rows, 1):
+        output_fn(f"  {index}. {title} - {detail}")
+    while True:
+        answer = (input_fn("Model to install [0]: ").strip() or "0").casefold()
+        if answer in {"0", "none"}:
+            return None
+        if answer.isdigit() and 1 <= int(answer) <= len(rows):
+            return rows[int(answer) - 1][0]
+        if answer in MODEL_CATALOG:
+            return answer
+        output_fn("Invalid choice; enter a listed number or model name.")
+
+
 def confirm_data_deletion(
     *,
     input_fn: Callable[[str], str] = input,
@@ -785,7 +842,7 @@ def select_interactively(
     default_scope: str = "project",
     input_fn: Callable[[str], str] = input,
     output_fn: Callable[[str], None] = print,
-) -> tuple[tuple[str, ...], tuple[str, ...], bool, str, bool]:
+) -> tuple[tuple[str, ...], tuple[str, ...], bool, str, bool, str | None]:
     output_fn("Detected LLM products:")
     for index, item in enumerate(detections, 1):
         marker = "x" if item.detected else " "
@@ -808,7 +865,9 @@ def select_interactively(
     )
 
     output_fn("Optional components (installation only; activation is separate):")
-    plugin_ids = tuple(PLUGIN_METADATA)
+    plugin_ids = tuple(
+        key for key in PLUGIN_METADATA if key not in IMPLIED_PLUGINS
+    )
     for index, identifier in enumerate(plugin_ids, 1):
         suffix = " [experimental]" if identifier == "nuextract-local" else ""
         output_fn(f"  {index}. [ ] {PLUGIN_METADATA[identifier][0]}{suffix}")
@@ -823,6 +882,9 @@ def select_interactively(
         identifier
         for index, identifier in enumerate(plugin_ids, 1)
         if index in plugin_indices
+    )
+    extractor_model = _select_extractor_model(
+        input_fn=input_fn, output_fn=output_fn
     )
     enable_extraction = False
     if "nuextract-local" in plugins:
@@ -854,4 +916,4 @@ def select_interactively(
     if enable_extraction and scope != "project":
         output_fn("Automatic extraction activation requires project scope; request disabled.")
         enable_extraction = False
-    return agents, plugins, with_mcp, scope, enable_extraction
+    return agents, plugins, with_mcp, scope, enable_extraction, extractor_model

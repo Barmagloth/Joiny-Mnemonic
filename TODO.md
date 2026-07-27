@@ -350,6 +350,32 @@ is premature.
       Verified by 15 checks in `tests/test_stage6_extractor_gate.py`, including
       an end-to-end runner pass against a STUB extractor (wiring only — no
       model quality is claimed by it)
+- [x] Model + runtime provisioning as part of installation (2026-07-27):
+      `model_provisioning.py` (content-pinned catalogue — weight sha256 taken
+      from the HF tree API `lfs.oid`, NOT the ETag, which is a Xet hash — plus
+      a pinned llama.cpp build, atomic verified download, generated backend
+      block whose `revision` carries the weight digest) and
+      `managed_runtime.py` (lazy start of ONLY the provisioned endpoint, health
+      reuse, failures surface as a wakeup error, never fatal). `setup
+      --extractor-model <key>` downloads, installs `local-llm` and configures
+      the backend; there is no separate model-installation step. win-x64 only
+      for now (`platform_not_provisioned` elsewhere). 10 checks in
+      `tests/test_model_provisioning.py`; verified live end to end: server
+      started lazily, real schema-valid candidates returned
+- [ ] Flaky (pre-existing, seen 2026-07-27):
+      `test_telemetry.RetrievalTelemetryTest.test_hook_retry_deduplicates_prompt_exposure`
+      asserts a retried hook returns an identical payload, but the packet
+      embeds `oldest_pending_age=<n.n>s` recomputed per call, so two calls that
+      straddle a rounding boundary differ (`0.1s` vs `0.2s`). Usage-sample
+      dedup itself still held. Either quantize the rendered age or make the
+      retry replay the first payload — a retried hook should be byte-identical
+- [ ] Implicit extractor selection is now ambiguous: with no `extractor.name`
+      in configuration `MemoryService` still picks the alphabetically first
+      installed extractor plugin, and provisioning means `local-llm` is present
+      almost everywhere. Extraction cannot run without an explicit policy
+      transition and the connector refuses a missing backend, so nothing runs
+      unasked today — but the selection should become explicit rather than
+      alphabetical before extraction is ever enabled by default
 - [ ] Candidate smoke: run qwen3-4b, gemma-3-4b and gliner-multilingual through
       the generic connector on a small EN/RU slice; measure load success, JSON
       validity, latency, empty-output rate and RU recall before spending on a

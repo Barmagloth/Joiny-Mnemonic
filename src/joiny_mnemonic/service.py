@@ -90,9 +90,10 @@ class MemoryService:
             or configured_extractor.get("name")
         )
         if extractor_name is not None:
+            # A configured extractor that is not importable leaves extraction
+            # unavailable with a stated reason; it never breaks the strict path,
+            # and the outcome no longer depends on which other plugins exist.
             selected_extractor = self.plugins.extractors.get(extractor_name)
-            if selected_extractor is None and self.plugins.extractors:
-                raise KeyError(f"unknown extractor plugin: {extractor_name}")
         elif self.plugins.extractors:
             selected_extractor = self.plugins.extractors[sorted(self.plugins.extractors)[0]]
         if extractor_config is None:
@@ -119,6 +120,10 @@ class MemoryService:
             extractor_config,
             enabled=policy_extraction_enabled,
         )
+        if extractor_name is not None and selected_extractor is None:
+            self.extraction.last_wakeup_error = (
+                f"extractor plugin not installed: {extractor_name}"
+            )
         self.retrieval = RetrievalEngine(self.store, self.plugins)
         self.snapshots = SnapshotManager(self.store, self.project_root)
         self.staleness = StalenessService(self.store, self.project_root)

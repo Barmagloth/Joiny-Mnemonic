@@ -37,6 +37,26 @@ The default scope is project-local, optional components are unchecked, and MCP r
 off. Re-running setup is supported. Existing host JSON is validated; OpenCode MCP configuration
 and hook-owned JSON are backed up before replacement.
 
+## Choosing an extraction model
+
+Guided setup asks which local model should propose memory candidates, or `0`
+for none. Choosing one is the entire installation of that model: the weights and
+a pinned `llama.cpp` runtime are downloaded into `~/.joiny-mnemonic` (each
+verified against a recorded sha256), the `local-llm` connector plugin is
+installed, and the project configuration is written with the matching backend.
+The server itself is started automatically the first time there is a backlog to
+extract — you never start or stop it by hand.
+
+```bash
+joiny-mnemonic setup --yes --extractor-model qwen3-4b
+```
+
+Extraction still has to be enabled separately: the model being installed does
+not make it run, and an extractor can only ever propose candidates. Provisioning
+is implemented for Windows on x86-64 today; elsewhere setup reports
+`platform_not_provisioned` and you can serve a runtime yourself as described in
+[the connector recipe](extractor-connector.md).
+
 ## Non-interactive installation
 
 Selections use stable, vendor-neutral identifiers:

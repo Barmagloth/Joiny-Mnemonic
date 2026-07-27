@@ -301,6 +301,16 @@ class ExtractionService:
             retry_failed=retry_failed,
             max_retries=self.config.max_retries,
         )
+        if events and self.config.backend:
+            # A provisioned runtime is started on first use, not kept resident
+            # from session start. A runtime the user manages is left alone.
+            from .managed_runtime import ensure_running
+
+            try:
+                ensure_running(self.config.backend)
+            except Exception as exc:  # visible, never fatal (JM-INV-008)
+                self.last_wakeup_error = f"managed runtime unavailable: {exc}"
+                return {"processed": 0, "succeeded": 0, "failed": 0}
         result = {"processed": 0, "succeeded": 0, "failed": 0}
         for event in events:
             result["processed"] += 1

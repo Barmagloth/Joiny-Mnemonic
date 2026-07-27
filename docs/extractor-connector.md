@@ -17,7 +17,39 @@ model runs here.
 Because the prompt and schema live in the core, two models are asked exactly the
 same question — that is what makes an evaluation comparison meaningful.
 
-## The recipe
+## Installed, not assembled
+
+Choosing a model is part of `joiny-mnemonic setup`, not a separate chore. The
+setup question lists the catalogue; picking an entry downloads the weights and a
+pinned `llama.cpp` runtime into `~/.joiny-mnemonic`, installs the `local-llm`
+plugin, and writes the resulting backend block into the project configuration.
+Nothing else has to be started by hand: the server is launched lazily the first
+time there is a backlog to extract, and reused while it stays healthy.
+
+```bash
+joiny-mnemonic setup --yes --extractor-model qwen3-4b
+```
+
+Two properties make this safe rather than merely convenient:
+
+- **Every downloaded artifact is content-pinned.** The catalogue records the
+  sha256 of each weight file and each runtime archive, and a byte that does not
+  match is refused (`artifact_digest_mismatch`) instead of landing on disk.
+  Publisher metadata is not trusted for this — a HuggingFace ETag is a Xet
+  hash, not the file digest.
+- **The weights are part of the identity.** The generated backend block carries
+  `revision: "sha256:<first 16 hex of the weight digest>"`, so re-provisioning
+  different bytes moves `canonical_hash` and invalidates signed evaluation
+  reports, exactly as a manual model swap does.
+
+Provisioning is currently implemented for Windows on x86-64; other platforms are
+refused with `platform_not_provisioned` rather than guessing at a build. The
+supervisor only ever starts the endpoint recorded in
+`~/.joiny-mnemonic/managed-runtime.json`; a backend you serve yourself is left
+alone, and a runtime that fails to start is reported as a wakeup error rather
+than failing the host interaction (JM-INV-008).
+
+## The recipe (serving a model yourself)
 
 1. Serve the model from any local runtime that speaks one of the supported
    protocols. Examples:
@@ -124,6 +156,16 @@ Covers: config-only model swap over a real loopback runtime, hash movement on
 every identity field, both transports sending the core schema, refusal of remote
 endpoints and unknown transports, and fail-closed behaviour on malformed
 runtime output.
+
+```bash
+PYTHONPATH=src python -m unittest tests.test_model_provisioning -v
+```
+
+Covers provisioning as installation: digest verification (including refusal of
+an already-present file that does not match the pin), reuse of a verified
+artifact without touching the network, the weight digest moving the backend
+identity, `setup --extractor-model` producing a valid configured backend, and
+the supervisor leaving a hand-served backend alone.
 
 ```bash
 PYTHONPATH=src python -m unittest tests.test_stage6_extractor_gate -v

@@ -366,9 +366,13 @@ class InstallerTest(unittest.TestCase):
             AgentDetection("claude-code", "Claude Code", "claude", "claude", False),
             AgentDetection("codex", "Codex", "codex", None, False),
         )
-        answers = iter(["not-a-number", "1,2", "2,3", "y", "maybe", "y", "bad", "project"])
+        answers = iter(
+            ["not-a-number", "1,2", "2,3", "0", "y", "maybe", "y", "bad", "project"]
+        )
         output = []
-        agents, plugins, with_mcp, scope, enable_extraction = select_interactively(
+        (
+            agents, plugins, with_mcp, scope, enable_extraction, extractor_model
+        ) = select_interactively(
             detections,
             input_fn=lambda _: next(answers),
             output_fn=output.append,
@@ -378,6 +382,7 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(enable_extraction)
         self.assertTrue(with_mcp)
         self.assertEqual(scope, "project")
+        self.assertIsNone(extractor_model)
         self.assertTrue(any("Invalid selection" in item for item in output))
         self.assertTrue(any("experimental" in item for item in output))
 
@@ -401,7 +406,7 @@ class InstallerTest(unittest.TestCase):
         args = build_parser().parse_args(
             ["--project-root", str(self.project()), "setup", "--scope", "project"]
         )
-        chosen = (("claude-code",), (), False, "project", False)
+        chosen = (("claude-code",), (), False, "project", False, None)
         with (
             patch.object(cli_module.sys.stdin, "isatty", return_value=True),
             patch.object(
