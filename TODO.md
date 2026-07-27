@@ -335,6 +335,18 @@ is premature.
       (JM-INV-007). Remote backends stay candidate-only like every
       extractor — no agent_finalized, no trusted memory. Stage 6
       evaluation itself runs on the local candidates only
+- [ ] Widen the stage 6 field (requested 2026-07-27): measure `qwen3-8b`
+      alongside the two 4B models, and add Haiku and Sonnet run through the
+      host CLI as a minimal `cli_bridge` transport. This promotes the remote
+      contract above from deferred to partly implemented: the CLI bridge is
+      the first non-local transport, so it must carry its own transport kind
+      and model identity into the hashed `ExtractorConfig`, and a CLI model
+      stays candidate-only like every other extractor. Prerequisites:
+      `qwen3-8b` needs a catalogue entry (weight URL + GGUF sha256, ~5GB at
+      Q4_K_M); the CLI bridge needs schema-constrained output, since `claude
+      -p` has no `response_format` — a schema violation must fail loudly, not
+      degrade into prose. Note the corpora leave the machine for CLI models,
+      unlike every measurement so far
 - [x] Executable JM-INV-007 gate (2026-07-27): `extractor_evaluation_target.py`
       freezes the target BEFORE a run — corpus bytes, extractor name/version,
       hashed ExtractorConfig (model, revision, inference, prompt hash, schema
@@ -439,12 +451,16 @@ is premature.
       run from a clean tree — the six published reports were all measured from
       a dirty tree (`git_dirty: true`), which under v2 alone would deny
       `PASSED` regardless of the metrics
-- [ ] `false_trusted` only counts examples flagged `adversarial`, so the 15
-      semantic traps above landed with `initial_status: auto` while the metric
-      read 0. "false_trusted: 0" must not be read as "no bad candidate was
-      auto-trusted". Either widen the metric to every empty-gold example or
-      rename it; widening moves `CHECKER_VERSION` and invalidates the frozen
-      targets, so it is a deliberate re-measure, not a patch
+- [x] Auto-trusted wrong candidates are measured now (2026-07-27):
+      `false_trusted` only counts examples flagged `adversarial`, so the
+      semantic traps landed with `initial_status: auto` while the metric read
+      0. Rather than redefine a metric whose narrow question is still worth
+      asking, the report carries a second one, `auto_trusted_false_records` —
+      every wrong candidate that arrived already trusted, attack or not — and
+      the gate holds it to the same threshold of zero
+      (`max_auto_trusted_false`). On the published qwen v2 dump the pair reads
+      0 and 27. This moved `CHECKER_VERSION` to `stage6-extractor-gate-v3`, so
+      the pending re-freeze covers it too
 - [ ] gliner-multilingual still needs its own span-extraction adapter: it does
       not speak the chat/JSON-schema protocol the connector uses, so it cannot
       be measured through `local-llm` at all

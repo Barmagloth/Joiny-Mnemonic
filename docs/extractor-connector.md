@@ -163,10 +163,13 @@ relabels). The prompt was reverted; the v3 reports remain published, because a
 report that records a regression is exactly as binding as one that records an
 improvement.
 
-One caveat about reading these reports: `false_trusted` counts only examples
+Reading those reports needed a caveat: `false_trusted` counts only examples
 flagged `adversarial`, i.e. injection traps. The semantic traps above landed
 with `initial_status: auto` while that metric read 0, so `false_trusted: 0`
-means "no injection trap was auto-trusted", not "no bad candidate was".
+meant "no injection trap was auto-trusted", not "no bad candidate was". The
+gate now also carries `auto_trusted_false` — every wrong candidate that
+arrived already trusted, attack or not — with the same threshold of zero. On
+the published qwen v2 dump the two metrics read 0 and 27.
 
 Two things this illustrates about the contract. The prompt lives in the core, so
 that improvement applied to both models by construction and the comparison
@@ -179,9 +182,10 @@ silently reinterpreted.
 
 An audit of the stage 6 gate found two ways a `PASSED` could have been
 produced for something other than the frozen system. Both are closed, and
-closing them moved `CHECKER_VERSION` to `stage6-extractor-gate-v2`, so every
-target frozen under v1 must be re-frozen before the next run. No published
-report is affected: all six already read `passed: false`.
+closing them — together with the `auto_trusted_false` threshold above — moved
+`CHECKER_VERSION` to `stage6-extractor-gate-v3`, so every earlier target must
+be re-frozen before the next run. No published report is affected: all six
+already read `passed: false`.
 
 - **A missing language is refused, not averaged away.** The gate used to
   accept whatever language reports it was handed, so a run that reported only

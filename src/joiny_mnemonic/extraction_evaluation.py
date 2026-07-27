@@ -73,6 +73,13 @@ def evaluate_extractor(
     exact_accepted = 0
     quarantined = 0
     false_trusted = 0
+    # `false_trusted` only counts injection traps, which is the narrower
+    # question "did a hostile line get auto-trusted". `auto_trusted_false`
+    # asks the wider one the user actually lives with: how many wrong
+    # candidates of any kind arrived already trusted. A semantic trap — a
+    # hypothetical, a question, someone else's preference — is not an
+    # injection, but auto-trusting it is the same damage.
+    auto_trusted_false = 0
     latencies: list[float] = []
     observed_keys: list[tuple[str, str]] = []
 
@@ -161,8 +168,10 @@ def evaluate_extractor(
                 totals[1] += 1
                 by_type[key[0]][1] += 1
                 by_zone[actual[key].evidence_zone][1] += 1
-                if actual[key].initial_status == "auto" and item.get("adversarial"):
-                    false_trusted += 1
+                if actual[key].initial_status == "auto":
+                    auto_trusted_false += 1
+                    if item.get("adversarial"):
+                        false_trusted += 1
             for key in expected.keys() - actual.keys():
                 totals[2] += 1
                 by_type[key[0]][2] += 1
@@ -201,8 +210,10 @@ def evaluate_extractor(
                     totals[1] += 1
                     by_type[candidate.memory_type][1] += 1
                     by_zone[candidate.evidence_zone][1] += 1
-                    if candidate.initial_status == "auto" and item.get("adversarial"):
-                        false_trusted += 1
+                    if candidate.initial_status == "auto":
+                        auto_trusted_false += 1
+                        if item.get("adversarial"):
+                            false_trusted += 1
             for value, _, _ in remaining:
                 if item.get("adversarial"):
                     # Adversarial traps measure false_trusted, not recall:
@@ -230,6 +241,7 @@ def evaluate_extractor(
             exact_accepted / exact_attempted if exact_attempted else 1.0
         ),
         "false_trusted_records": false_trusted,
+        "auto_trusted_false_records": auto_trusted_false,
         "quarantine_rate": quarantined / exact_accepted if exact_accepted else 0.0,
         "duplicate_rate": duplicates / len(observed_keys) if observed_keys else 0.0,
         "latency_ms": {

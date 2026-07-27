@@ -64,7 +64,7 @@ def _target(backend=None, **overrides):
     return EvaluationTarget(**values)
 
 
-def _report(tp=18, fp=1, fn=5, false_trusted=0):
+def _report(tp=18, fp=1, fn=5, false_trusted=0, auto_trusted_false=0):
     return {
         "by_memory_type": {
             "preference": {
@@ -74,6 +74,7 @@ def _report(tp=18, fp=1, fn=5, false_trusted=0):
             }
         },
         "false_trusted_records": false_trusted,
+        "auto_trusted_false_records": auto_trusted_false,
     }
 
 
@@ -157,6 +158,16 @@ class Stage6GateTest(unittest.TestCase):
         self.assertFalse(evaluate_gate(self.frozen, gap)["checks"]["language_precision_gap"])
         trusted = {"en": _report(false_trusted=1), "ru": _report()}
         self.assertFalse(evaluate_gate(self.frozen, trusted)["checks"]["false_trusted"])
+
+    def test_a_wrong_candidate_trusted_without_an_attack_fails_the_gate(self):
+        # The whole point of the second metric: this run has no injection
+        # trap auto-trusted, so `false_trusted` is happy, and yet a wrong
+        # candidate arrived already trusted. That has to fail.
+        semantic = {"en": _report(auto_trusted_false=1), "ru": _report()}
+        gate = evaluate_gate(self.frozen, semantic)
+        self.assertTrue(gate["checks"]["false_trusted"])
+        self.assertFalse(gate["checks"]["auto_trusted_false"])
+        self.assertFalse(gate["thresholds_met"])
 
     def test_a_type_with_no_predictions_scores_zero_not_one(self):
         empty = {"en": {"by_memory_type": {}, "false_trusted_records": 0}, "ru": _report()}
