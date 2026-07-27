@@ -27,6 +27,9 @@ from joiny_mnemonic.extractor_backend import (
     CANDIDATE_JSON_SCHEMA,
     VERDICT_JSON_SCHEMA,
     BackendConfig,
+    Verdict,
+    VerdictSchemaViolation,
+    parse_verdict,
     render_prompt,
     render_verification_prompt,
     validate_backend,
@@ -170,15 +173,15 @@ class LocalLLMExtractor:
         normalized_content: str,
         evidence_quote: str,
         config: Mapping[str, Any],
-    ) -> bool:
-        """Second pass over one already-proposed candidate; returns ``holds``.
+    ) -> Verdict:
+        """Second pass over one already-proposed candidate.
 
-        Unlike ``extract``, this returns a decoded answer rather than raw text:
-        the verdict is a single boolean, and a caller left to parse it would be
-        a second place that has to agree with the schema. A malformed verdict
-        raises rather than defaulting either way — defaulting to true would
-        trust an answer the model never gave, and defaulting to false would
-        quietly turn a broken runtime into a quality result.
+        Unlike ``extract``, this returns a decoded ``Verdict`` rather than raw
+        text: the core owns the schema, so the core owns the parse, and there is
+        no second place that has to agree with it. A malformed verdict raises
+        rather than defaulting either way — defaulting to true would trust an
+        answer the model never gave, and defaulting to false would quietly turn
+        a broken runtime into a quality result.
         """
         backend = self._resolve(config)
         raw = self._completion(
@@ -193,20 +196,11 @@ class LocalLLMExtractor:
             schema_name="candidate_verdict",
         )
         try:
-            verdict = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ExtractorTransportError(
-                "backend_malformed_verdict",
-                "verifier returned text that is not JSON",
-            ) from exc
-        if not isinstance(verdict, dict) or not isinstance(
-            verdict.get("holds"), bool
-        ):
-            raise ExtractorTransportError(
-                "backend_malformed_verdict",
-                "verifier response has no boolean 'holds' field",
-            )
-        return verdict["holds"]
+            return parse_verdict(raw)
+        except VerdictSchemaViolation as exc:
+            # Re-raised as a transport error so the failure ledger records it
+            # with a code, like every other way this plugin can fail.
+            raise ExtractorTransportError("backend_malformed_verdict", str(exc)) from exc
 
 
 def create_plugin(**_: Any) -> LocalLLMExtractor:

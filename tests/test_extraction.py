@@ -13,6 +13,7 @@ from joiny_mnemonic.extraction import (
     ExtractionValidationError,
     locate_evidence,
 )
+from joiny_mnemonic.extractor_backend import Verdict
 from joiny_mnemonic.api import make_handler
 from joiny_mnemonic.mcp import MCPServer, PROTOCOL_VERSION
 from joiny_mnemonic.plugins import PluginRegistry
@@ -57,6 +58,8 @@ class VerifyingExtractor(FakeExtractor):
         value = self.verdicts.pop(0)
         if isinstance(value, Exception):
             raise value
+        if isinstance(value, bool):
+            return Verdict(holds=value, reason="holds" if value else "hypothetical")
         return value
 
 
@@ -415,6 +418,32 @@ class ExtractionTest(unittest.TestCase):
             self.assertEqual(
                 fake.asked[0][1:], ("preference", content, content)
             )
+            # The reason travels with the verdict into the transition that
+            # quarantined the candidate, so why it was rejected is answerable
+            # later without asking the model again.
+            with service.store._lock:
+                transition = service.store._conn.execute(
+                    "SELECT rule_id FROM candidate_transitions WHERE candidate_id=?",
+                    (quarantined[0].id,),
+                ).fetchone()
+            self.assertEqual(transition["rule_id"], "verifier_rejected:hypothetical")
+
+    def test_a_verdict_that_is_not_a_verdict_is_refused_rather_than_coerced(self) -> None:
+        # `bool("false")` is True. A plugin returning a truthy non-Verdict must
+        # not be read as approval — that is the exact failure the second pass
+        # exists to prevent, so it fails the attempt instead.
+        content = "Всегда отвечай по-русски."
+        fake = VerifyingExtractor(
+            [output("preference", content, content)] * 4, ["false"] * 4
+        )
+        with self.service(fake, cfg=config(verify_candidates=True)) as service:
+            append_and_wait(service, kind="message", role="user", content=content)
+            self.assertFalse(service.store.list_extraction_candidates())
+            with service.store._lock:
+                outcomes = service.store._conn.execute(
+                    "SELECT outcome FROM extraction_attempts ORDER BY rowid"
+                ).fetchall()
+            self.assertNotIn("succeeded", [row["outcome"] for row in outcomes])
 
     def test_an_accepted_candidate_still_reaches_auto(self) -> None:
         content = "Всегда отвечай по-русски."

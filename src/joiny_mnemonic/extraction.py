@@ -18,6 +18,7 @@ from .extractor_backend import (
     VERDICT_SCHEMA_HASH,
     VERIFICATION_PROMPT_HASH,
     BackendConfig,
+    Verdict,
     validate_backend,
 )
 from .models import Event, ExtractionStatus
@@ -258,20 +259,22 @@ def validate_candidate(
     event: Event,
     *,
     threshold: float,
-    verdict: bool | None = None,
+    verdict: Verdict | None = None,
 ) -> ValidatedCandidate:
     """Decide the candidate's initial status.
 
     ``verdict`` is the verifier's answer, or ``None`` when no verifier ran.
     A rejected candidate is quarantined rather than dropped: the extractor was
     not wrong to notice the sentence, and a dropped candidate leaves no trace
-    to review, while a quarantined one costs nothing but a queue entry.
+    to review, while a quarantined one costs nothing but a queue entry. The
+    verifier's reason is carried into ``rule_id`` so the rejection can be
+    classified later without asking the model again.
     """
     start, end, zone = locate_evidence(event.content, candidate.evidence_quote)
     if zone != "prose":
         status, rule = "quarantined", f"untrusted_evidence_zone:{zone}"
-    elif verdict is False:
-        status, rule = "quarantined", "verifier_rejected"
+    elif verdict is not None and not verdict.holds:
+        status, rule = "quarantined", f"verifier_rejected:{verdict.reason}"
     elif candidate.confidence < threshold:
         status, rule = "quarantined", "below_auto_threshold"
     else:
@@ -324,7 +327,7 @@ class ExtractionService:
             )
         )
 
-    def _verdict(self, candidate: ProposedCandidate, event: Event) -> bool | None:
+    def _verdict(self, candidate: ProposedCandidate, event: Event) -> Verdict | None:
         """Ask the verifier about one candidate, or return None if none runs.
 
         A configured verifier that cannot answer raises, which fails the whole
@@ -343,15 +346,21 @@ class ExtractionService:
                 "verify_candidates is set but the extractor plugin has no "
                 "verify() — configuration and plugin disagree"
             )
-        return bool(
-            verify(
-                event,
-                memory_type=candidate.memory_type,
-                normalized_content=candidate.normalized_content,
-                evidence_quote=candidate.evidence_quote,
-                config=self.config.descriptor(),
-            )
+        answer = verify(
+            event,
+            memory_type=candidate.memory_type,
+            normalized_content=candidate.normalized_content,
+            evidence_quote=candidate.evidence_quote,
+            config=self.config.descriptor(),
         )
+        if not isinstance(answer, Verdict):
+            # Not coerced. `bool("false")` is True, so a plugin returning
+            # anything other than the core's own type would approve every
+            # candidate — the exact failure the second pass exists to prevent.
+            raise RuntimeError(
+                f"verify() must return a Verdict, got {type(answer).__name__}"
+            )
+        return answer
 
     def process_backlog(
         self, *, limit: int | None = None, retry_failed: bool = False

@@ -121,10 +121,23 @@ the extraction prompt and made both models worse, because a model asked to find
 and to doubt in one breath starts relabelling real preferences as facts rather
 than declining the traps.
 
-A rejected candidate is **quarantined, not dropped** (`rule_id:
-verifier_rejected`). The extractor was not wrong to notice the sentence, and a
-dropped candidate leaves nothing to review, while a quarantined one costs a
-queue entry.
+A rejected candidate is **quarantined, not dropped**. The extractor was not
+wrong to notice the sentence, and a dropped candidate leaves nothing to review,
+while a quarantined one costs a queue entry. The rejection reason travels with
+the verdict into the transition that quarantined it — `verifier_rejected:
+hypothetical`, `…:third_party`, `…:question` and so on — so a rejection can be
+classified later without asking the model again. The same string appears as
+`rule_id` in `--dump-predictions`.
+
+`verify()` returns the core's own `Verdict(holds, reason)`, and both the
+service and the evaluation harness refuse anything else rather than coercing
+it: `bool("false")` is `True`, so a plugin returning a truthy non-`Verdict`
+would approve every candidate — the exact failure the second pass exists to
+prevent. The answer is re-validated against `VERDICT_JSON_SCHEMA` on the way
+back, in the module that owns the schema, because constrained decoding is a
+request to the runtime and not a guarantee: a missing field, a non-boolean
+`holds`, a `reason` off the enum or an extra key is refused with
+`backend_malformed_verdict`.
 
 Three consequences worth stating plainly:
 

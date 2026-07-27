@@ -159,6 +159,58 @@ VERIFICATION_PROMPT_HASH = _sha256(VERIFICATION_PROMPT)
 VERDICT_SCHEMA_HASH = _sha256(_canonical_json(VERDICT_JSON_SCHEMA))
 
 
+class VerdictSchemaViolation(ValueError):
+    """A verifier answer that does not satisfy ``VERDICT_JSON_SCHEMA``."""
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    """The verifier's answer, as a core-owned type rather than a bare bool.
+
+    A bool would be coerced: ``bool("false")`` is ``True``, so a plugin that
+    returned a string — or any truthy object — would silently approve every
+    candidate, which is precisely what the second pass exists to prevent. The
+    ``reason`` is diagnostic only; no decision reads it, but it travels with the
+    verdict so a rejection can be classified without re-running the model.
+    """
+
+    holds: bool
+    reason: str
+
+
+#: Derived from the schema rather than repeated, so the constraint the runtime
+#: was asked to honour and the one enforced on the way back cannot drift.
+_VERDICT_FIELDS = frozenset(VERDICT_JSON_SCHEMA["required"])
+_VERDICT_REASONS = frozenset(VERDICT_JSON_SCHEMA["properties"]["reason"]["enum"])
+
+
+def parse_verdict(value: Any) -> Verdict:
+    """Decode a verifier answer strictly, or refuse it.
+
+    Constrained decoding is a request, not a guarantee: a runtime that ignored
+    ``response_format`` still returns something. Validating here — in the module
+    that owns the schema — is what makes "the model answered within the schema"
+    a checked fact rather than an assumption.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise VerdictSchemaViolation("verifier returned invalid JSON") from exc
+    if not isinstance(value, Mapping) or set(value) != _VERDICT_FIELDS:
+        raise VerdictSchemaViolation(
+            "verdict must be an object with exactly "
+            f"{', '.join(sorted(_VERDICT_FIELDS))}"
+        )
+    holds = value["holds"]
+    if not isinstance(holds, bool):
+        raise VerdictSchemaViolation("verdict 'holds' must be a boolean")
+    reason = value["reason"]
+    if reason not in _VERDICT_REASONS:
+        raise VerdictSchemaViolation(f"unsupported verdict reason: {reason!r}")
+    return Verdict(holds=holds, reason=str(reason))
+
+
 class BackendConfigurationError(ValueError):
     """Configuration refused before any inference runs."""
 

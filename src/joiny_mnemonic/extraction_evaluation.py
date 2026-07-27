@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .extraction import locate_evidence, parse_candidates, validate_candidate
+from .extractor_backend import Verdict
 from .models import Event
 
 
@@ -132,16 +133,21 @@ def evaluate_extractor(
                         "verify() — the measured system is not the configured one"
                     )
                 started = time.perf_counter()
-                verdict = bool(
-                    verify(
-                        event,
-                        memory_type=candidate.memory_type,
-                        normalized_content=candidate.normalized_content,
-                        evidence_quote=candidate.evidence_quote,
-                        config=config.descriptor(),
-                    )
+                verdict = verify(
+                    event,
+                    memory_type=candidate.memory_type,
+                    normalized_content=candidate.normalized_content,
+                    evidence_quote=candidate.evidence_quote,
+                    config=config.descriptor(),
                 )
                 elapsed_ms += (time.perf_counter() - started) * 1000
+                if not isinstance(verdict, Verdict):
+                    # Never coerced: a truthy non-Verdict would silently approve
+                    # every candidate and the report would read as a quality
+                    # result rather than a broken plugin.
+                    raise RuntimeError(
+                        f"verify() must return a Verdict, got {type(verdict).__name__}"
+                    )
             try:
                 valid = validate_candidate(
                     candidate, event, threshold=config.auto_threshold, verdict=verdict
@@ -161,6 +167,10 @@ def evaluate_extractor(
                     "evidence_quote": value.evidence_quote,
                     "evidence_zone": value.evidence_zone,
                     "initial_status": value.initial_status,
+                    # Carries the verifier's reason on a two-pass run, so a
+                    # dump can be classified by why each candidate was held
+                    # back without asking the model again.
+                    "rule_id": value.rule_id,
                     "confidence": value.confidence,
                 }
                 for value in predicted

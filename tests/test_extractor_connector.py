@@ -26,6 +26,7 @@ from joiny_mnemonic.extractor_backend import (
     CANDIDATE_JSON_SCHEMA,
     VERDICT_JSON_SCHEMA,
     BackendConfigurationError,
+    Verdict,
     validate_backend,
 )
 from joiny_mnemonic.models import Event
@@ -304,8 +305,10 @@ class ConnectorTest(unittest.TestCase):
         )
 
     def test_verification_asks_the_core_verdict_schema_over_the_same_transport(self):
-        self.assertIs(self._verify(True), True)
-        self.assertIs(self._verify(False), False)
+        self.assertEqual(self._verify(True), Verdict(holds=True, reason="holds"))
+        self.assertEqual(
+            self._verify(False), Verdict(holds=False, reason="hypothetical")
+        )
         path, body = _Runtime.requests[-1]
         self.assertTrue(path.endswith("/chat/completions"))
         self.assertEqual(
@@ -326,9 +329,22 @@ class ConnectorTest(unittest.TestCase):
         self.assertEqual(body["json_schema"], VERDICT_JSON_SCHEMA)
 
     def test_a_malformed_verdict_fails_closed_rather_than_defaulting(self):
-        # Defaulting to true would trust an answer the model never gave;
-        # defaulting to false would pass a broken runtime off as a quality result.
-        for text in ("not json at all", json.dumps({"reason": "holds"})):
+        # Constrained decoding is a request, not a guarantee: a runtime that
+        # ignored `response_format` still returns something, so the whole schema
+        # is enforced on the way back. Defaulting to true would trust an answer
+        # the model never gave; defaulting to false would pass a broken runtime
+        # off as a quality result.
+        for text in (
+            "not json at all",
+            json.dumps({"reason": "holds"}),  # missing `holds`
+            json.dumps({"holds": True}),  # missing `reason`
+            json.dumps({"holds": "true", "reason": "holds"}),  # not a boolean
+            json.dumps({"holds": 1, "reason": "holds"}),  # truthy, still not bool
+            json.dumps({"holds": True, "reason": "vibes"}),  # reason off the enum
+            json.dumps(  # additionalProperties: False
+                {"holds": True, "reason": "holds", "confidence": 0.9}
+            ),
+        ):
             with self.subTest(text=text):
                 _Runtime.completion_text = text
                 plugin = MODULE.LocalLLMExtractor()
