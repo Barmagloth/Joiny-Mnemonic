@@ -10,6 +10,24 @@ from .models import MemoryRecord
 from .storage import MemoryStore
 
 
+def coarse_age(seconds: float) -> str:
+    """Render an age at a resolution proportional to its size.
+
+    A staleness disclosure says the backlog is old, not how old to the tenth
+    of a second: `oldest_pending_age=591510.4s` spends precision it does not
+    have on a backlog almost seven days deep. Coarsening also makes a retried
+    hook reproduce its packet, because the rendered value stops moving between
+    two calls a fraction of a second apart.
+    """
+    if seconds < 60:
+        return "under a minute"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)}h"
+    return f"{int(seconds // 86400)}d"
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryStaleness:
     memory_id: str

@@ -100,10 +100,10 @@ class ProvisionedIdentityTest(unittest.TestCase):
         hashes = set()
         for key, block in blocks.items():
             validated = validate_backend(block)
-            self.assertTrue(validated.revision.startswith("sha256:"))
-            self.assertIn(
-                validated.revision.removeprefix("sha256:"),
-                MODEL_CATALOG[key].sha256,
+            # The whole digest, never a prefix: the revision is the exact
+            # version the report claims to have measured.
+            self.assertEqual(
+                validated.revision, f"sha256:{MODEL_CATALOG[key].sha256}"
             )
             hashes.add(ExtractorConfig.for_backend(validated).canonical_hash)
         self.assertEqual(len(hashes), len(MODEL_CATALOG))

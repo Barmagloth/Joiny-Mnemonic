@@ -38,7 +38,7 @@ Two properties make this safe rather than merely convenient:
   Publisher metadata is not trusted for this — a HuggingFace ETag is a Xet
   hash, not the file digest.
 - **The weights are part of the identity.** The generated backend block carries
-  `revision: "sha256:<first 16 hex of the weight digest>"`, so re-provisioning
+  `revision: "sha256:<the whole weight digest>"`, so re-provisioning
   different bytes moves `canonical_hash` and invalidates signed evaluation
   reports, exactly as a manual model swap does.
 
@@ -174,6 +174,48 @@ stayed meaningful. And because the prompt is hashed into the identity, the
 change invalidated the frozen targets: new targets had to be frozen and the old
 reports remain valid statements about the older system rather than being
 silently reinterpreted.
+
+### What the gate refuses (checker v2)
+
+An audit of the stage 6 gate found two ways a `PASSED` could have been
+produced for something other than the frozen system. Both are closed, and
+closing them moved `CHECKER_VERSION` to `stage6-extractor-gate-v2`, so every
+target frozen under v1 must be re-frozen before the next run. No published
+report is affected: all six already read `passed: false`.
+
+- **A missing language is refused, not averaged away.** The gate used to
+  accept whatever language reports it was handed, so a run that reported only
+  English — the language a model happens to be better at — could pass while
+  the frozen target named English *and* Russian. `evaluate_gate` now requires
+  exactly the languages of the frozen target and raises
+  `language_coverage_mismatch` otherwise.
+- **A dirty working tree cannot produce `PASSED`.** Provenance recorded
+  `git_dirty` after the fact, but recording is not refusing: the decision
+  never read it. `decide` now takes a required `worktree_clean` argument and
+  treats an unknown state as dirty, because a result measured from
+  uncommitted code names a system that exists on one machine only.
+
+Two smaller repairs came out of the same audit. `revision` carries the full
+weight sha256 rather than its first 16 characters — a report names the exact
+version it measured. And a repeat run of the same configuration on the same
+day now publishes a second report instead of colliding with the first: the
+filename carries the report's own content hash, so append-only stops
+forbidding the repeat runs that stochasticity has to be measured with.
+
+### The evidence behind the claims
+
+`benchmarks/results/stage6/diagnostics/` holds the per-example prediction
+dumps, their false-positive classifications, and the exact
+`connector-v3-scoped` prompt that was reverted, with `manifest.json` pinning
+each by sha256. The classification is reproducible rather than asserted:
+
+```bash
+PYTHONPATH=src python benchmarks/stage6_classify_false_positives.py dump.json out.json
+```
+
+The archived prompt is checkable too — rebuilding `ExtractorConfig` with it
+reproduces the `extractor_config_hash` recorded in both v3 reports, which
+`tests.test_stage6_extractor_gate` asserts.
 
 ## Remote models: contracted, not implemented
 

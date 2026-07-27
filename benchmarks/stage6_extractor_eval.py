@@ -29,7 +29,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from joiny_mnemonic.extraction import ExtractorConfig  # noqa: E402
 from joiny_mnemonic.extraction_evaluation import evaluate_extractor  # noqa: E402
-from joiny_mnemonic.extractor_backend import validate_backend  # noqa: E402
+from joiny_mnemonic.extractor_backend import (  # noqa: E402
+    EXTRACTION_PROMPT,
+    validate_backend,
+)
 from joiny_mnemonic.extractor_evaluation_target import (  # noqa: E402
     CHECKER_VERSION,
     DEFAULT_THRESHOLDS,
@@ -41,7 +44,10 @@ from joiny_mnemonic.extractor_evaluation_target import (  # noqa: E402
     write_report,
 )
 from joiny_mnemonic.plugins import PluginRegistry  # noqa: E402
-from joiny_mnemonic.report_signing import stamp_report  # noqa: E402
+from joiny_mnemonic.report_signing import (  # noqa: E402
+    code_worktree_dirty,
+    stamp_report,
+)
 
 
 CORPORA = {"en": "extraction_en_v2", "ru": "extraction_ru_v2"}
@@ -99,9 +105,10 @@ def main() -> int:
     parser.add_argument(
         "--dump-predictions",
         help=(
-            "write per-example predictions and golds to this file for debugging. "
-            "Diagnostic only: it is written beside the report, never into it, and "
-            "no decision depends on it."
+            "write per-example predictions and golds to this file. It is "
+            "written beside the report, never into it, and no decision reads "
+            "it — but the report pins its sha256, so a published claim about "
+            "individual predictions cannot drift from the run that produced it."
         ),
     )
     args = parser.parse_args()
@@ -179,12 +186,20 @@ def main() -> int:
         )
         print(f"predictions dumped to {dump_path}", flush=True)
 
-    decision = decide(frozen, actual, reports)
+    # `is False`, not `not dirty`: git being unable to answer must not read as
+    # a clean tree.
+    decision = decide(
+        frozen, actual, reports, worktree_clean=code_worktree_dirty(ROOT) is False
+    )
     report = stamp_report(
         {
             "schema": "joiny-mnemonic-stage6-extractor-eval-v1",
             "frozen_target": frozen.descriptor(),
             "actual_target": actual.descriptor(),
+            # The exact question that was asked, not only its hash: a report
+            # nobody can re-derive the prompt from cannot be reproduced once
+            # the prompt in the working tree has moved on.
+            "prompt_text": EXTRACTION_PROMPT,
             "decision": decision,
             "smoke": smoke,
             "reports": reports,
@@ -193,11 +208,20 @@ def main() -> int:
             "candidate_only": True,
         },
         repo_root=ROOT,
+        artifacts=(
+            {"predictions": Path(args.dump_predictions)}
+            if args.dump_predictions
+            else None
+        ),
     )
     stamp = datetime.now(UTC).strftime("%Y%m%d")
+    # The content hash is part of the name, so a repeat run of the same
+    # configuration on the same day publishes a new report instead of
+    # colliding with the previous one — repeat runs are how stochasticity
+    # gets measured, and the append-only rule must not forbid them.
     name = (
         f"extractor-eval-{stamp}-{backend.model}-"
-        f"{actual.identity_hash[:12]}.json"
+        f"{actual.identity_hash[:12]}-{report['report_sha256'][:8]}.json"
     )
     written = write_report(ROOT / args.output_dir, name, report)
     write_latest_pointer(ROOT / args.output_dir, written)

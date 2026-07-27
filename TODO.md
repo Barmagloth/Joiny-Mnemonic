@@ -362,13 +362,16 @@ is premature.
       for now (`platform_not_provisioned` elsewhere). 10 checks in
       `tests/test_model_provisioning.py`; verified live end to end: server
       started lazily, real schema-valid candidates returned
-- [ ] Flaky (pre-existing, seen 2026-07-27):
+- [x] Flake fixed (2026-07-27):
       `test_telemetry.RetrievalTelemetryTest.test_hook_retry_deduplicates_prompt_exposure`
       asserts a retried hook returns an identical payload, but the packet
-      embeds `oldest_pending_age=<n.n>s` recomputed per call, so two calls that
-      straddle a rounding boundary differ (`0.1s` vs `0.2s`). Usage-sample
-      dedup itself still held. Either quantize the rendered age or make the
-      retry replay the first payload — a retried hook should be byte-identical
+      embedded `oldest_pending_age=<n.n>s` recomputed per call, so two calls
+      that straddled a rounding boundary differed (`0.1s` vs `0.2s`).
+      Usage-sample dedup itself always held. The disclosure now renders at a
+      resolution proportional to its size (`under a minute` / `Nm` / `Nh` /
+      `Nd`): a staleness line says the backlog is old, and spending a tenth of
+      a second of precision on a seven-day backlog was never information. The
+      retry is byte-identical while the state it describes is unchanged
 - [ ] Implicit extractor selection is now ambiguous: with no `extractor.name`
       in configuration `MemoryService` still picks the alphabetically first
       installed extractor plugin, and provisioning means `local-llm` is present
@@ -410,6 +413,32 @@ is premature.
       be measured against something other than trap-only prose rules — e.g.
       an explicit "who holds it / is it still true" field in the schema, or
       raising `auto_threshold` so traps land quarantined rather than auto
+- [x] Gate audit repairs (2026-07-27, `CHECKER_VERSION` -> `stage6-extractor
+      -gate-v2`, so every v1 target must be re-frozen; no published report is
+      affected, all six already read `passed: false`):
+      (a) a missing language report was accepted, so a run that reported only
+      the stronger language could pass a target naming both — now
+      `language_coverage_mismatch`;
+      (b) `git_dirty` was recorded by provenance but never read by the
+      decision, so a dirty tree could produce `PASSED` — `decide` now takes a
+      required `worktree_clean` and treats unknown as dirty;
+      (c) `revision` truncated the weight sha256 to 16 chars — now the full
+      digest;
+      (d) a same-day repeat run of one configuration could not be published
+      (`report_would_be_rewritten`), which blocked the stochasticity repeats
+      the plan requires — the filename now carries the report's content hash;
+      (e) the report records `prompt_text`, not only the prompt hash
+- [x] Publish the evidence behind the published claims (2026-07-27):
+      `benchmarks/results/stage6/diagnostics/` holds the prediction dumps,
+      their classifications and the reverted `connector-v3-scoped` prompt,
+      each pinned by sha256 in `manifest.json`; the classifier is a committed
+      tool (`benchmarks/stage6_classify_false_positives.py`), and a test
+      proves the archived prompt reproduces the `extractor_config_hash` of
+      both v3 reports
+- [ ] Re-freeze both targets under checker v2 before the next measurement, and
+      run from a clean tree — the six published reports were all measured from
+      a dirty tree (`git_dirty: true`), which under v2 alone would deny
+      `PASSED` regardless of the metrics
 - [ ] `false_trusted` only counts examples flagged `adversarial`, so the 15
       semantic traps above landed with `initial_status: auto` while the metric
       read 0. "false_trusted: 0" must not be read as "no bad candidate was

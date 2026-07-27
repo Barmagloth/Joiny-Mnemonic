@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
 import stage6_extractor_eval as runner  # noqa: E402
 
 from joiny_mnemonic.extraction import ExtractorConfig
-from joiny_mnemonic.extractor_backend import validate_backend
+from joiny_mnemonic.extractor_backend import EXTRACTION_PROMPT, validate_backend
 from joiny_mnemonic.extractor_evaluation_target import (
     CHECKER_VERSION,
     DEFAULT_THRESHOLDS,
@@ -85,7 +85,7 @@ class Stage6GateTest(unittest.TestCase):
     # --- identity -------------------------------------------------------
 
     def test_matching_system_meeting_thresholds_passes(self):
-        decision = decide(self.frozen, _target(), self.passing)
+        decision = decide(self.frozen, _target(), self.passing, worktree_clean=True)
         self.assertTrue(decision["identity_matches"])
         self.assertTrue(decision["passed"])
         self.assertEqual(decision["identity_mismatches"], [])
@@ -96,7 +96,7 @@ class Stage6GateTest(unittest.TestCase):
     def test_different_model_is_refused_even_with_perfect_scores(self):
         other = _target(_backend(model="gemma-3-4b"))
         perfect = {"en": _report(tp=30, fp=0, fn=0), "ru": _report(tp=30, fp=0, fn=0)}
-        decision = decide(self.frozen, other, perfect)
+        decision = decide(self.frozen, other, perfect, worktree_clean=True)
         self.assertFalse(decision["passed"])
         self.assertTrue(decision["gate"]["thresholds_met"])
         problems = " ".join(decision["identity_mismatches"])
@@ -115,7 +115,7 @@ class Stage6GateTest(unittest.TestCase):
             ),
         ):
             with self.subTest(changed=label):
-                decision = decide(self.frozen, other, self.passing)
+                decision = decide(self.frozen, other, self.passing, worktree_clean=True)
                 self.assertFalse(decision["passed"])
                 self.assertTrue(decision["identity_mismatches"])
 
@@ -163,6 +163,39 @@ class Stage6GateTest(unittest.TestCase):
         gate = evaluate_gate(self.frozen, empty)
         self.assertEqual(gate["rows"]["en"]["precision"], 0.0)
         self.assertFalse(gate["thresholds_met"])
+
+    def test_a_missing_language_report_cannot_be_passed_off_as_a_result(self):
+        # A run that reports only the language the model happens to be good at
+        # measures a smaller system than the one that was frozen. Dropping the
+        # weaker language must be impossible, not merely discouraged.
+        perfect_en_only = {"en": _report(tp=30, fp=0, fn=0)}
+        with self.assertRaises(EvaluationIdentityError) as caught:
+            evaluate_gate(self.frozen, perfect_en_only)
+        self.assertEqual(caught.exception.code, "language_coverage_mismatch")
+        self.assertIn("ru", str(caught.exception))
+
+    def test_an_unexpected_language_report_is_refused_too(self):
+        extra = {"en": _report(), "ru": _report(), "de": _report()}
+        with self.assertRaises(EvaluationIdentityError) as caught:
+            evaluate_gate(self.frozen, extra)
+        self.assertEqual(caught.exception.code, "language_coverage_mismatch")
+
+    # --- provenance -----------------------------------------------------
+
+    def test_a_dirty_worktree_cannot_produce_passed(self):
+        # The provenance block already recorded git_dirty; recording is not
+        # refusing. A PASSED built from uncommitted code names a system that
+        # exists on exactly one machine (JM-INV-007).
+        dirty = decide(self.frozen, _target(), self.passing, worktree_clean=False)
+        self.assertFalse(dirty["passed"])
+        self.assertTrue(dirty["identity_matches"])
+        self.assertTrue(dirty["gate"]["thresholds_met"])
+        self.assertFalse(dirty["worktree_clean"])
+
+    def test_an_unknown_worktree_state_counts_as_dirty(self):
+        unknown = decide(self.frozen, _target(), self.passing, worktree_clean=None)
+        self.assertFalse(unknown["passed"])
+        self.assertFalse(unknown["worktree_clean"])
 
     # --- artifacts ------------------------------------------------------
 
@@ -290,6 +323,43 @@ class Stage6RunnerWiringTest(unittest.TestCase):
         self.assertEqual(pointer["report"], reports[0].name)
         self.assertFalse(pointer["passed"])
 
+    def test_repeating_the_same_configuration_publishes_a_second_report(self):
+        # Repeat runs are how stochasticity gets measured. The append-only
+        # rule must forbid rewriting a published report, not forbid measuring
+        # the same system twice on the same day.
+        target = self.root / "target.json"
+        self._run("--freeze", str(target))
+        self._run("--target", str(target))
+        self._run("--target", str(target))
+        results = self.root / "results"
+        reports = sorted(p for p in results.iterdir() if p.name != "latest.json")
+        self.assertEqual(len(reports), 2)
+        bodies = [json.loads(p.read_text(encoding="utf-8")) for p in reports]
+        self.assertNotEqual(bodies[0]["report_sha256"], bodies[1]["report_sha256"])
+        for path, body in zip(reports, bodies):
+            self.assertIn(body["report_sha256"][:8], path.name)
+            self.assertEqual(
+                body["decision"]["actual_identity_hash"],
+                bodies[0]["decision"]["actual_identity_hash"],
+            )
+        pointer = json.loads((results / "latest.json").read_text(encoding="utf-8"))
+        self.assertIn(pointer["report"], {p.name for p in reports})
+
+    def test_the_report_carries_the_prompt_it_measured(self):
+        target = self.root / "target.json"
+        self._run("--freeze", str(target))
+        self._run("--target", str(target))
+        report = json.loads(
+            next(
+                p
+                for p in (self.root / "results").iterdir()
+                if p.name != "latest.json"
+            ).read_text(encoding="utf-8")
+        )
+        # The hash alone cannot be turned back into the question that was
+        # asked once the working tree has moved on.
+        self.assertEqual(report["prompt_text"], EXTRACTION_PROMPT)
+
     def test_measuring_a_different_model_than_the_frozen_one_is_refused(self):
         target = self.root / "target.json"
         self._run("--freeze", str(target))
@@ -318,6 +388,60 @@ class Stage6RunnerWiringTest(unittest.TestCase):
     def test_freeze_and_target_are_mutually_exclusive(self):
         with self.assertRaises(SystemExit):
             self._run()
+
+
+class PublishedDiagnosticsTest(unittest.TestCase):
+    """The evidence behind published claims must stay pinned to its run."""
+
+    root = Path(__file__).resolve().parents[1] / "benchmarks/results/stage6"
+
+    def setUp(self):
+        manifest = self.root / "diagnostics" / "manifest.json"
+        if not manifest.exists():
+            self.skipTest("no published diagnostics in this checkout")
+        self.manifest = json.loads(manifest.read_text(encoding="utf-8"))
+
+    def test_every_diagnostic_artifact_matches_its_recorded_digest(self):
+        import hashlib
+
+        for name, entry in self.manifest["artifacts"].items():
+            with self.subTest(artifact=name):
+                path = self.root / "diagnostics" / name
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                self.assertEqual(digest, entry["sha256"])
+
+    def test_the_archived_prompt_reproduces_the_identity_it_claims(self):
+        # A reverted prompt that cannot be checked against the reports it
+        # produced is a story, not an artifact.
+        import hashlib
+
+        from joiny_mnemonic import extraction
+
+        archived = (
+            self.root / "diagnostics" / "connector-v3-scoped-prompt.txt"
+        ).read_text(encoding="utf-8")
+        original = extraction.EXTRACTION_PROMPT_HASH
+        extraction.EXTRACTION_PROMPT_HASH = hashlib.sha256(
+            archived.encode("utf-8")
+        ).hexdigest()
+        try:
+            checked = 0
+            for path in self.root.glob("*.json"):
+                if path.name == "latest.json":
+                    continue
+                body = json.loads(path.read_text(encoding="utf-8"))
+                target = body["actual_target"]
+                if target["extractor_version"] != "connector-v3-scoped":
+                    continue
+                backend = validate_backend(target["backend"])
+                self.assertEqual(
+                    ExtractorConfig.for_backend(backend).canonical_hash,
+                    target["extractor_config_hash"],
+                )
+                checked += 1
+            self.assertGreater(checked, 0)
+        finally:
+            extraction.EXTRACTION_PROMPT_HASH = original
 
 
 if __name__ == "__main__":

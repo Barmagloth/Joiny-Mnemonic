@@ -1,0 +1,61 @@
+{
+  "artifacts": {
+    "connector-v3-scoped-prompt.txt": {
+      "describes": {
+        "reverted_from": "src/joiny_mnemonic/extractor_backend.py"
+      },
+      "sha256": "9f88e20ed7f8c5b6e35902cea1aa939d2775ce9b7352fec3bcef88c1ec71ba06",
+      "verified": "rebuilding ExtractorConfig with this prompt reproduces the extractor_config_hash recorded in both connector-v3-scoped reports (qwen 3fbc2ece97dcf569, gemma 2bec09d29eb9d7ee)"
+    },
+    "gemma-3-4b-connector-v3-scoped-false-positives.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-gemma-3-4b-44f5734397fc.json",
+        "report_sha256": "950eed7f277041ca8c8c2321d5a8529e79ac6c026e5dfd19d76b7c6aa021b08e"
+      },
+      "produced_by": "benchmarks/stage6_classify_false_positives.py gemma-3-4b-connector-v3-scoped-predictions.json",
+      "sha256": "fea45b0c063245b74f0884a80bdd2745efc485c858b3a1bdffc99914a52e160a"
+    },
+    "gemma-3-4b-connector-v3-scoped-predictions.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-gemma-3-4b-44f5734397fc.json",
+        "report_sha256": "950eed7f277041ca8c8c2321d5a8529e79ac6c026e5dfd19d76b7c6aa021b08e"
+      },
+      "produced_by": "benchmarks/stage6_extractor_eval.py --dump-predictions",
+      "sha256": "03ec43c733577d5df85c2629e3bac1f176bfc5b0cb4d7eac1911616985853662"
+    },
+    "qwen3-4b-connector-v2-typed-false-positives.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-qwen3-4b-93ad6f2b2d6d.json",
+        "report_sha256": "254f8169bd04f81df6a9d9905c9e5a37e198aa00516a7d0f8a492ff13f73165b"
+      },
+      "produced_by": "benchmarks/stage6_classify_false_positives.py qwen3-4b-connector-v2-typed-predictions.json",
+      "sha256": "8e25656033b37dbdf9afc53f1947bb70e9769bb360427a06f04ea14d6fbc65c3"
+    },
+    "qwen3-4b-connector-v2-typed-predictions.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-qwen3-4b-93ad6f2b2d6d.json",
+        "report_sha256": "254f8169bd04f81df6a9d9905c9e5a37e198aa00516a7d0f8a492ff13f73165b"
+      },
+      "produced_by": "benchmarks/stage6_extractor_eval.py --dump-predictions",
+      "sha256": "48921c0eeb099265b7567da5d6450ba0d923fdbf6ea2332c8828d41c9460c7fa"
+    },
+    "qwen3-4b-connector-v3-scoped-false-positives.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-qwen3-4b-81ec3b8500bb.json",
+        "report_sha256": "8e022db7712f914690cd476ab1b80a94220c773c447d281abeca6a405f082490"
+      },
+      "produced_by": "benchmarks/stage6_classify_false_positives.py qwen3-4b-connector-v3-scoped-predictions.json",
+      "sha256": "d1240e047e8b6ae826c5b44923dbcaff198d12b90eb4148e2872c7096ccb8904"
+    },
+    "qwen3-4b-connector-v3-scoped-predictions.json": {
+      "describes": {
+        "report": "extractor-eval-20260727-qwen3-4b-81ec3b8500bb.json",
+        "report_sha256": "8e022db7712f914690cd476ab1b80a94220c773c447d281abeca6a405f082490"
+      },
+      "produced_by": "benchmarks/stage6_extractor_eval.py --dump-predictions",
+      "sha256": "b3cc041eb0e1738e6d3006c920b58d3cd81739ba624c0e649366bf6666efa9de"
+    }
+  },
+  "note": "Diagnostic artifacts backing the published claims about individual predictions. They are inputs to no decision: the gate never reads them. Reports published before this manifest pin their dump in provenance.artifact_sha256 only if the run was given --dump-predictions; the qwen connector-v2-typed dump comes from a separate debug run that reproduced its report byte for byte.",
+  "schema": "joiny-mnemonic-stage6-diagnostics-manifest-v1"
+}

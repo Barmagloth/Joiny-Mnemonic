@@ -30,7 +30,7 @@ from . import temporal
 from .reconciler import StateReconciler
 from .settlement import SettlementSurface
 from .snapshots import SnapshotManager
-from .staleness import MemoryStaleness, StalenessService
+from .staleness import MemoryStaleness, StalenessService, coarse_age
 from .storage import CURRENT_SCHEMA_VERSION, MemoryStore
 from .tasks import TaskManager
 from .usage import UsageMeter
@@ -914,7 +914,7 @@ class MemoryService:
             stale_reasons = (
                 *stale_reasons,
                 "automatic extraction backlog is incomplete; "
-                f"oldest_pending_age={extraction_status.oldest_pending_age:.1f}s",
+                f"oldest_pending_age={coarse_age(extraction_status.oldest_pending_age)}",
             )
         # Channel health consumer (2026-07-17): a degraded retrieval arm is
         # a staleness disclosure — the packet may be built on fewer arms

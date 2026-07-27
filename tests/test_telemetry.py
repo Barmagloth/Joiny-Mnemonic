@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from joiny_mnemonic.hooks import process_hook
 from joiny_mnemonic.service import MemoryService
+from joiny_mnemonic.staleness import coarse_age
 
 
 RUNTIME_ROOT = Path(__file__).resolve().parent / "runtime"
@@ -162,6 +163,17 @@ class RetrievalTelemetryTest(unittest.TestCase):
             "telemetry-hook-retry",
             branch_id="main",
         ))
+
+    def test_the_backlog_disclosure_does_not_move_between_two_calls(self) -> None:
+        # A staleness line rendered to a tenth of a second changes between two
+        # calls a fraction of a second apart, which is what made the retry above
+        # flaky. The disclosure is coarse now, so it is stable while the state
+        # it describes is unchanged.
+        self.assertEqual(coarse_age(0.1), coarse_age(0.2))
+        self.assertEqual(coarse_age(59.9), "under a minute")
+        self.assertEqual(coarse_age(90.0), "1m")
+        self.assertEqual(coarse_age(7200.0), "2h")
+        self.assertEqual(coarse_age(591510.4), "6d")
 
     def test_telemetry_failure_never_fails_search_or_prompt(self) -> None:
         with patch.object(

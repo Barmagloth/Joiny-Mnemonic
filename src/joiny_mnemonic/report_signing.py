@@ -62,6 +62,24 @@ def _package_version() -> str | None:
         return None
 
 
+def code_worktree_dirty(repo_root: Path | None = None) -> bool | None:
+    """Are there uncommitted CODE changes? ``None`` when git cannot say.
+
+    Tracked files only, and never the products of the run itself: a report
+    under ``benchmarks/results/`` cannot avoid "modifying" itself, so counting
+    it would make every stamp dirty by construction. Callers that gate on this
+    must treat ``None`` as dirty — an unknown provenance is not a clean one.
+    """
+    root = (repo_root or Path.cwd()).resolve()
+    porcelain = _git(["status", "--porcelain", "--untracked-files=no"], root)
+    if porcelain is None:
+        return None
+    return any(
+        line.strip() and "benchmarks/results/" not in line.replace("\\", "/")
+        for line in porcelain.splitlines()
+    )
+
+
 def stamp_report(
     report: dict[str, Any],
     *,
@@ -85,25 +103,12 @@ def stamp_report(
         artifact_hashes[label] = hashlib.sha256(
             Path(path).read_bytes()
         ).hexdigest()
-    # Tracked-file modifications only, and only to CODE: the report being
-    # stamped (and its sibling artifacts under benchmarks/results/) are
-    # products of the run — a report cannot avoid "modifying" itself, so
-    # counting it would make every stamp dirty by construction.
-    porcelain = _git(["status", "--porcelain", "--untracked-files=no"], root)
-    dirty = None
-    if porcelain is not None:
-        code_changes = [
-            line
-            for line in porcelain.splitlines()
-            if line.strip()
-            and "benchmarks/results/" not in line.replace("\\", "/")
-        ]
-        dirty = "\n".join(code_changes)
+    dirty = code_worktree_dirty(root)
     stamped["provenance"] = {
         "signing_version": REPORT_SIGNING_VERSION,
         "generated_at": datetime.now(UTC).isoformat(),
         "git_commit": _git(["rev-parse", "HEAD"], root),
-        "git_dirty": bool(dirty) if dirty is not None else None,
+        "git_dirty": dirty,
         "package_version": _package_version(),
         "schema_version": CURRENT_SCHEMA_VERSION,
         "temporal_projection_code_version": TEMPORAL_PROJECTION_CODE_VERSION,

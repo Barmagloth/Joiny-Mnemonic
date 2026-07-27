@@ -1,0 +1,707 @@
+{
+  "identity_hash": "81ec3b8500bbbcdbb21f863cd6ee6987393d57553eedc4383e1ded962aad5110",
+  "backend": {
+    "contract_version": "extractor-backend-v1",
+    "transport": "openai_compatible",
+    "endpoint": "http://127.0.0.1:14244/v1",
+    "model": "qwen3-4b",
+    "revision": "sha256:3605803b982cb64a",
+    "inference": {
+      "temperature": 0.0,
+      "max_tokens": 768
+    },
+    "request_timeout_seconds": 120.0
+  },
+  "summary": {
+    "*/type:decision": 2,
+    "*/type:fact": 35,
+    "*/type:preference": 14,
+    "*/type:task": 1,
+    "en/extra-on-empty-example": 11,
+    "en/mistyped:failure->fact": 1,
+    "en/mistyped:preference->decision": 1,
+    "en/mistyped:preference->fact": 9,
+    "ru/extra-on-empty-example": 10,
+    "ru/extra-span": 1,
+    "ru/mistyped:failure->fact": 1,
+    "ru/mistyped:preference->fact": 18
+  },
+  "total_false_positives": 52,
+  "false_positives": [
+    {
+      "language": "en",
+      "id": "pref-011",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "I never merge on Fridays, that's a personal rule.",
+      "normalized_content": "I never merge on Fridays, that's a personal rule.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "never merge on Fridays, that's a personal rule"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-025",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Espresso after lunch, never after six in the evening.",
+      "normalized_content": "Espresso after lunch, never after six in the evening.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Espresso after lunch, never after six in the evening"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-032",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Keep functions under forty lines; I stop reading past that.",
+      "normalized_content": "Keep functions under forty lines; I stop reading past that.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Keep functions under forty lines; I stop reading past that"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-037",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Standing desk in the morning, sitting after lunch, that's my rhythm.",
+      "normalized_content": "Standing desk in the morning, sitting after lunch, that's my rhythm.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Standing desk in the morning, sitting after lunch"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-038",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Avoid yellow in any palette you propose to me, it reads as alarm.",
+      "normalized_content": "Avoid yellow in any palette you propose to me, it reads as alarm.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Avoid yellow in any palette you propose to me, it reads as alarm"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-039",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "I answer email twice a day, at ten and at four, and never in between.",
+      "normalized_content": "I answer email twice a day, at ten and at four, and never in between.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "answer email twice a day, at ten and at four, and never in between"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-042",
+      "kind": "mistyped:preference->decision",
+      "initial_status": "auto",
+      "memory_type": "decision",
+      "evidence_quote": "Rebase, don't merge, on my feature branches please.",
+      "normalized_content": "Rebase, don't merge, on my feature branches please.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Rebase, don't merge, on my feature branches"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-043",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Tea in the evening, always green, never with sugar.",
+      "normalized_content": "Tea in the evening, always green, never with sugar.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Tea in the evening, always green, never with sugar"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-048",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Sunday is family day; never schedule anything for me then.",
+      "normalized_content": "Sunday is family day; never schedule anything for me then.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Sunday is family day; never schedule anything for me then"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "pref-050",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Hard pass on open-plan offices; I do my best work from the home study.",
+      "normalized_content": "Hard pass on open-plan offices; I do my best work from the home study.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Hard pass on open-plan offices; I do my best work from the home study"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "trap-other-person",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "My mom prefers window seats, but book whatever is cheaper for her.",
+      "normalized_content": "My mom prefers window seats, but book whatever is cheaper for her.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-hypothetical",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "If I were vegetarian I would probably prefer the tofu place.",
+      "normalized_content": "If I were vegetarian I would probably prefer the tofu place.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-transient",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "Right now I'd prefer a coffee",
+      "normalized_content": "Right now I'd prefer a coffee",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-quoted-stranger",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "The reviewer wrote that he prefers tabs, which is his call for his repo.",
+      "normalized_content": "The reviewer wrote that he prefers tabs, which is his call for his repo.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-sarcasm",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "I just love it when the build breaks five minutes before demo.",
+      "normalized_content": "I just love it when the build breaks five minutes before demo.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-negated",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "It's not that I prefer late nights, it's that deadlines keep landing on Mondays.",
+      "normalized_content": "It's not that I prefer late nights, it's that deadlines keep landing on Mondays.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-survey-option",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "The form asks whether users prefer email or SMS; leave that field empty for now.",
+      "normalized_content": "The form asks whether users prefer email or SMS; leave that field empty for now.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-fiction",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "cold tea",
+      "normalized_content": "cold tea",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-fiction",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "unresolved endings",
+      "normalized_content": "unresolved endings",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "trap-past-preference",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "As a teenager I preferred metal, but that phase ended long ago.",
+      "normalized_content": "As a teenager I preferred metal, but that phase ended long ago.",
+      "gold": []
+    },
+    {
+      "language": "en",
+      "id": "other-failure",
+      "kind": "mistyped:failure->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "The nightly import crashed because the CSV contained a BOM header.",
+      "normalized_content": "The nightly import crashed because the CSV contained a BOM header.",
+      "gold": [
+        {
+          "memory_type": "failure",
+          "evidence_quote": "The nightly import crashed because the CSV contained a BOM header"
+        }
+      ]
+    },
+    {
+      "language": "en",
+      "id": "other-negative-smalltalk",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "decision",
+      "evidence_quote": "talk tomorrow!",
+      "normalized_content": "talk tomorrow",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "pref-004",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "На завтрак всегда беру овсянку с черникой, блины — никогда.",
+      "normalized_content": "На завтрак всегда беру овсянку с черникой, блины — никогда.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "На завтрак всегда беру овсянку с черникой, блины — никогда"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-008",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "В самолёте всегда место у окна, проход не для меня.",
+      "normalized_content": "В самолёте всегда место у окна, проход не для меня.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "В самолёте всегда место у окна, проход не для меня"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-010",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "от светлого фона у меня болит голова",
+      "normalized_content": "от светлого фона у меня болит голова",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Тёмная тема везде: от светлого фона у меня болит голова"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-011",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "По пятницам я не мержу — личное правило.",
+      "normalized_content": "По пятницам я не мержу — личное правило.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "По пятницам я не мержу — личное правило"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-015",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Тренировки мне заходят только утром, в идеале до семи.",
+      "normalized_content": "Тренировки мне заходят только утром, в идеале до семи.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Тренировки мне заходят только утром, в идеале до семи"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-023",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Тестовые файлы называй с префиксом test_, суффиксы сбивают мою мышечную память.",
+      "normalized_content": "Тестовые файлы называй с префиксом test_, суффиксы сбивают мою мышечную память.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "называй с префиксом test_, суффиксы сбивают мою мышечную память"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-025",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Эспрессо после обеда — да, после шести вечера — никогда.",
+      "normalized_content": "Эспрессо после обеда — да, после шести вечера — никогда.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Эспрессо после обеда — да, после шести вечера — никогда"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-031",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Красное вино лучше белого, но хороший стаут лучше обоих.",
+      "normalized_content": "Красное вино лучше белого, но хороший стаут лучше обоих.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Красное вино лучше белого, но хороший стаут лучше обоих"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-032",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Функции держи короче сорока строк: дальше я просто перестаю читать.",
+      "normalized_content": "Функции держи короче сорока строк: дальше я просто перестаю читать.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Функции держи короче сорока строк: дальше я просто перестаю читать"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-034",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Со мной работает прямая обратная связь; смягчённая критика просто теряется.",
+      "normalized_content": "Со мной работает прямая обратная связь; смягчённая критика просто теряется.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "работает прямая обратная связь; смягчённая критика просто теряется"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-035",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Подкасты слушаю на полуторной скорости, аудиокниги — на обычной.",
+      "normalized_content": "Подкасты слушаю на полуторной скорости, аудиокниги — на обычной.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Подкасты слушаю на полуторной скорости, аудиокниги — на обычной"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-037",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Утром стою за конторкой, после обеда сижу — такой у меня ритм.",
+      "normalized_content": "Утром стою за конторкой, после обеда сижу — такой у меня ритм.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Утром стою за конторкой, после обеда сижу"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-038",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Жёлтый в палитрах мне не предлагай: он читается как тревога.",
+      "normalized_content": "Жёлтый в палитрах мне не предлагай: он читается как тревога.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Жёлтый в палитрах мне не предлагай: он читается как тревога"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-039",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Почту разбираю дважды в день, в десять и в четыре, и никогда между.",
+      "normalized_content": "Почту разбираю дважды в день, в десять и в четыре, и никогда между.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Почту разбираю дважды в день, в десять и в четыре, и никогда между"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-040",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Когда приходят друзья — настолки, а не видеоигры.",
+      "normalized_content": "Когда приходят друзья — настолки, а не видеоигры.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Когда приходят друзья — настолки, а не видеоигры"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-041",
+      "kind": "extra-span",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "расписание — прожаренным до понедельника",
+      "normalized_content": "расписание — прожаренным до понедельника",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Стейк люблю medium rare, а расписание — прожаренным до понедельника"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-045",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Столики у прохода меня нервируют, моё место — угловой диванчик.",
+      "normalized_content": "Столики у прохода меня нервируют, моё место — угловой диванчик.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "моё место — угловой диванчик"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-048",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Воскресенье — семейный день, на него мне ничего не планируй.",
+      "normalized_content": "Воскресенье — семейный день, на него мне ничего не планируй.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Воскресенье — семейный день, на него мне ничего не планируй"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "pref-049",
+      "kind": "mistyped:preference->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Дебажу сперва принтами и только в конце берусь за отладчик.",
+      "normalized_content": "Дебажу сперва принтами и только в конце берусь за отладчик.",
+      "gold": [
+        {
+          "memory_type": "preference",
+          "evidence_quote": "Дебажу сперва принтами и только в конце берусь за отладчик"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "trap-other-person",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "Мама предпочитает места у окна",
+      "normalized_content": "Мама предпочитает места у окна",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-hypothetical",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "Будь я вегетарианцем, наверное предпочёл бы ту тофушную.",
+      "normalized_content": "Будь я вегетарианцем, наверное предпочёл бы ту тофушную.",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-transient",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "Сейчас я бы предпочёл кофе",
+      "normalized_content": "Сейчас я бы предпочёл кофе",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-quoted-stranger",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "предпочитает табы",
+      "normalized_content": "предпочитает табы",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-sarcasm",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "обожаю, когда сборка падает за пять минут до демо",
+      "normalized_content": "обожаю, когда сборка падает за пять минут до демо",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-negated",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Дело не в том, что я люблю сидеть по ночам, просто дедлайны вечно по понедельникам.",
+      "normalized_content": "Дело не в том, что я люблю сидеть по ночам, просто дедлайны вечно по понедельникам.",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-survey-option",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "task",
+      "evidence_quote": "В анкете спрашивают, что пользователи предпочитают — почту или SMS; это поле пока оставь пустым.",
+      "normalized_content": "В анкете спрашивают, что пользователи предпочитают — почту или SMS; это поле пока оставь пустым.",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-fiction",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "В моём рассказе детектив предпочитает холодный чай и открытые финалы.",
+      "normalized_content": "В моём рассказе детектив предпочитает холодный чай и открытые финалы.",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "trap-past-preference",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "preference",
+      "evidence_quote": "Подростком я предпочитал металл",
+      "normalized_content": "Подростком я предпочитал металл",
+      "gold": []
+    },
+    {
+      "language": "ru",
+      "id": "other-failure",
+      "kind": "mistyped:failure->fact",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Ночной импорт упал, потому что в CSV оказался BOM-заголовок.",
+      "normalized_content": "Ночной импорт упал, потому что в CSV оказался BOM-заголовок.",
+      "gold": [
+        {
+          "memory_type": "failure",
+          "evidence_quote": "Ночной импорт упал, потому что в CSV оказался BOM-заголовок"
+        }
+      ]
+    },
+    {
+      "language": "ru",
+      "id": "other-negative-smalltalk",
+      "kind": "extra-on-empty-example",
+      "initial_status": "auto",
+      "memory_type": "fact",
+      "evidence_quote": "Отлично, спишемся завтра!",
+      "normalized_content": "Отлично, спишемся завтра!",
+      "gold": []
+    }
+  ]
+}

@@ -23,7 +23,7 @@ from typing import Any, Mapping
 from .report_signing import canonical_json
 
 
-CHECKER_VERSION = "stage6-extractor-gate-v1"
+CHECKER_VERSION = "stage6-extractor-gate-v2"
 
 #: Pre-registered stage 6 thresholds (ROADMAP §9).
 DEFAULT_THRESHOLDS: dict[str, float] = {
@@ -160,6 +160,19 @@ def evaluate_gate(
         raise EvaluationIdentityError(
             "no_language_reports", "the gate requires at least one language report"
         )
+    # Every language named in the frozen target must be measured. A run that
+    # reports only the language a model happens to be good at is not a weaker
+    # result — it is a result about a different, smaller system, and the
+    # per-language thresholds exist precisely to forbid that trade.
+    expected_languages = set(target.corpus_digests)
+    missing = sorted(expected_languages - set(rows))
+    unexpected = sorted(set(rows) - expected_languages)
+    if missing or unexpected:
+        raise EvaluationIdentityError(
+            "language_coverage_mismatch",
+            "the gate requires exactly the languages of the frozen target; "
+            f"missing: {missing or 'none'}, unexpected: {unexpected or 'none'}",
+        )
     checks = {}
     for language, row in sorted(rows.items()):
         checks[f"precision_{language}"] = (
@@ -180,17 +193,27 @@ def decide(
     frozen: EvaluationTarget,
     actual: EvaluationTarget,
     reports: Mapping[str, Mapping[str, Any]],
+    *,
+    worktree_clean: bool | None,
 ) -> dict[str, Any]:
-    """The only place ``passed`` is computed."""
+    """The only place ``passed`` is computed.
+
+    ``worktree_clean`` is required, not defaulted, and an unknown state counts
+    as dirty. A ``PASSED`` produced from uncommitted code names a system that
+    exists only on one machine, which is exactly what JM-INV-007 forbids; the
+    provenance block records the same fact, but recording is not refusing.
+    """
     mismatches = target_mismatches(frozen, actual)
     gate = evaluate_gate(actual, reports)
+    clean = worktree_clean is True
     return {
         "frozen_identity_hash": frozen.identity_hash,
         "actual_identity_hash": actual.identity_hash,
         "identity_mismatches": mismatches,
         "identity_matches": not mismatches,
+        "worktree_clean": clean,
         "gate": gate,
-        "passed": (not mismatches) and gate["thresholds_met"],
+        "passed": (not mismatches) and gate["thresholds_met"] and clean,
     }
 
 

@@ -332,14 +332,16 @@ def start_server(
 def backend_block(spec: ModelSpec, endpoint: str) -> dict:
     """The configuration block a provisioned model is served under.
 
-    ``revision`` carries the weight digest, so the evaluation identity moves
-    whenever the actual bytes change — not merely when someone edits a label.
+    ``revision`` carries the full weight digest, so the evaluation identity
+    moves whenever the actual bytes change — not merely when someone edits a
+    label. It is not truncated: a report names the exact version it measured,
+    and a shortened digest is a weaker statement than the one being claimed.
     """
     return BackendConfig(
         transport="openai_compatible",
         endpoint=f"{endpoint}/v1",
         model=spec.key,
-        revision=f"sha256:{spec.sha256[:16]}",
+        revision=f"sha256:{spec.sha256}",
         inference={"temperature": 0.0, "max_tokens": 768},
     ).descriptor()
 
