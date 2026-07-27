@@ -31,6 +31,7 @@ from joiny_mnemonic.extraction import ExtractorConfig  # noqa: E402
 from joiny_mnemonic.extraction_evaluation import evaluate_extractor  # noqa: E402
 from joiny_mnemonic.extractor_backend import (  # noqa: E402
     EXTRACTION_PROMPT,
+    VERIFICATION_PROMPT,
     validate_backend,
 )
 from joiny_mnemonic.extractor_evaluation_target import (  # noqa: E402
@@ -99,6 +100,15 @@ def main() -> int:
     )
     parser.add_argument("--target", help="frozen target file to measure against")
     parser.add_argument("--freeze", help="write the frozen target file and exit")
+    parser.add_argument(
+        "--verify-candidates",
+        action="store_true",
+        help=(
+            "run the verifier second pass. This is a different system, not a "
+            "tuned one: it moves the extractor config hash, so it needs its own "
+            "frozen target and its reports cannot be compared with one-pass runs."
+        ),
+    )
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--scored-type", action="append", default=[])
     parser.add_argument("--output-dir", default="benchmarks/results/stage6")
@@ -117,7 +127,9 @@ def main() -> int:
         raise SystemExit("pass exactly one of --target or --freeze")
 
     backend = validate_backend(json.loads(Path(args.backend).read_text("utf-8")))
-    config = ExtractorConfig.for_backend(backend)
+    config = ExtractorConfig.for_backend(
+        backend, verify_candidates=args.verify_candidates
+    )
     paths = {
         language: _corpus_path(name, args.limit)
         for language, name in CORPORA.items()
@@ -200,6 +212,12 @@ def main() -> int:
             # nobody can re-derive the prompt from cannot be reproduced once
             # the prompt in the working tree has moved on.
             "prompt_text": EXTRACTION_PROMPT,
+            # Same reason as `prompt_text`, and `None` rather than absent: a
+            # reader must be able to tell "one pass" from "two" without
+            # recomputing a hash.
+            "verification_prompt_text": (
+                VERIFICATION_PROMPT if args.verify_candidates else None
+            ),
             "decision": decision,
             "smoke": smoke,
             "reports": reports,

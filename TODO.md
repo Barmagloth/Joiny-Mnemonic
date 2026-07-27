@@ -480,6 +480,18 @@ is premature.
       `auto_trusted_false`; (c) treat a second sighting as the promotion
       signal. Note (a) doubles extraction cost per event; measure it as its
       own configuration with its own frozen target, not as a prompt tweak
+  - [x] (a) built 2026-07-27: `verify_candidates` on `ExtractorConfig`,
+        `VERIFICATION_PROMPT`/`VERDICT_JSON_SCHEMA` in the core, `verify()`
+        on `local-llm` over both transports, `--verify-candidates` on the
+        runner. A rejection quarantines rather than drops. The flag is
+        absent from the descriptor when false, so no published one-pass
+        report was invalidated by the feature existing; turning it on does
+        move `canonical_hash`, which is the case that should
+  - [ ] (a) is built but **unmeasured**: no two-pass target has been frozen
+        and no two-pass report exists. Nothing may be claimed about its
+        effect on precision until one is published
+  - [ ] (b) raise `auto_threshold` — not started
+  - [ ] (c) second sighting as the promotion signal — not started
 - [ ] gliner-multilingual still needs its own span-extraction adapter: it does
       not speak the chat/JSON-schema protocol the connector uses, so it cannot
       be measured through `local-llm` at all

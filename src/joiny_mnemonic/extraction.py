@@ -15,6 +15,8 @@ from .extractor_backend import (
     ALLOWED_CANDIDATE_TYPES,
     CANDIDATE_SCHEMA_HASH,
     EXTRACTION_PROMPT_HASH,
+    VERDICT_SCHEMA_HASH,
+    VERIFICATION_PROMPT_HASH,
     BackendConfig,
     validate_backend,
 )
@@ -52,6 +54,10 @@ class ExtractorConfig:
     max_retries: int = 3
     worker_concurrency: int = 1
     backend: Mapping[str, Any] | None = None
+    #: Run the verifier second pass. Off by default, and part of the identity
+    #: either way: a run with the verifier measures a different system than one
+    #: without it, so the two must never be compared under one frozen target.
+    verify_candidates: bool = False
 
     @classmethod
     def for_backend(cls, backend: BackendConfig, **overrides: Any) -> "ExtractorConfig":
@@ -73,6 +79,17 @@ class ExtractorConfig:
         value = asdict(self)
         value["prompt_hash"] = EXTRACTION_PROMPT_HASH
         value["schema_hash"] = CANDIDATE_SCHEMA_HASH
+        if self.verify_candidates:
+            value["verification_prompt_hash"] = VERIFICATION_PROMPT_HASH
+            value["verdict_schema_hash"] = VERDICT_SCHEMA_HASH
+        else:
+            # Absent, not `false`. A run without the verifier executes exactly
+            # the code that ran before the verifier existed, so its identity
+            # must not move — otherwise adding an optional stage would
+            # retroactively invalidate every published report about a system
+            # that did not change. Turning the verifier on adds three keys and
+            # therefore does move the hash, which is the case that should.
+            value.pop("verify_candidates")
         return value
 
     @property
@@ -90,13 +107,17 @@ def resolve_extractor_config(
     """
     if plugin is None:
         return None
+    verify = bool(configured_extractor.get("verify_candidates", False))
     backend_value = configured_extractor.get("backend")
     if backend_value:
-        return ExtractorConfig.for_backend(validate_backend(backend_value))
+        return ExtractorConfig.for_backend(
+            validate_backend(backend_value), verify_candidates=verify
+        )
     return ExtractorConfig(
         model_identity=str(getattr(plugin, "model_identity", plugin.name)),
         model_version=str(getattr(plugin, "model_version", "unknown")),
         inference_parameters=dict(getattr(plugin, "inference_parameters", {})),
+        verify_candidates=verify,
     )
 
 
@@ -233,11 +254,24 @@ def parse_candidates(value: Any) -> tuple[ProposedCandidate, ...]:
 
 
 def validate_candidate(
-    candidate: ProposedCandidate, event: Event, *, threshold: float
+    candidate: ProposedCandidate,
+    event: Event,
+    *,
+    threshold: float,
+    verdict: bool | None = None,
 ) -> ValidatedCandidate:
+    """Decide the candidate's initial status.
+
+    ``verdict`` is the verifier's answer, or ``None`` when no verifier ran.
+    A rejected candidate is quarantined rather than dropped: the extractor was
+    not wrong to notice the sentence, and a dropped candidate leaves no trace
+    to review, while a quarantined one costs nothing but a queue entry.
+    """
     start, end, zone = locate_evidence(event.content, candidate.evidence_quote)
     if zone != "prose":
         status, rule = "quarantined", f"untrusted_evidence_zone:{zone}"
+    elif verdict is False:
+        status, rule = "quarantined", "verifier_rejected"
     elif candidate.confidence < threshold:
         status, rule = "quarantined", "below_auto_threshold"
     else:
@@ -290,6 +324,35 @@ class ExtractionService:
             )
         )
 
+    def _verdict(self, candidate: ProposedCandidate, event: Event) -> bool | None:
+        """Ask the verifier about one candidate, or return None if none runs.
+
+        A configured verifier that cannot answer raises, which fails the whole
+        extraction attempt and retries it. That is deliberate: silently
+        continuing would publish candidates from a system that is not the one
+        the configuration describes.
+        """
+        if not self.config or not self.config.verify_candidates:
+            return None
+        verify = getattr(self.extractor, "verify", None)
+        if verify is None:
+            # Not an ExtractionValidationError: that would be caught per
+            # candidate and recorded as one rejection, when the actual problem
+            # is that this system cannot run the configuration it claims.
+            raise RuntimeError(
+                "verify_candidates is set but the extractor plugin has no "
+                "verify() — configuration and plugin disagree"
+            )
+        return bool(
+            verify(
+                event,
+                memory_type=candidate.memory_type,
+                normalized_content=candidate.normalized_content,
+                evidence_quote=candidate.evidence_quote,
+                config=self.config.descriptor(),
+            )
+        )
+
     def process_backlog(
         self, *, limit: int | None = None, retry_failed: bool = False
     ) -> dict[str, int]:
@@ -334,6 +397,7 @@ class ExtractionService:
                                 candidate,
                                 event,
                                 threshold=self.config.auto_threshold,
+                                verdict=self._verdict(candidate, event),
                             )
                         )
                     except ExtractionValidationError as exc:

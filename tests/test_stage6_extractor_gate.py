@@ -20,7 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "benchmarks"))
 import stage6_extractor_eval as runner  # noqa: E402
 
 from joiny_mnemonic.extraction import ExtractorConfig
-from joiny_mnemonic.extractor_backend import EXTRACTION_PROMPT, validate_backend
+from joiny_mnemonic.extractor_backend import (
+    EXTRACTION_PROMPT,
+    VERIFICATION_PROMPT,
+    validate_backend,
+)
 from joiny_mnemonic.extractor_evaluation_target import (
     CHECKER_VERSION,
     DEFAULT_THRESHOLDS,
@@ -370,6 +374,23 @@ class Stage6RunnerWiringTest(unittest.TestCase):
         # The hash alone cannot be turned back into the question that was
         # asked once the working tree has moved on.
         self.assertEqual(report["prompt_text"], EXTRACTION_PROMPT)
+
+    def test_a_one_pass_target_cannot_measure_a_verifier_run(self):
+        # The second pass is a different system, not a tuned one. A target
+        # frozen for one pass must refuse the two-pass run outright, so no
+        # report can claim the verifier's numbers under the older identity.
+        target = self.root / "target.json"
+        self._run("--freeze", str(target))
+        self.assertEqual(self._run("--target", str(target), "--verify-candidates"), 1)
+        report = json.loads(
+            next(
+                p
+                for p in (self.root / "results").iterdir()
+                if p.name != "latest.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertFalse(report["decision"]["identity_matches"])
+        self.assertEqual(report["verification_prompt_text"], VERIFICATION_PROMPT)
 
     def test_measuring_a_different_model_than_the_frozen_one_is_refused(self):
         target = self.root / "target.json"

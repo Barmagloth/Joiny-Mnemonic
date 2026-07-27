@@ -44,6 +44,22 @@ class FakeExtractor:
         return value
 
 
+class VerifyingExtractor(FakeExtractor):
+    """A fake that also answers the second pass, one verdict per candidate."""
+
+    def __init__(self, outputs: list[object], verdicts: list[object]) -> None:
+        super().__init__(outputs)
+        self.verdicts = list(verdicts)
+        self.asked = []
+
+    def verify(self, event, *, memory_type, normalized_content, evidence_quote, config):
+        self.asked.append((event.id, memory_type, normalized_content, evidence_quote))
+        value = self.verdicts.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
 def config(**values) -> ExtractorConfig:
     defaults = {
         "model_identity": "deterministic-fake",
@@ -379,6 +395,64 @@ class ExtractionTest(unittest.TestCase):
                 record for record in service.store.list_memories()
                 if record.metadata.get("origin") == "auto"
             ])
+
+    def test_verifier_quarantines_a_rejected_candidate_instead_of_dropping_it(self) -> None:
+        # The second pass exists to stop wrong candidates arriving trusted, not
+        # to make them disappear: what it rejects has to stay reviewable, or a
+        # verifier mistake is unrecoverable and invisible.
+        content = "Всегда отвечай по-русски."
+        fake = VerifyingExtractor([output("preference", content, content)], [False])
+        with self.service(fake, cfg=config(verify_candidates=True)) as service:
+            append_and_wait(service, kind="message", role="user", content=content)
+            quarantined = service.store.list_extraction_candidates(status="quarantined")
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual(quarantined[0].evidence_zone, "prose")
+            self.assertFalse(service.store.list_extraction_candidates(status="auto"))
+            self.assertFalse([
+                record for record in service.store.list_memories()
+                if record.metadata.get("origin") == "auto"
+            ])
+            self.assertEqual(
+                fake.asked[0][1:], ("preference", content, content)
+            )
+
+    def test_an_accepted_candidate_still_reaches_auto(self) -> None:
+        content = "Всегда отвечай по-русски."
+        fake = VerifyingExtractor([output("preference", content, content)], [True])
+        with self.service(fake, cfg=config(verify_candidates=True)) as service:
+            append_and_wait(service, kind="message", role="user", content=content)
+            self.assertEqual(
+                len(service.store.list_extraction_candidates(status="auto")), 1
+            )
+
+    def test_the_verifier_moves_the_identity_hash(self) -> None:
+        # A run with the second pass measures a different system; the two must
+        # not be comparable under one frozen evaluation target (JM-INV-007).
+        self.assertNotEqual(
+            config().canonical_hash, config(verify_candidates=True).canonical_hash
+        )
+        descriptor = config(verify_candidates=True).descriptor()
+        self.assertIn("verification_prompt_hash", descriptor)
+        self.assertIn("verdict_schema_hash", descriptor)
+        self.assertNotIn("verification_prompt_hash", config().descriptor())
+        # …and the converse: a run without it is the same system as before the
+        # verifier existed, so its descriptor must not gain a key at all.
+        self.assertNotIn("verify_candidates", config().descriptor())
+
+    def test_a_plugin_without_verify_fails_the_attempt_rather_than_publishing(self) -> None:
+        # Configuration and plugin disagree: continuing would publish candidates
+        # from a system that is not the one the configuration describes.
+        content = "Всегда отвечай по-русски."
+        fake = FakeExtractor([output("preference", content, content)] * 4)
+        with self.service(fake, cfg=config(verify_candidates=True)) as service:
+            append_and_wait(service, kind="message", role="user", content=content)
+            self.assertFalse(service.store.list_extraction_candidates())
+            with service.store._lock:
+                outcomes = service.store._conn.execute(
+                    "SELECT outcome FROM extraction_attempts ORDER BY rowid"
+                ).fetchall()
+            self.assertTrue(outcomes)
+            self.assertNotIn("succeeded", [row["outcome"] for row in outcomes])
 
     def test_append_returns_before_background_extractor_finishes(self) -> None:
         started = threading.Event()

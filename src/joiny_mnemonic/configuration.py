@@ -62,6 +62,11 @@ def validate_configuration(value: Mapping[str, Any]) -> dict[str, Any]:
     result["extractor"] = {
         "requested_enabled": requested_enabled,
         "name": name.strip() if isinstance(name, str) else None,
+        # Carried through explicitly: this block is rebuilt rather than copied,
+        # so a key that is not named here is silently dropped, and a dropped
+        # verifier flag would mean running a different system than the file asks
+        # for while the identity hash claims otherwise.
+        "verify_candidates": bool(extractor.get("verify_candidates", False)),
     }
     backend = extractor.get("backend")
     if backend is not None:
@@ -116,5 +121,9 @@ def effective_configuration(
         "scope": "default",
         "agents": [],
         "plugins": [],
-        "extractor": {"requested_enabled": False, "name": None},
+        "extractor": {
+            "requested_enabled": False,
+            "name": None,
+            "verify_candidates": False,
+        },
     }

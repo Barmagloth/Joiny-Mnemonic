@@ -107,7 +107,10 @@ def evaluate_extractor(
         )
         started = time.perf_counter()
         raw = extractor.extract(event, context=context, config=config.descriptor())
-        latencies.append((time.perf_counter() - started) * 1000)
+        # The verifier's calls are added to this below: the second pass is part
+        # of the configuration being measured, so its cost belongs in the same
+        # per-example latency rather than being invisible.
+        elapsed_ms = (time.perf_counter() - started) * 1000
         try:
             proposed = parse_candidates(raw)
         except ValueError as exc:
@@ -120,9 +123,28 @@ def evaluate_extractor(
         predicted = []
         for candidate in proposed:
             exact_attempted += 1
+            verdict = None
+            if config.verify_candidates:
+                verify = getattr(extractor, "verify", None)
+                if verify is None:
+                    raise RuntimeError(
+                        "verify_candidates is set but the extractor has no "
+                        "verify() — the measured system is not the configured one"
+                    )
+                started = time.perf_counter()
+                verdict = bool(
+                    verify(
+                        event,
+                        memory_type=candidate.memory_type,
+                        normalized_content=candidate.normalized_content,
+                        evidence_quote=candidate.evidence_quote,
+                        config=config.descriptor(),
+                    )
+                )
+                elapsed_ms += (time.perf_counter() - started) * 1000
             try:
                 valid = validate_candidate(
-                    candidate, event, threshold=config.auto_threshold
+                    candidate, event, threshold=config.auto_threshold, verdict=verdict
                 )
             except ValueError:
                 continue
@@ -130,6 +152,7 @@ def evaluate_extractor(
             quarantined += valid.initial_status == "quarantined"
             predicted.append(valid)
             observed_keys.append((valid.memory_type, valid.normalized_content.casefold()))
+        latencies.append(elapsed_ms)
         if per_example_sink is not None:
             per_example_sink[-1]["predicted"] = [
                 {

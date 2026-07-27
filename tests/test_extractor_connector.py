@@ -24,6 +24,7 @@ from joiny_mnemonic.extraction import (
 )
 from joiny_mnemonic.extractor_backend import (
     CANDIDATE_JSON_SCHEMA,
+    VERDICT_JSON_SCHEMA,
     BackendConfigurationError,
     validate_backend,
 )
@@ -283,6 +284,88 @@ class ConnectorTest(unittest.TestCase):
             plugin.extract(_event(), context=(), config=config.descriptor())
         self.assertEqual(caught.exception.code, "backend_not_configured")
         self.assertEqual(_Runtime.requests, [])
+
+    # --- verifier second pass -------------------------------------------
+
+    def _verify(self, holds: bool = True, *, backend_value=None):
+        _Runtime.completion_text = json.dumps(
+            {"holds": holds, "reason": "holds" if holds else "hypothetical"}
+        )
+        plugin = MODULE.LocalLLMExtractor()
+        config = ExtractorConfig.for_backend(
+            validate_backend(backend_value or self.backend()), verify_candidates=True
+        )
+        return plugin.verify(
+            _event(),
+            memory_type="decision",
+            normalized_content="SQLite остаётся единственной основной базой",
+            evidence_quote="решили использовать SQLite",
+            config=config.descriptor(),
+        )
+
+    def test_verification_asks_the_core_verdict_schema_over_the_same_transport(self):
+        self.assertIs(self._verify(True), True)
+        self.assertIs(self._verify(False), False)
+        path, body = _Runtime.requests[-1]
+        self.assertTrue(path.endswith("/chat/completions"))
+        self.assertEqual(
+            body["response_format"]["json_schema"]["schema"], VERDICT_JSON_SCHEMA
+        )
+        prompt = body["messages"][0]["content"]
+        self.assertIn("CANDIDATE:", prompt)
+        self.assertIn(EVENT_TEXT, prompt)
+        # The candidate is data below the instruction block, not part of it.
+        self.assertLess(prompt.index("CURRENT EVENT:"), prompt.index("CANDIDATE:"))
+
+    def test_verification_over_the_native_transport_uses_the_same_schema(self):
+        self._verify(True, backend_value=self.backend(
+            transport="llama_cpp", endpoint=self.base
+        ))
+        path, body = _Runtime.requests[-1]
+        self.assertTrue(path.endswith("/completion"))
+        self.assertEqual(body["json_schema"], VERDICT_JSON_SCHEMA)
+
+    def test_a_malformed_verdict_fails_closed_rather_than_defaulting(self):
+        # Defaulting to true would trust an answer the model never gave;
+        # defaulting to false would pass a broken runtime off as a quality result.
+        for text in ("not json at all", json.dumps({"reason": "holds"})):
+            with self.subTest(text=text):
+                _Runtime.completion_text = text
+                plugin = MODULE.LocalLLMExtractor()
+                config = ExtractorConfig.for_backend(
+                    validate_backend(self.backend()), verify_candidates=True
+                )
+                with self.assertRaises(MODULE.ExtractorTransportError) as caught:
+                    plugin.verify(
+                        _event(),
+                        memory_type="decision",
+                        normalized_content="x",
+                        evidence_quote="решили",
+                        config=config.descriptor(),
+                    )
+                self.assertEqual(caught.exception.code, "backend_malformed_verdict")
+
+    def test_configuration_carries_the_verifier_flag_into_the_identity(self):
+        validated = validate_configuration(
+            {
+                "version": 2,
+                "scope": "project",
+                "agents": ["claude-code"],
+                "plugins": ["local-llm"],
+                "extractor": {
+                    "requested_enabled": False,
+                    "name": "local-llm",
+                    "backend": self.backend(),
+                    "verify_candidates": True,
+                },
+            }
+        )
+        self.assertIs(validated["extractor"]["verify_candidates"], True)
+        plugin = MODULE.LocalLLMExtractor()
+        resolved = resolve_extractor_config(validated["extractor"], plugin)
+        self.assertIs(resolved.verify_candidates, True)
+        without = resolve_extractor_config({"backend": self.backend()}, plugin)
+        self.assertNotEqual(resolved.canonical_hash, without.canonical_hash)
 
     def test_service_resolution_prefers_the_configured_backend(self):
         plugin = MODULE.LocalLLMExtractor()

@@ -25,8 +25,10 @@ from typing import Any, Mapping
 
 from joiny_mnemonic.extractor_backend import (
     CANDIDATE_JSON_SCHEMA,
+    VERDICT_JSON_SCHEMA,
     BackendConfig,
     render_prompt,
+    render_verification_prompt,
     validate_backend,
 )
 
@@ -101,7 +103,14 @@ class LocalLLMExtractor:
             )
         return decoded
 
-    def _completion(self, backend: BackendConfig, prompt: str) -> str:
+    def _completion(
+        self,
+        backend: BackendConfig,
+        prompt: str,
+        *,
+        schema: dict[str, Any] = CANDIDATE_JSON_SCHEMA,
+        schema_name: str = "memory_candidates",
+    ) -> str:
         inference = dict(backend.inference)
         if backend.transport == "openai_compatible":
             body = {
@@ -111,9 +120,9 @@ class LocalLLMExtractor:
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": {
-                        "name": "memory_candidates",
+                        "name": schema_name,
                         "strict": True,
-                        "schema": CANDIDATE_JSON_SCHEMA,
+                        "schema": schema,
                     },
                 },
                 **inference,
@@ -132,7 +141,7 @@ class LocalLLMExtractor:
                 ) from exc
         body = {
             "prompt": prompt,
-            "json_schema": CANDIDATE_JSON_SCHEMA,
+            "json_schema": schema,
             "stream": False,
             **inference,
         }
@@ -152,6 +161,52 @@ class LocalLLMExtractor:
             event.content, tuple(item.content for item in context)
         )
         return self._completion(backend, prompt)
+
+    def verify(
+        self,
+        event,
+        *,
+        memory_type: str,
+        normalized_content: str,
+        evidence_quote: str,
+        config: Mapping[str, Any],
+    ) -> bool:
+        """Second pass over one already-proposed candidate; returns ``holds``.
+
+        Unlike ``extract``, this returns a decoded answer rather than raw text:
+        the verdict is a single boolean, and a caller left to parse it would be
+        a second place that has to agree with the schema. A malformed verdict
+        raises rather than defaulting either way — defaulting to true would
+        trust an answer the model never gave, and defaulting to false would
+        quietly turn a broken runtime into a quality result.
+        """
+        backend = self._resolve(config)
+        raw = self._completion(
+            backend,
+            render_verification_prompt(
+                event.content,
+                memory_type=memory_type,
+                normalized_content=normalized_content,
+                evidence_quote=evidence_quote,
+            ),
+            schema=VERDICT_JSON_SCHEMA,
+            schema_name="candidate_verdict",
+        )
+        try:
+            verdict = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ExtractorTransportError(
+                "backend_malformed_verdict",
+                "verifier returned text that is not JSON",
+            ) from exc
+        if not isinstance(verdict, dict) or not isinstance(
+            verdict.get("holds"), bool
+        ):
+            raise ExtractorTransportError(
+                "backend_malformed_verdict",
+                "verifier response has no boolean 'holds' field",
+            )
+        return verdict["holds"]
 
 
 def create_plugin(**_: Any) -> LocalLLMExtractor:

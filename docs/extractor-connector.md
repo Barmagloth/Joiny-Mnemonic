@@ -101,6 +101,47 @@ than failing the host interaction (JM-INV-008).
 Both constrain decoding to the core schema. A model that cannot honour the
 schema fails loudly; it never degrades into prose that later gets guessed at.
 
+## The verifier second pass
+
+Optional, off by default, and a different system when it is on:
+
+```json
+"extractor": {
+  "name": "local-llm",
+  "verify_candidates": true,
+  "backend": { "...": "..." }
+}
+```
+
+With it enabled, every proposed candidate is sent back to the same model as a
+second, separate call: the extraction prompt asks *what is here*, the
+verification prompt asks *does this one candidate survive*. The two stay in
+separate calls on purpose — `connector-v3-scoped` tried folding the rule into
+the extraction prompt and made both models worse, because a model asked to find
+and to doubt in one breath starts relabelling real preferences as facts rather
+than declining the traps.
+
+A rejected candidate is **quarantined, not dropped** (`rule_id:
+verifier_rejected`). The extractor was not wrong to notice the sentence, and a
+dropped candidate leaves nothing to review, while a quarantined one costs a
+queue entry.
+
+Three consequences worth stating plainly:
+
+- **It costs one extra model call per candidate**, and the measured
+  `latency_ms` includes it.
+- **It moves `canonical_hash`.** A two-pass run needs its own frozen target and
+  its reports are not comparable with one-pass reports. Conversely, leaving it
+  off changes nothing: the flag is absent from the descriptor when false, so no
+  published one-pass report was invalidated by this feature existing.
+- **A configured verifier whose plugin has no `verify()` fails the extraction
+  attempt** rather than continuing without it — publishing candidates from a
+  system other than the configured one is the failure being prevented.
+
+```bash
+PYTHONPATH=src python benchmarks/stage6_extractor_eval.py --backend backend.json --verify-candidates --freeze target-verified.json
+```
+
 ## Why a swap invalidates signed reports
 
 `ExtractorConfig.canonical_hash` covers the whole backend descriptor —
