@@ -1,0 +1,7 @@
+{
+  "identity_hash": "d9c8ce7612c92b4992dd3562431f1dbb8d630db1a5a2c56883394d7dd198c48c",
+  "passed": false,
+  "report": "extractor-eval-20260727-gemma-3-4b-d9c8ce7612c9.json",
+  "report_sha256": "7092a9e159b8018ae139d318304c6c78f30aa5add767883ae34557d9702ff821",
+  "schema": "joiny-mnemonic-stage6-latest-pointer-v1"
+}

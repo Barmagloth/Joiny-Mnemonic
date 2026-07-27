@@ -1,0 +1,565 @@
+{
+  "actual_target": {
+    "backend": {
+      "contract_version": "extractor-backend-v1",
+      "endpoint": "http://127.0.0.1:1681/v1",
+      "inference": {
+        "max_tokens": 768,
+        "temperature": 0.0
+      },
+      "model": "gemma-3-4b",
+      "request_timeout_seconds": 120.0,
+      "revision": "sha256:882e8d2db44dc554",
+      "transport": "openai_compatible"
+    },
+    "checker_version": "stage6-extractor-gate-v1",
+    "corpus_digests": {
+      "en": "5b110c5078bf08aa2c92616c84db3109dc3893b50a4336e2753e31aac278b65d",
+      "ru": "61101f9526b1ae100f347e178cb94e09bb532d3326f7d4a138b823679af7b83d"
+    },
+    "extractor_config_hash": "0c17d459148b75d7d995a378059adea72ba7fa0845f66bba849dab0105e5d158",
+    "extractor_name": "local-llm",
+    "extractor_version": "connector-v2-typed",
+    "scored_types": [
+      "preference"
+    ],
+    "thresholds": {
+      "max_false_trusted": 0,
+      "max_language_precision_gap": 0.1,
+      "min_precision": 0.9,
+      "min_recall": 0.7
+    }
+  },
+  "candidate_only": true,
+  "decision": {
+    "actual_identity_hash": "d9c8ce7612c92b4992dd3562431f1dbb8d630db1a5a2c56883394d7dd198c48c",
+    "frozen_identity_hash": "d9c8ce7612c92b4992dd3562431f1dbb8d630db1a5a2c56883394d7dd198c48c",
+    "gate": {
+      "checks": {
+        "false_trusted": true,
+        "language_precision_gap": true,
+        "precision_en": false,
+        "precision_ru": false,
+        "recall_en": true,
+        "recall_ru": false
+      },
+      "rows": {
+        "en": {
+          "false_negative": 5,
+          "false_positive": 10,
+          "false_trusted": 0,
+          "precision": 0.8305084745762712,
+          "recall": 0.9074074074074074,
+          "true_positive": 49
+        },
+        "ru": {
+          "false_negative": 20,
+          "false_positive": 11,
+          "false_trusted": 0,
+          "precision": 0.7555555555555555,
+          "recall": 0.6296296296296297,
+          "true_positive": 34
+        }
+      },
+      "thresholds_met": false
+    },
+    "identity_matches": true,
+    "identity_mismatches": [],
+    "passed": false
+  },
+  "exact_triple_reports": {
+    "en": {
+      "automatic_enablement_allowed": false,
+      "by_evidence_zone": {
+        "blockquote": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "fenced_code": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "inline_code": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "prose": {
+          "f1": 0.0,
+          "false_negative": 57,
+          "false_positive": 72,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        }
+      },
+      "by_memory_type": {
+        "decision": {
+          "f1": 0.0,
+          "false_negative": 2,
+          "false_positive": 4,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "fact": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 5,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "failure": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 2,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "lesson": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 2,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "preference": {
+          "f1": 0.0,
+          "false_negative": 54,
+          "false_positive": 59,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "task": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        }
+      },
+      "corpus_version": "en-memory-extraction-v2",
+      "duplicate_rate": 0.0,
+      "exact_evidence_acceptance_rate": 0.9868421052631579,
+      "examples": 70,
+      "false_trusted_records": 0,
+      "latency_ms": {
+        "max": 2894.34070000425,
+        "mean": 1482.2332814402346
+      },
+      "match_mode": "exact-triple",
+      "overall": {
+        "f1": 0.0,
+        "false_negative": 60,
+        "false_positive": 75,
+        "precision": 0.0,
+        "recall": 0.0,
+        "true_positive": 0
+      },
+      "quarantine_rate": 0.04,
+      "threshold_under_evaluation": 0.85
+    },
+    "ru": {
+      "automatic_enablement_allowed": false,
+      "by_evidence_zone": {
+        "blockquote": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 1,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "fenced_code": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 2,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "inline_code": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "prose": {
+          "f1": 0.0,
+          "false_negative": 57,
+          "false_positive": 73,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        }
+      },
+      "by_memory_type": {
+        "decision": {
+          "f1": 0.0,
+          "false_negative": 2,
+          "false_positive": 3,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "fact": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 9,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "failure": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 8,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "lesson": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 5,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "preference": {
+          "f1": 0.0,
+          "false_negative": 54,
+          "false_positive": 45,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        },
+        "task": {
+          "f1": 0.0,
+          "false_negative": 1,
+          "false_positive": 6,
+          "precision": 0.0,
+          "recall": 0.0,
+          "true_positive": 0
+        }
+      },
+      "corpus_version": "ru-memory-extraction-v2",
+      "duplicate_rate": 0.0,
+      "exact_evidence_acceptance_rate": 0.9620253164556962,
+      "examples": 70,
+      "false_trusted_records": 0,
+      "latency_ms": {
+        "max": 2305.6311002001166,
+        "mean": 1584.8381500292037
+      },
+      "match_mode": "exact-triple",
+      "overall": {
+        "f1": 0.0,
+        "false_negative": 60,
+        "false_positive": 76,
+        "precision": 0.0,
+        "recall": 0.0,
+        "true_positive": 0
+      },
+      "quarantine_rate": 0.039473684210526314,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "frozen_target": {
+    "backend": {
+      "contract_version": "extractor-backend-v1",
+      "endpoint": "http://127.0.0.1:1681/v1",
+      "inference": {
+        "max_tokens": 768,
+        "temperature": 0.0
+      },
+      "model": "gemma-3-4b",
+      "request_timeout_seconds": 120.0,
+      "revision": "sha256:882e8d2db44dc554",
+      "transport": "openai_compatible"
+    },
+    "checker_version": "stage6-extractor-gate-v1",
+    "corpus_digests": {
+      "en": "5b110c5078bf08aa2c92616c84db3109dc3893b50a4336e2753e31aac278b65d",
+      "ru": "61101f9526b1ae100f347e178cb94e09bb532d3326f7d4a138b823679af7b83d"
+    },
+    "extractor_config_hash": "0c17d459148b75d7d995a378059adea72ba7fa0845f66bba849dab0105e5d158",
+    "extractor_name": "local-llm",
+    "extractor_version": "connector-v2-typed",
+    "scored_types": [
+      "preference"
+    ],
+    "thresholds": {
+      "max_false_trusted": 0,
+      "max_language_precision_gap": 0.1,
+      "min_precision": 0.9,
+      "min_recall": 0.7
+    }
+  },
+  "limited_to": null,
+  "provenance": {
+    "artifact_sha256": {},
+    "generated_at": "2026-07-27T01:45:06.657316+00:00",
+    "git_commit": "6f7376c95e143fb8019a8b5834a7d5ec131ed9c5",
+    "git_dirty": true,
+    "package_version": "0.8.0",
+    "platform": "win32",
+    "python": "3.13.1",
+    "schema_version": 11,
+    "signing_version": "report-signing-v1",
+    "snapshot_replay_code_version": "snapshot-materializer-v2",
+    "temporal_projection_code_version": "temporal-core-v1"
+  },
+  "report_sha256": "7092a9e159b8018ae139d318304c6c78f30aa5add767883ae34557d9702ff821",
+  "reports": {
+    "en": {
+      "automatic_enablement_allowed": false,
+      "by_evidence_zone": {
+        "blockquote": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "fenced_code": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "inline_code": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "prose": {
+          "f1": 0.8062015503875969,
+          "false_negative": 5,
+          "false_positive": 20,
+          "precision": 0.7222222222222222,
+          "recall": 0.9122807017543859,
+          "true_positive": 52
+        }
+      },
+      "by_memory_type": {
+        "decision": {
+          "f1": 0.6666666666666666,
+          "false_negative": 0,
+          "false_positive": 2,
+          "precision": 0.5,
+          "recall": 1.0,
+          "true_positive": 2
+        },
+        "fact": {
+          "f1": 0.33333333333333337,
+          "false_negative": 0,
+          "false_positive": 4,
+          "precision": 0.2,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "failure": {
+          "f1": 0.6666666666666666,
+          "false_negative": 0,
+          "false_positive": 1,
+          "precision": 0.5,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "lesson": {
+          "f1": 0.6666666666666666,
+          "false_negative": 0,
+          "false_positive": 1,
+          "precision": 0.5,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "preference": {
+          "f1": 0.8672566371681415,
+          "false_negative": 5,
+          "false_positive": 10,
+          "precision": 0.8305084745762712,
+          "recall": 0.9074074074074074,
+          "true_positive": 49
+        },
+        "task": {
+          "f1": 0.5,
+          "false_negative": 0,
+          "false_positive": 2,
+          "precision": 0.3333333333333333,
+          "recall": 1.0,
+          "true_positive": 1
+        }
+      },
+      "corpus_version": "en-memory-extraction-v2",
+      "duplicate_rate": 0.0,
+      "exact_evidence_acceptance_rate": 0.9868421052631579,
+      "examples": 70,
+      "false_trusted_records": 0,
+      "latency_ms": {
+        "max": 14680.690999608487,
+        "mean": 1694.9394071341626
+      },
+      "match_mode": "type-span",
+      "overall": {
+        "f1": 0.8148148148148148,
+        "false_negative": 5,
+        "false_positive": 20,
+        "precision": 0.7333333333333333,
+        "recall": 0.9166666666666666,
+        "true_positive": 55
+      },
+      "quarantine_rate": 0.04,
+      "threshold_under_evaluation": 0.85
+    },
+    "ru": {
+      "automatic_enablement_allowed": false,
+      "by_evidence_zone": {
+        "blockquote": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "fenced_code": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "inline_code": {
+          "f1": 1.0,
+          "false_negative": 0,
+          "false_positive": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "prose": {
+          "f1": 0.5692307692307693,
+          "false_negative": 20,
+          "false_positive": 36,
+          "precision": 0.5068493150684932,
+          "recall": 0.6491228070175439,
+          "true_positive": 37
+        }
+      },
+      "by_memory_type": {
+        "decision": {
+          "f1": 0.8,
+          "false_negative": 0,
+          "false_positive": 1,
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "true_positive": 2
+        },
+        "fact": {
+          "f1": 0.19999999999999998,
+          "false_negative": 0,
+          "false_positive": 8,
+          "precision": 0.1111111111111111,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "failure": {
+          "f1": 0.2222222222222222,
+          "false_negative": 0,
+          "false_positive": 7,
+          "precision": 0.125,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "lesson": {
+          "f1": 0.33333333333333337,
+          "false_negative": 0,
+          "false_positive": 4,
+          "precision": 0.2,
+          "recall": 1.0,
+          "true_positive": 1
+        },
+        "preference": {
+          "f1": 0.6868686868686867,
+          "false_negative": 20,
+          "false_positive": 11,
+          "precision": 0.7555555555555555,
+          "recall": 0.6296296296296297,
+          "true_positive": 34
+        },
+        "task": {
+          "f1": 0.2857142857142857,
+          "false_negative": 0,
+          "false_positive": 5,
+          "precision": 0.16666666666666666,
+          "recall": 1.0,
+          "true_positive": 1
+        }
+      },
+      "corpus_version": "ru-memory-extraction-v2",
+      "duplicate_rate": 0.0,
+      "exact_evidence_acceptance_rate": 0.9620253164556962,
+      "examples": 70,
+      "false_trusted_records": 0,
+      "latency_ms": {
+        "max": 2617.91680008173,
+        "mean": 1597.7581900078803
+      },
+      "match_mode": "type-span",
+      "overall": {
+        "f1": 0.5882352941176471,
+        "false_negative": 20,
+        "false_positive": 36,
+        "precision": 0.5263157894736842,
+        "recall": 0.6666666666666666,
+        "true_positive": 40
+      },
+      "quarantine_rate": 0.039473684210526314,
+      "threshold_under_evaluation": 0.85
+    }
+  },
+  "schema": "joiny-mnemonic-stage6-extractor-eval-v1",
+  "smoke": {
+    "en": {
+      "empty_output": 1,
+      "empty_output_rate": 0.014285714285714285,
+      "examples": 70,
+      "json_invalid": 0,
+      "json_validity_rate": 1.0
+    },
+    "ru": {
+      "empty_output": 4,
+      "empty_output_rate": 0.05714285714285714,
+      "examples": 70,
+      "json_invalid": 0,
+      "json_validity_rate": 1.0
+    }
+  }
+}

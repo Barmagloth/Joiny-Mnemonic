@@ -135,6 +135,23 @@ empty-output rate, latency) before paying for a full run. The report lands in
 `benchmarks/results/stage6/` under a dated name and is never rewritten;
 `latest.json` only points at it.
 
+### What the first measurements showed (2026-07-27)
+
+On the full development corpora (70 EN + 70 RU, one run per configuration, not
+held-out), an untyped prompt made `qwen3-4b` label preferences as `decision` and
+score 0.06 / 0.08 recall, while `gemma-3-4b` reached 0.85 / 0.75 on EN. Adding
+`memory_type` definitions to the shared prompt moved qwen to 0.852 precision /
+0.963 recall (EN) and 0.882 / 0.849 (RU) with zero false-trusted candidates, and
+left gemma at 0.831 / 0.907 (EN) and 0.756 / 0.630 (RU). Neither passes the
+gate — both fall short of the 0.90 precision threshold.
+
+Two things this illustrates about the contract. The prompt lives in the core, so
+that improvement applied to both models by construction and the comparison
+stayed meaningful. And because the prompt is hashed into the identity, the
+change invalidated the frozen targets: new targets had to be frozen and the old
+reports remain valid statements about the older system rather than being
+silently reinterpreted.
+
 ## Remote models: contracted, not implemented
 
 A remote model — a hosted API endpoint or a host-CLI bridge such as `claude -p`

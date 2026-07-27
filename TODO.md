@@ -376,10 +376,27 @@ is premature.
       transition and the connector refuses a missing backend, so nothing runs
       unasked today — but the selection should become explicit rather than
       alphabetical before extraction is ever enabled by default
-- [ ] Candidate smoke: run qwen3-4b, gemma-3-4b and gliner-multilingual through
-      the generic connector on a small EN/RU slice; measure load success, JSON
-      validity, latency, empty-output rate and RU recall before spending on a
-      full run
+- [x] Candidate smoke for qwen3-4b and gemma-3-4b (2026-07-27): both ran the
+      full dev corpora (70 EN + 70 RU, `extraction_*_v2`, ONE run each — no
+      stochasticity measured, NOT held-out) through the generic connector.
+      JSON validity 1.0 everywhere, mean latency 1.3-2.3 s. Signed reports in
+      `benchmarks/results/stage6/`. Untyped prompt (`connector-v1`): qwen
+      recall 0.06 en / 0.08 ru because it labelled preferences `decision`
+      (56/59 false `decision`), and produced one false-trusted candidate on an
+      adversarial ru example; gemma 0.85/0.75 en, 0.89/0.46 ru. After adding
+      memory_type definitions to the shared prompt (`connector-v2-typed`):
+      qwen 0.852/0.963 en, 0.882/0.849 ru, gap 0.03, zero false-trusted;
+      gemma 0.831/0.907 en, 0.756/0.630 ru. NEITHER passes the gate — both
+      miss `min_precision` 0.90 — but qwen is now the leading candidate and
+      the only remaining failing check for it is precision
+- [ ] Close the precision gap before any gate attempt: qwen leaves 9 en / 6 ru
+      false positives at `connector-v2-typed`. The runner does not persist
+      per-example predictions, so the next step is a debug run that dumps the
+      false positives and classifies them (over-extraction of non-durable
+      lines vs wrong evidence span vs wrong type)
+- [ ] gliner-multilingual still needs its own span-extraction adapter: it does
+      not speak the chat/JSON-schema protocol the connector uses, so it cannot
+      be measured through `local-llm` at all
 - [ ] PRODUCT DISCOVERY GATE proper: run held-out scoring against the exact
       shipped backend and frozen configuration. Passing permits suggestion-only
       deployment; it never grants authority to write finalized memory
