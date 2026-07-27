@@ -96,6 +96,14 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--scored-type", action="append", default=[])
     parser.add_argument("--output-dir", default="benchmarks/results/stage6")
+    parser.add_argument(
+        "--dump-predictions",
+        help=(
+            "write per-example predictions and golds to this file for debugging. "
+            "Diagnostic only: it is written beside the report, never into it, and "
+            "no decision depends on it."
+        ),
+    )
     args = parser.parse_args()
 
     if bool(args.target) == bool(args.freeze):
@@ -136,8 +144,10 @@ def main() -> int:
     reports: dict[str, dict] = {}
     smoke: dict[str, dict] = {}
     exact: dict[str, dict] = {}
+    dumped: dict[str, list[dict]] = {}
     for language, path in paths.items():
         rows: list[dict] = []
+        dumped[language] = rows
         reports[language] = evaluate_extractor(
             extractor, config, path, match_mode="type-span", per_example_sink=rows
         )
@@ -150,6 +160,24 @@ def main() -> int:
             f"latency_ms={reports[language]['latency_ms']}",
             flush=True,
         )
+
+    if args.dump_predictions:
+        dump_path = Path(args.dump_predictions)
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_path.write_text(
+            json.dumps(
+                {
+                    "identity_hash": actual.identity_hash,
+                    "backend": backend.descriptor(),
+                    "languages": dumped,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        print(f"predictions dumped to {dump_path}", flush=True)
 
     decision = decide(frozen, actual, reports)
     report = stamp_report(

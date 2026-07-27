@@ -389,11 +389,33 @@ is premature.
       gemma 0.831/0.907 en, 0.756/0.630 ru. NEITHER passes the gate — both
       miss `min_precision` 0.90 — but qwen is now the leading candidate and
       the only remaining failing check for it is precision
-- [ ] Close the precision gap before any gate attempt: qwen leaves 9 en / 6 ru
-      false positives at `connector-v2-typed`. The runner does not persist
-      per-example predictions, so the next step is a debug run that dumps the
-      false positives and classifies them (over-extraction of non-durable
-      lines vs wrong evidence span vs wrong type)
+- [x] Classify the qwen precision gap (2026-07-27): added
+      `--dump-predictions` to the runner (diagnostic file beside the report,
+      never inside it) and re-ran the frozen `connector-v2-typed` target. The
+      debug run reproduced the published report byte for byte. ALL 15 false
+      `preference` candidates are `trap-*` examples with an empty gold: other
+      people's preferences, hypotheticals, questions, momentary wants,
+      sarcasm, negation, fiction and explicitly ended past preferences. Zero
+      span errors, zero type errors among them — the gap is entirely a
+      durability/attribution discrimination failure
+- [ ] The precision gap survived the first repair attempt. `connector-v3-scoped`
+      added an explicit negative rule ("extract only what the user themselves
+      holds durably right now… not someone else's, hypothetical, a question,
+      momentary, sarcastic, negated or ended") and made both models WORSE:
+      qwen 0.863/0.815 en and 0.829/0.642 ru, gemma 0.725/0.685 en and
+      0.629/0.415 ru with one false-trusted candidate. 14 of the 15 traps
+      survived, and the rule caused 27 new `preference`->`fact` relabels
+      (9 en / 18 ru) that did not exist under v2. Prompt reverted to
+      `connector-v2-typed`; the v3 reports stay published. Next attempts should
+      be measured against something other than trap-only prose rules — e.g.
+      an explicit "who holds it / is it still true" field in the schema, or
+      raising `auto_threshold` so traps land quarantined rather than auto
+- [ ] `false_trusted` only counts examples flagged `adversarial`, so the 15
+      semantic traps above landed with `initial_status: auto` while the metric
+      read 0. "false_trusted: 0" must not be read as "no bad candidate was
+      auto-trusted". Either widen the metric to every empty-gold example or
+      rename it; widening moves `CHECKER_VERSION` and invalidates the frozen
+      targets, so it is a deliberate re-measure, not a patch
 - [ ] gliner-multilingual still needs its own span-extraction adapter: it does
       not speak the chat/JSON-schema protocol the connector uses, so it cannot
       be measured through `local-llm` at all

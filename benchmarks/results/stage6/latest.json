@@ -1,7 +1,7 @@
 {
-  "identity_hash": "d9c8ce7612c92b4992dd3562431f1dbb8d630db1a5a2c56883394d7dd198c48c",
+  "identity_hash": "44f5734397fcfa6d255b89f30dde5193fd15a2f6b838bf2224eaa91b115c4589",
   "passed": false,
-  "report": "extractor-eval-20260727-gemma-3-4b-d9c8ce7612c9.json",
-  "report_sha256": "7092a9e159b8018ae139d318304c6c78f30aa5add767883ae34557d9702ff821",
+  "report": "extractor-eval-20260727-gemma-3-4b-44f5734397fc.json",
+  "report_sha256": "950eed7f277041ca8c8c2321d5a8529e79ac6c026e5dfd19d76b7c6aa021b08e",
   "schema": "joiny-mnemonic-stage6-latest-pointer-v1"
 }

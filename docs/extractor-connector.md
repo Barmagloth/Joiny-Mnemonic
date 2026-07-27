@@ -145,6 +145,29 @@ score 0.06 / 0.08 recall, while `gemma-3-4b` reached 0.85 / 0.75 on EN. Adding
 left gemma at 0.831 / 0.907 (EN) and 0.756 / 0.630 (RU). Neither passes the
 gate — both fall short of the 0.90 precision threshold.
 
+The remaining precision gap has a single cause. `--dump-predictions` writes the
+per-example predictions beside the report (never into it, and no decision reads
+it); on the frozen `connector-v2-typed` target every one of qwen's 15 false
+`preference` candidates is a `trap-*` example whose gold is deliberately empty —
+someone else's preference, a hypothetical, a question, a momentary want,
+sarcasm, a negation, fiction, or a preference the user says is over. No span
+errors and no type errors among them.
+
+The first repair attempt failed and is published as such. `connector-v3-scoped`
+stated the rule in prose ("extract only what the user themselves holds durably
+right now…"); 14 of the 15 traps survived it, and both models got worse —
+qwen dropped to 0.863 / 0.815 (EN) and 0.829 / 0.642 (RU), gemma to
+0.725 / 0.685 and 0.629 / 0.415 with a false-trusted candidate. The rule mostly
+pushed the model to relabel genuine preferences as `fact` (27 new such
+relabels). The prompt was reverted; the v3 reports remain published, because a
+report that records a regression is exactly as binding as one that records an
+improvement.
+
+One caveat about reading these reports: `false_trusted` counts only examples
+flagged `adversarial`, i.e. injection traps. The semantic traps above landed
+with `initial_status: auto` while that metric read 0, so `false_trusted: 0`
+means "no injection trap was auto-trusted", not "no bad candidate was".
+
 Two things this illustrates about the contract. The prompt lives in the core, so
 that improvement applied to both models by construction and the comparison
 stayed meaningful. And because the prompt is hashed into the identity, the
