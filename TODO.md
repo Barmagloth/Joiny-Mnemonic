@@ -461,6 +461,25 @@ is premature.
       (`max_auto_trusted_false`). On the published qwen v2 dump the pair reads
       0 and 27. This moved `CHECKER_VERSION` to `stage6-extractor-gate-v3`, so
       the pending re-freeze covers it too
+- [ ] Close the precision gap with a second pass, not a better prompt
+      (state of the art surveyed 2026-07-27). Three findings, all pointing the
+      same way. First, our single-pass numbers are not the weak part: Mem0 —
+      the highest-precision system in a 2026 comparison — reports precision
+      0.446 on LOCOMO, where our qwen3-4b sits at 0.85/0.88 on our own dev
+      corpora. Different benchmark and different denominator, so this is not
+      a ranking; it does say that 0.90 from one prompted pass is not what the
+      field achieves. Second, every training-free approach converges on a
+      verifier pass that judges each candidate against its own evidence
+      before promotion — which is exactly what `connector-v3-scoped` tried to
+      do inside the extraction prompt and failed at. Third, corroboration:
+      one mention should not promote, a repeated one should. Concretely for
+      us: (a) a verifier stage over `(candidate, evidence_quote, surrounding
+      turn)` answering "does the user themselves hold this, right now"; (b)
+      raise `auto_threshold` so an unverified candidate lands quarantined
+      instead of auto — the traps then cost recall-into-quarantine, not
+      `auto_trusted_false`; (c) treat a second sighting as the promotion
+      signal. Note (a) doubles extraction cost per event; measure it as its
+      own configuration with its own frozen target, not as a prompt tweak
 - [ ] gliner-multilingual still needs its own span-extraction adapter: it does
       not speak the chat/JSON-schema protocol the connector uses, so it cannot
       be measured through `local-llm` at all
