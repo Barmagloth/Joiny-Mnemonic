@@ -463,6 +463,9 @@ class ExtractionTest(unittest.TestCase):
         descriptor = config(verify_candidates=True).descriptor()
         self.assertIn("verification_prompt_hash", descriptor)
         self.assertIn("verdict_schema_hash", descriptor)
+        # The parser accepts less than the schema states, so the schema hash
+        # alone does not name the acceptance rule that was measured.
+        self.assertIn("verdict_parser_version", descriptor)
         self.assertNotIn("verification_prompt_hash", config().descriptor())
         # …and the converse: a run without it is the same system as before the
         # verifier existed, so its descriptor must not gain a key at all.

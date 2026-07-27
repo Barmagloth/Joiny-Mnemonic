@@ -341,6 +341,11 @@ class ConnectorTest(unittest.TestCase):
             json.dumps({"holds": "true", "reason": "holds"}),  # not a boolean
             json.dumps({"holds": 1, "reason": "holds"}),  # truthy, still not bool
             json.dumps({"holds": True, "reason": "vibes"}),  # reason off the enum
+            json.dumps({"holds": True, "reason": []}),  # membership on a list
+            json.dumps({"holds": True, "reason": {}}),  # unhashable, not a string
+            # The two fields must agree, or the reason is not diagnostic.
+            json.dumps({"holds": True, "reason": "hypothetical"}),
+            json.dumps({"holds": False, "reason": "holds"}),
             json.dumps(  # additionalProperties: False
                 {"holds": True, "reason": "holds", "confidence": 0.9}
             ),

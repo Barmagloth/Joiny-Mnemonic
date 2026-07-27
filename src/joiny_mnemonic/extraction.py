@@ -15,6 +15,7 @@ from .extractor_backend import (
     ALLOWED_CANDIDATE_TYPES,
     CANDIDATE_SCHEMA_HASH,
     EXTRACTION_PROMPT_HASH,
+    VERDICT_PARSER_VERSION,
     VERDICT_SCHEMA_HASH,
     VERIFICATION_PROMPT_HASH,
     BackendConfig,
@@ -83,6 +84,7 @@ class ExtractorConfig:
         if self.verify_candidates:
             value["verification_prompt_hash"] = VERIFICATION_PROMPT_HASH
             value["verdict_schema_hash"] = VERDICT_SCHEMA_HASH
+            value["verdict_parser_version"] = VERDICT_PARSER_VERSION
         else:
             # Absent, not `false`. A run without the verifier executes exactly
             # the code that ran before the verifier existed, so its identity

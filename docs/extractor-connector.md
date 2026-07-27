@@ -136,8 +136,17 @@ would approve every candidate — the exact failure the second pass exists to
 prevent. The answer is re-validated against `VERDICT_JSON_SCHEMA` on the way
 back, in the module that owns the schema, because constrained decoding is a
 request to the runtime and not a guarantee: a missing field, a non-boolean
-`holds`, a `reason` off the enum or an extra key is refused with
+`holds`, a non-string or off-enum `reason`, or an extra key is refused with
 `backend_malformed_verdict`.
+
+The parser also requires the two fields to agree — `holds` exactly when the
+reason is `holds` — because a verdict that says "it survives, because it is
+hypothetical" is not diagnostic. JSON Schema could express that with `oneOf`,
+but not every runtime's schema-to-grammar converter handles it, and a rule only
+some runtimes honour is worse than one that is always checked. Since this
+acceptance rule is stricter than the schema states, two-pass identities carry
+`verdict_parser_version` alongside the schema hash; one-pass identities are
+untouched by it.
 
 Three consequences worth stating plainly:
 

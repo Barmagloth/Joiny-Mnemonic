@@ -158,6 +158,12 @@ CANDIDATE_SCHEMA_HASH = _sha256(_canonical_json(CANDIDATE_JSON_SCHEMA))
 VERIFICATION_PROMPT_HASH = _sha256(VERIFICATION_PROMPT)
 VERDICT_SCHEMA_HASH = _sha256(_canonical_json(VERDICT_JSON_SCHEMA))
 
+#: `parse_verdict` enforces more than the schema states — the holds/reason
+#: coupling below — so the schema hash alone does not name the acceptance rule
+#: that was measured. Only two-pass runs carry this, so tightening it never
+#: touches a one-pass identity.
+VERDICT_PARSER_VERSION = "verdict-parser-v1"
+
 
 class VerdictSchemaViolation(ValueError):
     """A verifier answer that does not satisfy ``VERDICT_JSON_SCHEMA``."""
@@ -206,9 +212,22 @@ def parse_verdict(value: Any) -> Verdict:
     if not isinstance(holds, bool):
         raise VerdictSchemaViolation("verdict 'holds' must be a boolean")
     reason = value["reason"]
+    # Type before membership: `[] in frozenset()` is fine but `{} in` a set of
+    # strings is a TypeError, and an unwrapped TypeError escapes the plugin's
+    # error code instead of being reported as a malformed verdict.
+    if not isinstance(reason, str):
+        raise VerdictSchemaViolation("verdict 'reason' must be a string")
     if reason not in _VERDICT_REASONS:
         raise VerdictSchemaViolation(f"unsupported verdict reason: {reason!r}")
-    return Verdict(holds=holds, reason=str(reason))
+    # The two fields have to agree, or the reason is not diagnostic. JSON Schema
+    # could express this with oneOf, but not every runtime's schema-to-grammar
+    # converter handles it, and a rule only some runtimes honour is worse than
+    # one that is always checked here.
+    if holds != (reason == "holds"):
+        raise VerdictSchemaViolation(
+            f"verdict holds={holds} contradicts reason={reason!r}"
+        )
+    return Verdict(holds=holds, reason=reason)
 
 
 class BackendConfigurationError(ValueError):
