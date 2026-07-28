@@ -75,6 +75,24 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
         context_tokens=8192,
         notes="strong multilingual instruction following; default candidate",
     ),
+    "qwen3-8b": ModelSpec(
+        key="qwen3-8b",
+        title="Qwen3 8B (Q4_K_M)",
+        url=(
+            "https://huggingface.co/unsloth/Qwen3-8B-GGUF/"
+            "resolve/main/Qwen3-8B-Q4_K_M.gguf"
+        ),
+        filename="Qwen3-8B-Q4_K_M.gguf",
+        sha256="120307ba529eb2439d6c430d94104dabd578497bc7bfe7e322b5d9933b449bd4",
+        size_bytes=5_027_784_512,
+        context_tokens=8192,
+        # Not the 2507 Instruct line — that update did not ship an 8B — so
+        # this is the hybrid-reasoning base model. Extraction is
+        # grammar-constrained, so it cannot emit a thinking block even if it
+        # wants to; whether being denied one costs it accuracy is a question
+        # for its own frozen target, not an assumption to bake in here.
+        notes="size step up from the 4B pair; twice the weights, twice the wait",
+    ),
     "gemma-3-4b": ModelSpec(
         key="gemma-3-4b",
         title="Gemma 3 4B Instruct (Q4_K_M)",
