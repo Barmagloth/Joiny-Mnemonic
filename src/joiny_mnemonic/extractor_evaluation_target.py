@@ -23,12 +23,25 @@ from typing import Any, Mapping
 from .report_signing import canonical_json
 
 
-CHECKER_VERSION = "stage6-extractor-gate-v3"
+CHECKER_VERSION = "stage6-extractor-gate-v4"
 
 #: Pre-registered stage 6 thresholds (ROADMAP §9).
+#:
+#: Two families, because a candidate and a trusted record cost different
+#: things. A wrong candidate costs a reviewer a few seconds; a wrong trusted
+#: record is a false memory the user never agreed to. The candidate bars keep
+#: the review queue useful, the trusted bars decide whether review may be
+#: skipped at all.
 DEFAULT_THRESHOLDS: dict[str, float] = {
-    "min_precision": 0.90,
-    "min_recall": 0.70,
+    "min_candidate_precision": 0.90,
+    "min_candidate_recall": 0.70,
+    "min_trusted_precision": 0.90,
+    # A verifier that rejects everything would otherwise score a perfect
+    # trusted precision over an empty set, so the trusted side needs a floor
+    # of its own. Deliberately below the candidate floor: giving up trusted
+    # recall to buy trusted precision is the trade the second pass exists to
+    # make, and the bar only has to stop it from being a total surrender.
+    "min_trusted_recall": 0.50,
     "max_language_precision_gap": 0.10,
     "max_false_trusted": 0,
     # Wider than `max_false_trusted`, which only sees injection traps. Zero is
@@ -132,22 +145,52 @@ def target_mismatches(
     return problems
 
 
-def _scored(report: Mapping[str, Any], scored_types: tuple[str, ...]) -> dict[str, float]:
-    """Aggregate the scored types by summing their confusion counts."""
+def _confusion(
+    block: Mapping[str, Any], scored_types: tuple[str, ...]
+) -> tuple[int, int, int]:
     tp = fp = fn = 0
     for memory_type in scored_types:
-        scores = report.get("by_memory_type", {}).get(memory_type)
+        scores = block.get(memory_type)
         if not scores:
             continue
         tp += int(scores["true_positive"])
         fp += int(scores["false_positive"])
         fn += int(scores["false_negative"])
+    return tp, fp, fn
+
+
+def _scored(report: Mapping[str, Any], scored_types: tuple[str, ...]) -> dict[str, float]:
+    """Aggregate the scored types by summing their confusion counts.
+
+    Empty numerators score zero, not one: a run that produced no trusted
+    record at all has not demonstrated that trusting is safe, it has only
+    declined to try.
+    """
+    if "trusted_by_memory_type" not in report:
+        raise EvaluationIdentityError(
+            "report_predates_trusted_metrics",
+            "the report has no trusted_by_memory_type block, so its precision "
+            "counts quarantined candidates and cannot be judged by this gate",
+        )
+    tp, fp, fn = _confusion(report.get("by_memory_type", {}), scored_types)
+    trusted_tp, trusted_fp, trusted_fn = _confusion(
+        report["trusted_by_memory_type"], scored_types
+    )
     return {
         "true_positive": tp,
         "false_positive": fp,
         "false_negative": fn,
-        "precision": tp / (tp + fp) if tp + fp else 0.0,
-        "recall": tp / (tp + fn) if tp + fn else 0.0,
+        "candidate_precision": tp / (tp + fp) if tp + fp else 0.0,
+        "candidate_recall": tp / (tp + fn) if tp + fn else 0.0,
+        "trusted_true_positive": trusted_tp,
+        "trusted_false_positive": trusted_fp,
+        "trusted_false_negative": trusted_fn,
+        "trusted_precision": (
+            trusted_tp / (trusted_tp + trusted_fp) if trusted_tp + trusted_fp else 0.0
+        ),
+        "trusted_recall": (
+            trusted_tp / (trusted_tp + trusted_fn) if trusted_tp + trusted_fn else 0.0
+        ),
         "false_trusted": int(report.get("false_trusted_records", 0)),
         "auto_trusted_false": int(report.get("auto_trusted_false_records", 0)),
     }
@@ -181,11 +224,19 @@ def evaluate_gate(
         )
     checks = {}
     for language, row in sorted(rows.items()):
-        checks[f"precision_{language}"] = (
-            row["precision"] >= thresholds["min_precision"]
+        checks[f"candidate_precision_{language}"] = (
+            row["candidate_precision"] >= thresholds["min_candidate_precision"]
         )
-        checks[f"recall_{language}"] = row["recall"] >= thresholds["min_recall"]
-    precisions = [row["precision"] for row in rows.values()]
+        checks[f"candidate_recall_{language}"] = (
+            row["candidate_recall"] >= thresholds["min_candidate_recall"]
+        )
+        checks[f"trusted_precision_{language}"] = (
+            row["trusted_precision"] >= thresholds["min_trusted_precision"]
+        )
+        checks[f"trusted_recall_{language}"] = (
+            row["trusted_recall"] >= thresholds["min_trusted_recall"]
+        )
+    precisions = [row["candidate_precision"] for row in rows.values()]
     checks["language_precision_gap"] = (
         max(precisions) - min(precisions)
     ) <= thresholds["max_language_precision_gap"]

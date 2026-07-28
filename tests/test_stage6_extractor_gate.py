@@ -68,13 +68,41 @@ def _target(backend=None, **overrides):
     return EvaluationTarget(**values)
 
 
-def _report(tp=18, fp=1, fn=5, false_trusted=0, auto_trusted_false=0):
+def _report(
+    tp=18,
+    fp=1,
+    fn=5,
+    false_trusted=0,
+    trusted_tp=None,
+    trusted_fp=0,
+    trusted_fn=None,
+    auto_trusted_false=None,
+):
+    """A two-block report: every candidate, then the auto-trusted subset.
+
+    The defaults describe the shape a healthy run has — one wrong candidate
+    was produced and quarantined, so it costs candidate precision and not
+    trusted precision. `auto_trusted_false` follows `trusted_fp` unless a test
+    overrides it, because in a real report they are the same event counted
+    once.
+    """
+    trusted_tp = tp if trusted_tp is None else trusted_tp
+    trusted_fn = fn if trusted_fn is None else trusted_fn
+    if auto_trusted_false is None:
+        auto_trusted_false = trusted_fp
     return {
         "by_memory_type": {
             "preference": {
                 "true_positive": tp,
                 "false_positive": fp,
                 "false_negative": fn,
+            }
+        },
+        "trusted_by_memory_type": {
+            "preference": {
+                "true_positive": trusted_tp,
+                "false_positive": trusted_fp,
+                "false_negative": trusted_fn,
             }
         },
         "false_trusted_records": false_trusted,
@@ -116,7 +144,9 @@ class Stage6GateTest(unittest.TestCase):
             ("scope", _target(scored_types=("preference", "fact"))),
             (
                 "thresholds",
-                _target(thresholds={**DEFAULT_THRESHOLDS, "min_precision": 0.5}),
+                _target(
+                    thresholds={**DEFAULT_THRESHOLDS, "min_candidate_precision": 0.5}
+                ),
             ),
         ):
             with self.subTest(changed=label):
@@ -142,13 +172,24 @@ class Stage6GateTest(unittest.TestCase):
 
     def test_thresholds_are_applied_per_language(self):
         cases = {
-            "precision_below_090": (
+            "candidate_precision_below_090": (
                 {"en": _report(tp=8, fp=4, fn=1), "ru": _report()},
-                "precision_en",
+                "candidate_precision_en",
             ),
-            "recall_below_070": (
+            "candidate_recall_below_070": (
                 {"en": _report(tp=5, fp=0, fn=10), "ru": _report()},
-                "recall_en",
+                "candidate_recall_en",
+            ),
+            # The bar the second pass is built to move, and the one a
+            # candidate-level number cannot see: detection is unchanged, but
+            # four wrong records were trusted rather than queued.
+            "trusted_precision_below_090": (
+                {"en": _report(trusted_tp=8, trusted_fp=4), "ru": _report()},
+                "trusted_precision_en",
+            ),
+            "trusted_recall_below_050": (
+                {"en": _report(trusted_tp=5, trusted_fn=10), "ru": _report()},
+                "trusted_recall_en",
             ),
         }
         for label, (reports, failing) in cases.items():
@@ -174,10 +215,58 @@ class Stage6GateTest(unittest.TestCase):
         self.assertFalse(gate["thresholds_met"])
 
     def test_a_type_with_no_predictions_scores_zero_not_one(self):
-        empty = {"en": {"by_memory_type": {}, "false_trusted_records": 0}, "ru": _report()}
+        empty = {
+            "en": {
+                "by_memory_type": {},
+                "trusted_by_memory_type": {},
+                "false_trusted_records": 0,
+            },
+            "ru": _report(),
+        }
         gate = evaluate_gate(self.frozen, empty)
-        self.assertEqual(gate["rows"]["en"]["precision"], 0.0)
+        self.assertEqual(gate["rows"]["en"]["candidate_precision"], 0.0)
+        self.assertEqual(gate["rows"]["en"]["trusted_precision"], 0.0)
         self.assertFalse(gate["thresholds_met"])
+
+    def test_a_verifier_that_trusts_nothing_cannot_buy_perfect_precision(self):
+        # The failure mode the trusted recall floor exists for. Detection is
+        # untouched and nothing wrong was trusted, so every candidate-level
+        # check and both trusted-record counters are satisfied — and the run
+        # still must not pass, because a system that trusts nothing has not
+        # shown that trusting is safe, only that it declined to try.
+        rejects_everything = {
+            "en": _report(trusted_tp=0, trusted_fp=0, trusted_fn=23),
+            "ru": _report(),
+        }
+        gate = evaluate_gate(self.frozen, rejects_everything)
+        self.assertTrue(gate["checks"]["candidate_precision_en"])
+        self.assertTrue(gate["checks"]["candidate_recall_en"])
+        self.assertTrue(gate["checks"]["auto_trusted_false"])
+        self.assertFalse(gate["checks"]["trusted_precision_en"])
+        self.assertFalse(gate["checks"]["trusted_recall_en"])
+        self.assertFalse(gate["thresholds_met"])
+
+    def test_the_two_precisions_are_judged_apart(self):
+        # A run whose candidates are mostly wrong but whose trusted subset is
+        # clean: the review queue is noisy, nothing false was auto-trusted.
+        # The gate has to fail it on the candidate side alone, or a model that
+        # quarantines its way to a clean trusted set could pass while burying
+        # its reviewer.
+        noisy_queue = {"en": _report(tp=8, fp=12, fn=2), "ru": _report()}
+        gate = evaluate_gate(self.frozen, noisy_queue)
+        self.assertFalse(gate["checks"]["candidate_precision_en"])
+        self.assertTrue(gate["checks"]["trusted_precision_en"])
+        self.assertFalse(gate["thresholds_met"])
+
+    def test_a_report_without_trusted_metrics_is_refused_not_defaulted(self):
+        # Reports written before the split state one precision over every
+        # candidate, quarantined ones included. Reading that number as a
+        # trusted precision would claim safety the run never measured.
+        legacy = dict(_report())
+        legacy.pop("trusted_by_memory_type")
+        with self.assertRaises(EvaluationIdentityError) as caught:
+            evaluate_gate(self.frozen, {"en": legacy, "ru": _report()})
+        self.assertEqual(caught.exception.code, "report_predates_trusted_metrics")
 
     def test_a_missing_language_report_cannot_be_passed_off_as_a_result(self):
         # A run that reports only the language the model happens to be good at

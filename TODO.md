@@ -487,6 +487,18 @@ is premature.
         absent from the descriptor when false, so no published one-pass
         report was invalidated by the feature existing; turning it on does
         move `canonical_hash`, which is the case that should
+  - [x] (a) the metric it was built to move now exists (2026-07-28). Audit
+        finding: a rejection quarantines rather than drops, and the evaluator
+        counted quarantined candidates in `predicted`, so the second pass
+        could not move the precision the gate read. Split into
+        `candidate_precision/recall` (every candidate — detection and review
+        queue) and `trusted_precision/recall` (`initial_status: auto` only —
+        the only family automatic enablement turns on), plus
+        `quarantine_reasons` by `rule_id`. Gate v4: candidate 0.90/0.70,
+        trusted 0.90/0.50, both trusted counters zero. The trusted recall
+        floor stops a reject-everything verifier from scoring perfect
+        precision on an empty set; pre-split reports are refused rather than
+        reinterpreted
   - [ ] (a) is built but **unmeasured**: no two-pass target has been frozen
         and no two-pass report exists. Nothing may be claimed about its
         effect on precision until one is published

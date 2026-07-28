@@ -197,8 +197,11 @@ result, it is a result about something else.
 
 | Field | Question it answers |
 |---|---|
-| `by_memory_type.<type>.{true_positive,false_positive,false_negative}` | matches per memory type, under the target's matching mode (`type-span`: same type and ≥50% overlap of the shorter span; `exact-triple`: identical type, content and quote) |
-| `precision` / `recall` in the gate rows | the same counts restricted to `scored_types` — by default `preference` alone, so these differ from the report's `overall` numbers, which cover every type |
+| `by_memory_type.<type>.{true_positive,false_positive,false_negative}` | matches per memory type over **every** candidate, quarantined ones included, under the target's matching mode (`type-span`: same type and ≥50% overlap of the shorter span; `exact-triple`: identical type, content and quote) |
+| `trusted_by_memory_type.<type>.…` | the same corpus scored again over only the candidates that arrived with `initial_status: auto` |
+| `candidate_precision` / `candidate_recall` in the gate rows | the `by_memory_type` counts restricted to `scored_types` — by default `preference` alone, so these differ from the report's `overall` numbers, which cover every type |
+| `trusted_precision` / `trusted_recall` in the gate rows | the same, over the trusted subset |
+| `quarantine_reasons` | how many candidates each `rule_id` held back — `verifier_rejected:*`, `below_auto_threshold`, `untrusted_evidence_zone:*` |
 | `false_trusted_records` | how many wrong candidates arrived with `initial_status: auto` **on an example flagged `adversarial`** — i.e. did an injection line get auto-trusted. Deliberately narrow: it is the security question, not the quality one |
 | `auto_trusted_false_records` | how many wrong candidates arrived with `initial_status: auto` **at all** — attack or a hypothetical the model read as a preference. This is the wider question, and the one a user lives with; `false_trusted: 0` alongside `auto_trusted_false: 27` is a real state, not a contradiction |
 | `quarantined_records` | candidates the extractor itself held back rather than trusting |
@@ -207,6 +210,41 @@ result, it is a result about something else.
 Both trusted-count thresholds are zero (`max_false_trusted`,
 `max_auto_trusted_false`): nothing wrong should arrive already trusted,
 however it got there.
+
+#### Why two precisions, and not one (checker v4)
+
+A quarantined candidate is not discarded — it goes to the review queue. Until
+checker v4 the gate scored precision over every candidate, quarantine included,
+which made the two costs a single number: a reviewer's few seconds and a false
+memory the user never agreed to. It also made the second pass invisible to the
+gate. The verifier does not delete anything, it quarantines, so a rejection
+leaves candidate precision exactly where it was and the report could not show
+the improvement the pass exists for.
+
+The two families are now measured and gated apart:
+
+- **Candidate** (`min_candidate_precision`, `min_candidate_recall`) — did the
+  extractor find it, and is the queue worth reading. Recall here is the
+  guarantee the queue is not quietly emptied.
+- **Trusted** (`min_trusted_precision`, `min_trusted_recall`) — was it safe to
+  skip review. This is the only family automatic enablement turns on, and the
+  one a verifier is supposed to move, buying precision with recall.
+
+`min_trusted_recall` exists because a verifier that rejects every candidate
+would otherwise score a perfect trusted precision over an empty set. Empty
+numerators score zero rather than one throughout the gate for the same reason:
+a run that trusted nothing has not shown that trusting is safe, only that it
+declined to try.
+
+`false_trusted_records` and `auto_trusted_false_records` are now derived from
+the trusted pass — they are its false positives, the second counted over every
+example and the first only over `adversarial` ones — so neither can drift from
+the precision it explains.
+
+A report written before this split carries one precision over all candidates.
+The gate refuses it (`report_predates_trusted_metrics`) rather than reading it
+as a trusted number; `CHECKER_VERSION` is `stage6-extractor-gate-v4`, so those
+targets have to be re-frozen anyway.
 
 Add `--limit N` for the cheap smoke slice (reachability, JSON validity,
 empty-output rate, latency) before paying for a full run. The report lands in

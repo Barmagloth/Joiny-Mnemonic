@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from joiny_mnemonic.extraction import ExtractorConfig
 from joiny_mnemonic.extraction_evaluation import evaluate_extractor
+from joiny_mnemonic.extractor_backend import Verdict
 from joiny_mnemonic.plugins import PluginRegistry
 from joiny_mnemonic.service import MemoryService
 
@@ -60,6 +62,42 @@ class GoldCorpusExtractor:
 
     def extract(self, event, *, context, config):
         return {"candidates": self.expected[event.content]}
+
+
+class NoisyGoldExtractor(GoldCorpusExtractor):
+    """Gold, plus one invented preference on a real piece of prose.
+
+    The invented candidate quotes evidence that genuinely exists, so nothing
+    upstream of the verifier can catch it: the zone is prose and the
+    confidence is above any threshold. It is wrong only in what it claims the
+    text means, which is the one thing a second pass can judge.
+    """
+
+    INVENTED = "The user wants every heading removed from the codebase."
+
+    def __init__(self, corpus, *, example_id="preference-prose"):
+        super().__init__(corpus)
+        item = next(
+            value for value in corpus["examples"] if value["id"] == example_id
+        )
+        self.noisy_content = item["current"]
+        self.noisy = {
+            "memory_type": "preference",
+            "normalized_content": self.INVENTED,
+            "evidence_quote": item["expected"][0]["evidence_quote"],
+            "confidence": 0.99,
+        }
+
+    def extract(self, event, *, context, config):
+        result = super().extract(event, context=context, config=config)
+        if event.content != self.noisy_content:
+            return result
+        return {"candidates": [*result["candidates"], self.noisy]}
+
+    def verify(self, event, *, memory_type, normalized_content, evidence_quote, config):
+        if normalized_content == self.INVENTED:
+            return Verdict(holds=False, reason="unsupported_by_quote")
+        return Verdict(holds=True, reason="holds")
 
 
 class EnglishExtractionTest(unittest.TestCase):
@@ -272,6 +310,58 @@ class EnglishExtractionTest(unittest.TestCase):
         self.assertEqual(report["false_trusted_records"], 0)
         self.assertIn("inline_code", report["by_evidence_zone"])
         self.assertIn("decision", report["by_memory_type"])
+        # A perfect extractor still does not trust everything it finds: the
+        # golds quoted from code, fences and blockquotes are quarantined by
+        # zone. So trusted recall is strictly lower than candidate recall even
+        # here, which is the point of reporting them apart — the queue is
+        # complete, the trusted set deliberately is not.
+        self.assertEqual(report["trusted_overall"]["precision"], 1.0)
+        self.assertLess(
+            report["trusted_overall"]["recall"], report["overall"]["recall"]
+        )
+        self.assertEqual(
+            report["trusted_overall"]["false_negative"],
+            report["overall"]["true_positive"]
+            - report["trusted_overall"]["true_positive"],
+        )
+
+    def test_the_verifier_moves_trusted_precision_and_leaves_detection_alone(self):
+        # The metric the second pass was built for. The same invented
+        # candidate is produced in both runs; the verifier does not delete it,
+        # it quarantines it. So candidate precision — what the review queue
+        # sees — is identical, and trusted precision, the only number
+        # automatic enablement turns on, goes from wrong to clean.
+        path = self.root / "evals" / "extraction_en_v1.json"
+        corpus = json.loads(path.read_text(encoding="utf-8"))
+        extractor = NoisyGoldExtractor(corpus)
+        one_pass = evaluate_extractor(extractor, self.config, path)
+        two_pass = evaluate_extractor(
+            extractor, replace(self.config, verify_candidates=True), path
+        )
+
+        self.assertEqual(
+            one_pass["by_memory_type"]["preference"],
+            two_pass["by_memory_type"]["preference"],
+        )
+        self.assertEqual(one_pass["by_memory_type"]["preference"]["false_positive"], 1)
+
+        self.assertEqual(
+            one_pass["trusted_by_memory_type"]["preference"]["false_positive"], 1
+        )
+        self.assertEqual(
+            two_pass["trusted_by_memory_type"]["preference"]["false_positive"], 0
+        )
+        self.assertLess(
+            one_pass["trusted_by_memory_type"]["preference"]["precision"],
+            two_pass["trusted_by_memory_type"]["preference"]["precision"],
+        )
+        self.assertEqual(one_pass["auto_trusted_false_records"], 1)
+        self.assertEqual(two_pass["auto_trusted_false_records"], 0)
+        # And the price is recorded rather than implied.
+        self.assertEqual(
+            two_pass["quarantine_reasons"]["verifier_rejected:unsupported_by_quote"], 1
+        )
+        self.assertGreater(two_pass["quarantine_rate"], one_pass["quarantine_rate"])
 
 
 if __name__ == "__main__":
